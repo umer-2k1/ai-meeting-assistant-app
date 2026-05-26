@@ -1,10 +1,10 @@
 const config = {
   metadata: {
-    title: 'Vite React.js TypeScript & Shadcn/ui — Template',
+    title: 'AI Meeting Copilot',
     description:
-      'Boilerplate template designed to quickly bootstrap a React.js Web App, SPA, website or landing page with React 19, TypeScript, Shadcn/ui, TailwindCSS 4, Vite 7, SWC, ESLint 10, Husky and much more in just 30 seconds.',
+      'Desktop-first AI meeting assistant with live transcription, intelligent summaries, action items, and meeting follow-up workflows.',
     keywords:
-      'react.js, react.js-template, react.js-boilerplate, typescript, shadcn/ui, tailwindcss, vite, swc, eslint, prettier, husky, commitlint, lint-staged'
+      'ai meeting copilot, transcription, meeting intelligence, action items, dashboard, react, tailwind, shadcn'
   },
   server: {
     host: 'localhost',

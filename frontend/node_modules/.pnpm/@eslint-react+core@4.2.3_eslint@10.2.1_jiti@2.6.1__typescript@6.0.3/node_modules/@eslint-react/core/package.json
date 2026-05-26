@@ -1,0 +1,64 @@
+{
+  "name": "@eslint-react/core",
+  "version": "4.2.3",
+  "description": "ESLint React's ESLint utility module for static analysis of React core APIs and patterns.",
+  "homepage": "https://github.com/Rel1cx/eslint-react",
+  "bugs": {
+    "url": "https://github.com/Rel1cx/eslint-react/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Rel1cx/eslint-react.git",
+    "directory": "packages/core"
+  },
+  "license": "MIT",
+  "author": "Rel1cx",
+  "sideEffects": false,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "./package.json"
+  ],
+  "dependencies": {
+    "@typescript-eslint/scope-manager": "^8.58.0",
+    "@typescript-eslint/types": "^8.58.0",
+    "@typescript-eslint/utils": "^8.58.0",
+    "ts-pattern": "^5.9.0",
+    "@eslint-react/ast": "4.2.3",
+    "@eslint-react/jsx": "4.2.3",
+    "@eslint-react/var": "4.2.3",
+    "@eslint-react/shared": "4.2.3"
+  },
+  "devDependencies": {
+    "@typescript-eslint/typescript-estree": "^8.58.0",
+    "tsdown": "^0.21.7",
+    "@local/configs": "0.0.0",
+    "@local/eff": "3.0.0-beta.72"
+  },
+  "peerDependencies": {
+    "eslint": "^10.0.0",
+    "typescript": "*"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "inlinedDependencies": {
+    "@local/eff": "workspace:*"
+  },
+  "scripts": {
+    "build": "tsdown --dts-resolve",
+    "build:docs": "typedoc",
+    "lint:publish": "publint",
+    "lint:ts": "tsl"
+  }
+}

@@ -1,0 +1,170 @@
+import type { AiAnswer, CalendarEvent, Meeting, TranscriptLine } from './types';
+
+export const starterTranscript: TranscriptLine[] = [
+  {
+    id: 't-live-1',
+    timestamp: '00:00:15',
+    speaker: 'John Martinez',
+    text: "Alright team, let's dive into the Q3 roadmap. We have three main priorities for this quarter."
+  },
+  {
+    id: 't-live-2',
+    timestamp: '00:00:28',
+    speaker: 'Sarah Chen',
+    text: 'Before we start, I want to flag the API latency issue we have been seeing on mobile.'
+  },
+  {
+    id: 't-live-3',
+    timestamp: '00:00:45',
+    speaker: 'Marcus Wong',
+    text: 'That is a good point. We should prioritize that alongside the Dark Mode feature.'
+  },
+  {
+    id: 't-live-4',
+    timestamp: '00:01:02',
+    speaker: 'John Martinez',
+    text: "Agreed. Let's make that a P0 for the sprint.",
+    highlighted: true
+  }
+];
+
+export const meetings: Meeting[] = [
+  {
+    id: 'meeting-1',
+    title: 'Product Sync Meeting',
+    status: 'live',
+    startedAt: 'Today, 10:30 AM',
+    duration: '45 min',
+    participantCount: 5,
+    summarySnippet:
+      'Discussed Q3 roadmap priorities and decided to launch Dark Mode while moving API latency to P0.',
+    tags: ['roadmap', 'design', 'q3'],
+    decisions: [
+      'API latency issue elevated to P0 priority',
+      'Dark Mode feature approved for Q3 launch'
+    ],
+    transcript: starterTranscript,
+    actionItems: [
+      {
+        id: 'a-1',
+        assignee: 'Alex',
+        task: 'Finalize tech specs by Friday',
+        due: 'Friday',
+        timestamp: '00:12:34',
+        priority: 'high'
+      },
+      {
+        id: 'a-2',
+        assignee: 'Sarah',
+        task: 'Update help center articles',
+        due: 'Next Monday',
+        timestamp: '00:18:45',
+        priority: 'medium'
+      }
+    ],
+    notes:
+      'Need to align onboarding content with Dark Mode rollout. Investigate mobile API timeout threshold.',
+    aiSummary:
+      'The team focused on Q3 priorities with emphasis on Dark Mode delivery and reducing mobile API latency. A key decision was to treat latency as sprint P0.'
+  },
+  {
+    id: 'meeting-2',
+    title: 'Client Discovery Call',
+    status: 'completed',
+    startedAt: 'Yesterday, 2:00 PM',
+    duration: '1h 15m',
+    participantCount: 3,
+    summarySnippet:
+      'Captured client requirements for enterprise reporting and agreed to deliver a scope proposal.',
+    tags: ['client', 'discovery'],
+    decisions: ['Prepare enterprise reporting proposal by next Tuesday'],
+    transcript: [
+      {
+        id: 't-client-1',
+        timestamp: '00:07:20',
+        speaker: 'Client',
+        text: 'We need role-based dashboards and CSV exports for our operations team.'
+      }
+    ],
+    actionItems: [
+      {
+        id: 'a-3',
+        assignee: 'John',
+        task: 'Send proposal draft',
+        due: 'Tuesday',
+        timestamp: '00:31:02',
+        priority: 'high'
+      }
+    ],
+    notes: 'Client asked for SOC2 timeline and data residency information.',
+    aiSummary:
+      'Discovery focused on reporting needs, data governance, and rollout timeline. Follow-up requires a scoped proposal.'
+  },
+  {
+    id: 'meeting-3',
+    title: 'Engineering Standup',
+    status: 'completed',
+    startedAt: 'May 9, 10:00 AM',
+    duration: '28 min',
+    participantCount: 6,
+    summarySnippet: 'Reviewed sprint blockers and confirmed migration sequence for notifications.',
+    tags: ['standup', 'engineering'],
+    decisions: ['Sequence notification migration after auth hardening'],
+    transcript: [
+      {
+        id: 't-standup-1',
+        timestamp: '00:04:11',
+        speaker: 'Priya',
+        text: 'Auth hardening has to land first; notification changes depend on new claim checks.'
+      }
+    ],
+    actionItems: [
+      {
+        id: 'a-4',
+        assignee: 'Priya',
+        task: 'Publish migration checklist',
+        due: 'Tomorrow',
+        timestamp: '00:09:20',
+        priority: 'medium'
+      }
+    ],
+    notes: 'Need compatibility test matrix before migration release.',
+    aiSummary:
+      'The team aligned on dependency order and agreed to gate notification migration behind auth completion.'
+  }
+];
+
+export const calendarEvents: CalendarEvent[] = [
+  {
+    id: 'c-1',
+    title: 'Client Strategy Review',
+    time: 'Today, 2:00 PM - 3:00 PM',
+    location: 'Zoom Meeting',
+    note: 'Meeting starts in 1 hour 15 minutes'
+  },
+  {
+    id: 'c-2',
+    title: 'Weekly Team Standup',
+    time: 'Tomorrow, 10:00 AM - 10:30 AM',
+    location: 'Recurring',
+    note: 'Auto-record available',
+    recurring: true
+  }
+];
+
+export const quickAiAnswers: AiAnswer[] = [
+  {
+    id: 'q-1',
+    question: 'Who mentioned pricing discussion?',
+    answer:
+      'Sarah mentioned pricing at 00:14:32 and noted that the enterprise tier should be revisited before Q3.',
+    timestamp: '00:14:32'
+  },
+  {
+    id: 'q-2',
+    question: 'Did anyone disagree with the timeline?',
+    answer:
+      'Yes. Sarah disagreed at 00:02:20 and suggested extending the timeline by two weeks.',
+    timestamp: '00:02:20'
+  }
+];
