@@ -1,0 +1,76 @@
+html,
+body,
+#root {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: transparent !important;
+}
+
+.widget-drag-handle {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.widget-drag-handle:active {
+  cursor: grabbing;
+}
+
+.widget-no-drag {
+  cursor: default;
+}
+
+.widget-resize-handle {
+  touch-action: none;
+  user-select: none;
+}
+
+.widget-resize-corner {
+  cursor: nwse-resize;
+}
+
+.widget-resize-right {
+  cursor: ew-resize;
+}
+
+.widget-resize-bottom {
+  cursor: ns-resize;
+}
+
+/* Compact pill only — subtle glow without large shadow bleed */
+@keyframes widget-live-pulse {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 1px rgba(6, 182, 212, 0.45),
+      0 0 10px rgba(6, 182, 212, 0.25);
+  }
+
+  50% {
+    box-shadow:
+      0 0 0 1px rgba(59, 130, 246, 0.65),
+      0 0 14px rgba(6, 182, 212, 0.35);
+  }
+}
+
+.widget-live-ring {
+  animation: widget-live-pulse 2s ease-in-out infinite;
+}
+
+/* Expanded panel — border pulse only, no heavy drop shadow */
+@keyframes widget-live-border-pulse {
+  0%,
+  100% {
+    border-color: rgba(59, 130, 246, 0.35);
+  }
+
+  50% {
+    border-color: rgba(6, 182, 212, 0.75);
+  }
+}
+
+.widget-live-border {
+  animation: widget-live-border-pulse 2s ease-in-out infinite;
+}

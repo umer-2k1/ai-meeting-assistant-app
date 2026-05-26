@@ -4,8 +4,21 @@ This folder contains the desktop runtime foundation for Milestone 2.
 
 ## Files
 
-- `main.cjs` - Electron main process, tray, shortcuts, IPC handlers (CommonJS; required because package `type` is `module`)
+- `main.cjs` - Electron main process, tray, shortcuts, IPC handlers, and the system-wide floating widget window (CommonJS; required because package `type` is `module`)
 - `preload.cjs` - secure bridge exposed to the renderer (`window.desktop`)
+
+## System Floating Widget
+
+A separate always-on-top `BrowserWindow` loads `widget.html` and stays visible across the whole desktop (not only inside the main app window).
+
+- **Visibility**: only shown while a recording session is active (hidden when recording stops)
+- **Compact mode**: small dark glass pill (message icon, timer, mic, stop, settings) with a cyan pulse glow while live
+- **Expanded mode**: larger AI chat panel (default 480×680) — toggle with message icon; drag corner/edges to resize within screen bounds
+- **IPC**:
+  - `desktop:widget:set-expanded`
+  - `desktop:widget:open-main`
+
+Widget source lives in `src/widget/` and is built as a second Vite entry (`widget.html`).
 
 ## Renderer Integration
 

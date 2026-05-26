@@ -1191,15 +1191,17 @@ export default function MeetingCopilotApp() {
           </main>
         </div>
       </div>
-      <FloatingWidget
-        isRecording={isRecording}
-        elapsedSeconds={elapsedSeconds}
-        onPauseResume={pauseResumeRecording}
-        onStop={stopRecording}
-        onAsk={() => {
-          setView('live');
-        }}
-      />
+      {runtimeMode !== 'desktop' && (
+        <FloatingWidget
+          isRecording={isRecording}
+          elapsedSeconds={elapsedSeconds}
+          onPauseResume={pauseResumeRecording}
+          onStop={stopRecording}
+          onAsk={() => {
+            setView('live');
+          }}
+        />
+      )}
     </div>
   );
 }
