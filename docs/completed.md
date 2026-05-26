@@ -20,6 +20,21 @@
 - Meeting detail page implemented with multi-tab analysis and notes.
 - Calendar and Settings screens implemented with requirement-aligned content.
 - Floating recording widget implemented.
+- UI upgraded to a sleeker, glassy deep-blue theme aligned with `design-theme.png`:
+  - Enhanced gradients, contrast, and spacing
+  - Improved card surfaces, navigation states, and visual hierarchy
+  - Refined button/label/badge treatments for modern desktop feel
+
+## Milestone 1 (Delivered)
+
+- Web prototype and architecture baseline delivered.
+- Ask AI upgraded from static local output to async query flow.
+- Added frontend Ask AI API client with timeout and fallback behavior.
+- Added smarter backend `POST /api/ask-meeting` logic for:
+  - action item queries
+  - disagreement/timeline queries
+  - pricing mention queries
+- Added quick Ask AI prompt chips and better loading/error feedback.
 
 ## Architecture and Repo Structure
 

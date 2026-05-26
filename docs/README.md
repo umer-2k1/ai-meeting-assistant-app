@@ -1,6 +1,7 @@
 # AI Meeting Copilot Docs Index
 
 - `project-scope.md` - requirement coverage and implemented scope
+- `milestones.md` - milestone baseline with status and scope
 - `completed.md` - shipped items done in the current implementation
 - `in-progress.md` - active workstreams currently being built
 - `pending.md` - planned but not started items

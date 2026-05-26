@@ -23,7 +23,12 @@
     "lint:fix": "eslint --fix",
     "format": "prettier --write **/**/*.{html,css,scss,js,jsx,cjs,mjs,ts,tsx,mdx} --cache",
     "test": "playwright test",
-    "test:ui": "playwright test --ui"
+    "test:ui": "playwright test --ui",
+    "check:node": "node scripts/check-node-version.mjs",
+    "check:electron": "node scripts/check-node-version.mjs && node scripts/check-electron.mjs",
+    "desktop:start": "pnpm check:electron && electron electron/main.cjs",
+    "desktop:dev": "pnpm check:electron && sh -c 'pnpm dev & DEV_PID=$!; until nc -z localhost 3000; do sleep 1; done; VITE_DEV_SERVER_URL=http://localhost:3000 pnpm desktop:start; kill $DEV_PID'",
+    "test:desktop-ipc": "pnpm check:electron && playwright test __tests__/desktop-ipc.test.ts --project=chromium"
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",
@@ -65,6 +70,7 @@
     "@vitejs/plugin-react": "6.0.1",
     "babel-plugin-react-compiler": "1.0.0",
     "cssnano": "7.1.7",
+    "electron": "^42.2.0",
     "eslint": "10.2.1",
     "eslint-config-prettier": "10.1.8",
     "eslint-plugin-jsx-a11y": "6.10.2",
