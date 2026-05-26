@@ -37,18 +37,26 @@ export default function ThemeProvider({
 
   useEffect(() => {
     const root = globalThis.document.documentElement;
-    root.classList.remove('light', 'dark');
+
+    const applyTheme = (resolved: 'light' | 'dark') => {
+      root.classList.remove('light', 'dark');
+      root.classList.add(resolved);
+    };
 
     if (theme === 'system') {
-      const systemTheme = globalThis.matchMedia('(prefers-color-scheme: dark)').matches
-        ? 'dark'
-        : 'light';
+      const media = globalThis.matchMedia('(prefers-color-scheme: dark)');
+      const syncSystemTheme = () => {
+        applyTheme(media.matches ? 'dark' : 'light');
+      };
 
-      root.classList.add(systemTheme);
-      return;
+      syncSystemTheme();
+      media.addEventListener('change', syncSystemTheme);
+      return () => {
+        media.removeEventListener('change', syncSystemTheme);
+      };
     }
 
-    root.classList.add(theme);
+    applyTheme(theme);
   }, [theme]);
 
   const value = {

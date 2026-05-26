@@ -34,6 +34,14 @@ import ThemeToggle from '@/components/ui/theme-toggle';
 import { cn } from '@/lib/utils';
 
 import { askMeetingQuestion } from './api';
+import {
+  COPILOT_BTN_OUTLINE,
+  COPILOT_HIGHLIGHT_PANEL,
+  COPILOT_INNER_PANEL,
+  COPILOT_INPUT,
+  COPILOT_SURFACE
+} from './copilot-styles';
+import './copilot-theme.css';
 import { calendarEvents, meetings, quickAiAnswers, starterTranscript } from './mock-data';
 import type { AiAnswer, Meeting, TranscriptLine } from './types';
 
@@ -65,8 +73,30 @@ const QUICK_ASK_PROMPTS = [
   'Did anyone disagree with the timeline?'
 ] as const;
 
-const SURFACE =
-  'rounded-2xl border border-[#334155]/70 bg-[linear-gradient(140deg,rgba(30,41,59,0.92),rgba(15,23,42,0.9))] shadow-[0_14px_40px_rgba(2,6,23,0.45)] backdrop-blur-xl';
+const SURFACE = COPILOT_SURFACE;
+
+const PAGE_META: Record<View, { title: string; description: string }> = {
+  dashboard: {
+    title: 'Dashboard',
+    description: 'Real-time transcription, intelligence, and meeting follow-up automation.'
+  },
+  live: {
+    title: 'Live Session',
+    description: 'Capture, transcribe, and ask AI questions during an active meeting.'
+  },
+  detail: {
+    title: 'Meeting Detail',
+    description: 'Review summaries, transcripts, action items, and AI insights.'
+  },
+  calendar: {
+    title: 'Calendar',
+    description: 'Upcoming meetings and recording controls from your calendar.'
+  },
+  settings: {
+    title: 'Settings',
+    description: 'Configure audio, AI preferences, integrations, and privacy.'
+  }
+};
 
 function createRealtimeLine(nextIndex: number): TranscriptLine {
   const speaker = nextIndex % 2 === 0 ? 'Sarah Chen' : 'Marcus Wong';
@@ -99,20 +129,20 @@ function AppSidebar({
   selectedMeeting: Meeting;
 }) {
   return (
-    <aside className='hidden w-64 shrink-0 border-r border-[#334155]/60 bg-[#060b1d]/95 p-4 lg:flex lg:flex-col'>
-      <div className='mb-3 inline-flex items-center gap-3 rounded-xl border border-[#1E3A8A]/50 bg-[#0B1227]/90 px-3 py-2'>
+    <aside className='sticky top-0 hidden h-dvh w-64 shrink-0 flex-col overflow-y-auto overscroll-contain border-r border-border bg-sidebar p-4 text-sidebar-foreground lg:flex'>
+      <div className='mb-3 inline-flex items-center gap-3 rounded-xl border border-primary/30 bg-card px-3 py-2'>
         <div className='inline-flex size-8 items-center justify-center rounded-lg bg-gradient-to-br from-[#1E3A8A] via-[#3B82F6] to-[#06B6D4] text-white'>
           <IconBolt className='size-4' />
         </div>
         <div>
-          <p className='text-sm font-semibold text-[#F1F5F9]'>Speller.ai</p>
-          <p className='text-[11px] text-[#94A3B8]'>AI Meeting Copilot</p>
+          <p className='text-sm font-semibold text-foreground'>Speller.ai</p>
+          <p className='text-[11px] text-muted-foreground'>AI Meeting Copilot</p>
         </div>
       </div>
 
-      <div className='rounded-xl border border-[#334155]/80 bg-[#0c142d]/80 p-3'>
-        <p className='text-sm font-semibold text-[#F1F5F9]'>John Doe</p>
-        <p className='text-xs text-[#94A3B8]'>john@company.com</p>
+      <div className='rounded-xl border border-border bg-muted/40 p-3'>
+        <p className='text-sm font-semibold text-foreground'>John Doe</p>
+        <p className='text-xs text-muted-foreground'>john@company.com</p>
       </div>
       <nav aria-label='Primary navigation' className='mt-4 space-y-1'>
         {SIDEBAR_LINKS.map((entry) => {
@@ -127,8 +157,8 @@ function AppSidebar({
               className={cn(
                 'flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm transition-all duration-200',
                 activeView === entry.id
-                  ? 'bg-gradient-to-r from-[#1E3A8A] to-[#3B82F6] text-[#F1F5F9] shadow-[0_8px_24px_rgba(59,130,246,0.35)]'
-                  : 'text-[#c5d4ee] hover:bg-[#16244a] hover:text-[#F1F5F9]'
+                  ? 'bg-gradient-to-r from-[#1E3A8A] to-[#3B82F6] text-white shadow-[0_8px_24px_rgba(59,130,246,0.35)]'
+                  : 'text-muted-foreground hover:bg-[var(--copilot-nav-hover)] hover:text-foreground'
               )}
             >
               <Icon className='size-4' />
@@ -139,14 +169,14 @@ function AppSidebar({
       </nav>
 
       <div className='mt-5'>
-        <p className='mb-2 px-2 text-[11px] font-semibold tracking-[0.15em] text-[#64748B] uppercase'>
+        <p className='mb-2 px-2 text-[11px] font-semibold tracking-[0.15em] text-muted-foreground uppercase'>
           Recent
         </p>
         <div className='space-y-1'>
           {meetings.slice(0, 3).map((meeting) => (
             <div
               key={meeting.id}
-              className='rounded-lg border border-transparent px-2 py-1.5 text-xs text-[#9db4db] hover:border-[#1E3A8A]/50 hover:bg-[#0f1d3f]/70'
+              className='rounded-lg border border-transparent px-2 py-1.5 text-xs text-muted-foreground hover:border-primary/40 hover:bg-muted/60'
             >
               {meeting.title}
             </div>
@@ -154,10 +184,10 @@ function AppSidebar({
         </div>
       </div>
 
-      <div className='mt-4 rounded-xl border border-[#334155]/80 bg-[#0c142d]/80 p-3'>
-        <p className='text-[11px] text-[#94A3B8]'>Active meeting</p>
-        <p className='text-sm font-medium text-[#F1F5F9]'>{selectedMeeting.title}</p>
-        <p className='mt-1 text-xs text-[#94A3B8]'>{selectedMeeting.duration}</p>
+      <div className='mt-4 rounded-xl border border-border bg-muted/40 p-3'>
+        <p className='text-[11px] text-muted-foreground'>Active meeting</p>
+        <p className='text-sm font-medium text-foreground'>{selectedMeeting.title}</p>
+        <p className='mt-1 text-xs text-muted-foreground'>{selectedMeeting.duration}</p>
       </div>
 
       <Button
@@ -199,8 +229,8 @@ function DashboardScreen({
         {statCards.map((stat) => (
           <Card key={stat.label} className={SURFACE}>
             <CardContent className='space-y-1'>
-              <p className='text-xs uppercase tracking-[0.12em] text-[#94A3B8]'>{stat.label}</p>
-              <p className='text-2xl font-semibold text-[#F1F5F9]'>{stat.value}</p>
+              <p className='text-xs uppercase tracking-[0.12em] text-muted-foreground'>{stat.label}</p>
+              <p className='text-2xl font-semibold text-foreground'>{stat.value}</p>
               <p className='text-xs text-[#06B6D4]'>{stat.trend}</p>
             </CardContent>
           </Card>
@@ -209,18 +239,18 @@ function DashboardScreen({
 
       <div className='flex flex-wrap items-center gap-3'>
         <div className='relative min-w-64 flex-1'>
-          <IconSearch className='absolute top-2 left-2.5 size-4 text-[#94A3B8]' />
+          <IconSearch className='absolute top-2 left-2.5 size-4 text-muted-foreground' />
           <Input
             aria-label='Search all meetings'
             value={searchText}
             onChange={(event) => {
               setSearchText(event.currentTarget.value);
             }}
-            className='border-[#334155] bg-[#0F172A]/70 pl-8 text-[#F1F5F9] placeholder:text-[#94A3B8] focus-visible:border-[#3B82F6]'
+            className={cn(COPILOT_INPUT, 'bg-muted/70 pl-8')}
             placeholder='Search all meetings...'
           />
         </div>
-        <Button variant='outline' className='border-[#334155] bg-[#0F172A]/70 text-[#F1F5F9]'>
+        <Button variant='outline' className={COPILOT_BTN_OUTLINE}>
           Filters
         </Button>
       </div>
@@ -235,32 +265,32 @@ function DashboardScreen({
           <IconMicrophone className='mr-1.5 size-4' />
           Start New Recording
         </Button>
-        <Button variant='outline' className='border-[#334155] bg-[#0F172A]/70 text-[#F1F5F9]'>
+        <Button variant='outline' className={COPILOT_BTN_OUTLINE}>
           Import Audio
         </Button>
       </div>
 
       <div className='space-y-3'>
         <div className='flex items-center gap-2'>
-          <IconFolders className='size-4 text-[#94A3B8]' />
-          <h2 className='text-lg font-semibold text-[#F1F5F9]'>Recent Meetings</h2>
+          <IconFolders className='size-4 text-muted-foreground' />
+          <h2 className='text-lg font-semibold text-foreground'>Recent Meetings</h2>
         </div>
         {filteredMeetings.map((meeting) => (
           <Card key={meeting.id} className={cn(SURFACE, 'transition-all hover:-translate-y-0.5 hover:border-[#3B82F6]/60')}>
             <CardHeader className='space-y-3'>
               <div className='flex items-center justify-between gap-3'>
-                <CardTitle className='text-[#F1F5F9]'>{meeting.title}</CardTitle>
+                <CardTitle className='text-foreground'>{meeting.title}</CardTitle>
                 <Badge
                   variant={meeting.status === 'live' ? 'default' : 'outline'}
                   className={cn(
                     meeting.status === 'live' && 'bg-[#EF4444] text-white',
-                    meeting.status !== 'live' && 'border-[#334155] text-[#9db4db]'
+                    meeting.status !== 'live' && 'border-border text-muted-foreground'
                   )}
                 >
                   {meeting.status === 'live' ? 'Live' : 'Completed'}
                 </Badge>
               </div>
-              <div className='flex flex-wrap items-center gap-3 text-xs text-[#94A3B8]'>
+              <div className='flex flex-wrap items-center gap-3 text-xs text-muted-foreground'>
                 <span className='inline-flex items-center gap-1'>
                   <IconClock className='size-3.5' />
                   {meeting.startedAt}
@@ -273,25 +303,25 @@ function DashboardScreen({
               </div>
             </CardHeader>
             <CardContent className='space-y-3'>
-              <p className='text-sm text-[#c5d4ee]'>{meeting.summarySnippet}</p>
+              <p className='text-sm text-foreground/80'>{meeting.summarySnippet}</p>
               <div className='flex flex-wrap gap-1'>
                 {meeting.tags.map((tag) => (
                   <Badge
                     key={`${meeting.id}-${tag}`}
                     variant='outline'
-                    className='border-[#334155] bg-[#0f1d3f]/70 text-[#9db4db]'
+                    className='border-border bg-muted/70 text-muted-foreground'
                   >
                     #{tag}
                   </Badge>
                 ))}
               </div>
               <div className='flex flex-wrap items-center justify-between gap-2'>
-                <p className='text-xs text-[#94A3B8]'>
+                <p className='text-xs text-muted-foreground'>
                   {meeting.actionItems.length} action items • {meeting.decisions.length} decisions
                 </p>
                 <Button
                   size='sm'
-                  className='bg-[#3B82F6] text-white hover:bg-[#2563eb]'
+                  className='bg-primary text-primary-foreground hover:bg-primary/90'
                   onClick={() => {
                     onOpenMeeting(meeting.id);
                   }}
@@ -350,17 +380,17 @@ function LiveScreen({
                 className={cn('size-4 text-red-500', isRecording && 'animate-pulse')}
                 aria-hidden='true'
               />
-              <p className='text-sm font-semibold text-[#F1F5F9]'>Recording</p>
+              <p className='text-sm font-semibold text-foreground'>Recording</p>
             </div>
-            <p className='text-sm text-[#c5d4ee]'>Timer: {mm}:{ss}</p>
+            <p className='text-sm text-foreground/80'>Timer: {mm}:{ss}</p>
           </div>
           <Input
             defaultValue='Product Sync Meeting'
             aria-label='Meeting title'
-            className='border-[#334155] bg-[#0F172A]/60 text-[#F1F5F9]'
+            className={COPILOT_INPUT}
           />
           <div className='flex flex-wrap items-center gap-2'>
-            <Button variant='outline' className='border-[#334155] text-[#F1F5F9]' onClick={onPauseResume}>
+            <Button variant='outline' className='border-border text-foreground' onClick={onPauseResume}>
               <IconPlayerPause className='mr-1.5 size-4' />
               {isPaused ? 'Resume' : 'Pause'}
             </Button>
@@ -368,18 +398,18 @@ function LiveScreen({
               <IconPlayerStop className='mr-1.5 size-4' />
               Stop
             </Button>
-            <Button variant='secondary' className='bg-[#1E3A8A]/30 text-[#dbe8ff] hover:bg-[#1E3A8A]/50'>
+            <Button variant='secondary' className='bg-[#1E3A8A]/30 text-foreground/85 hover:bg-[#1E3A8A]/50'>
               <IconSparkles className='mr-1.5 size-4' />
               Highlight
             </Button>
-            <Button variant='secondary' className='bg-[#1E3A8A]/30 text-[#dbe8ff] hover:bg-[#1E3A8A]/50'>
+            <Button variant='secondary' className='bg-[#1E3A8A]/30 text-foreground/85 hover:bg-[#1E3A8A]/50'>
               <IconFileText className='mr-1.5 size-4' />
               Note
             </Button>
           </div>
         </CardHeader>
         <CardContent className='space-y-3'>
-          <p className='text-xs font-semibold tracking-[0.15em] text-[#94A3B8] uppercase'>
+          <p className='text-xs font-semibold tracking-[0.15em] text-muted-foreground uppercase'>
             Live Transcript
           </p>
           <div aria-live='polite' className='max-h-[420px] space-y-3 overflow-y-auto pr-2'>
@@ -388,16 +418,14 @@ function LiveScreen({
                 key={line.id}
                 className={cn(
                   'rounded-lg border p-3',
-                  line.highlighted
-                    ? 'border-[#06B6D4]/60 bg-[#0b2740]/70'
-                    : 'border-[#334155]/70 bg-[#0F172A]/70'
+                  line.highlighted ? COPILOT_HIGHLIGHT_PANEL : COPILOT_INNER_PANEL
                 )}
               >
-                <p className='mb-1 text-xs font-medium text-[#94A3B8]'>
+                <p className='mb-1 text-xs font-medium text-muted-foreground'>
                   [{line.timestamp}] {line.speaker}
                   {line.highlighted ? '  ⭐' : ''}
                 </p>
-                <p className='text-sm text-[#dbe8ff]'>{line.text}</p>
+                <p className='text-sm text-foreground/85'>{line.text}</p>
               </div>
             ))}
           </div>
@@ -416,9 +444,9 @@ function LiveScreen({
                 onChange={(event) => {
                   setAskInput(event.currentTarget.value);
                 }}
-                className='border-[#334155] bg-[#0F172A]/60 text-[#F1F5F9]'
+                className={COPILOT_INPUT}
               />
-              <Button size='icon' type='submit' disabled={isAsking} className='bg-[#3B82F6] text-white'>
+              <Button size='icon' type='submit' disabled={isAsking} className='bg-primary text-primary-foreground'>
                 <IconArrowUp className='size-4' />
               </Button>
             </div>
@@ -427,7 +455,7 @@ function LiveScreen({
                 <button
                   key={prompt}
                   type='button'
-                  className='rounded-full border border-[#334155] bg-[#0f1d3f]/70 px-3 py-1 text-xs text-[#c5d4ee] hover:border-[#3B82F6]'
+                  className='rounded-full border border-border bg-muted/70 px-3 py-1 text-xs text-foreground/80 hover:border-[#3B82F6]'
                   onClick={async () => {
                     await onAskAi(prompt);
                   }}
@@ -454,32 +482,32 @@ function LiveScreen({
 
       <Card className={SURFACE}>
         <CardHeader>
-          <CardTitle className='text-[#F1F5F9]'>Live Intelligence</CardTitle>
+          <CardTitle className='text-foreground'>Live Intelligence</CardTitle>
         </CardHeader>
         <CardContent className='space-y-4'>
           <div>
-            <p className='text-xs font-semibold tracking-[0.15em] text-[#94A3B8] uppercase'>Summary</p>
-            <p className='mt-1 text-sm text-[#c5d4ee]'>
+            <p className='text-xs font-semibold tracking-[0.15em] text-muted-foreground uppercase'>Summary</p>
+            <p className='mt-1 text-sm text-foreground/80'>
               Team is discussing Q3 priorities with focus on Dark Mode, API latency, and mobile
               performance.
             </p>
           </div>
           <div>
-            <p className='text-xs font-semibold tracking-[0.15em] text-[#94A3B8] uppercase'>Key Decisions</p>
-            <p className='mt-1 text-sm text-[#c5d4ee]'>
+            <p className='text-xs font-semibold tracking-[0.15em] text-muted-foreground uppercase'>Key Decisions</p>
+            <p className='mt-1 text-sm text-foreground/80'>
               API latency is now P0 priority for the sprint.
             </p>
           </div>
           <div>
-            <p className='text-xs font-semibold tracking-[0.15em] text-[#94A3B8] uppercase'>Action Items</p>
-            <p className='mt-1 text-sm text-[#c5d4ee]'>None detected yet during this live segment.</p>
+            <p className='text-xs font-semibold tracking-[0.15em] text-muted-foreground uppercase'>Action Items</p>
+            <p className='mt-1 text-sm text-foreground/80'>None detected yet during this live segment.</p>
           </div>
-          <div className='space-y-2 border-t border-[#334155]/70 pt-3'>
-            <p className='text-xs font-semibold tracking-[0.15em] text-[#94A3B8] uppercase'>Ask Responses</p>
+          <div className='space-y-2 border-t border-border/70 pt-3'>
+            <p className='text-xs font-semibold tracking-[0.15em] text-muted-foreground uppercase'>Ask Responses</p>
             {aiAnswers.slice(0, 2).map((answer) => (
-              <div key={answer.id} className='rounded-md border border-[#334155]/70 bg-[#0F172A]/70 p-2'>
-                <p className='text-xs text-[#94A3B8]'>{answer.question}</p>
-                <p className='text-sm text-[#dbe8ff]'>{answer.answer}</p>
+              <div key={answer.id} className='rounded-md border border-border/70 bg-muted/70 p-2'>
+                <p className='text-xs text-muted-foreground'>{answer.question}</p>
+                <p className='text-sm text-foreground/85'>{answer.answer}</p>
                 <p className='text-xs text-[#06B6D4]'>Timestamp: {answer.timestamp}</p>
               </div>
             ))}
@@ -518,28 +546,28 @@ function DetailScreen({
             onClick={() => {
               setView('dashboard');
             }}
-            className='text-left text-xs text-[#94A3B8] hover:text-[#F1F5F9]'
+            className='text-left text-xs text-muted-foreground hover:text-foreground'
           >
             ← Back to Dashboard
           </button>
           <div className='flex flex-wrap items-center justify-between gap-2'>
-            <CardTitle className='text-xl text-[#F1F5F9]'>{meeting.title}</CardTitle>
+            <CardTitle className='text-xl text-foreground'>{meeting.title}</CardTitle>
             <div className='flex flex-wrap gap-2'>
-              <Button size='sm' variant='outline' className='border-[#334155] text-[#F1F5F9]'>
+              <Button size='sm' variant='outline' className='border-border text-foreground'>
                 Share
               </Button>
-              <Button size='sm' variant='outline' className='border-[#334155] text-[#F1F5F9]'>
+              <Button size='sm' variant='outline' className='border-border text-foreground'>
                 Export
               </Button>
-              <Button size='sm' variant='outline' className='border-[#334155] text-[#F1F5F9]'>
+              <Button size='sm' variant='outline' className='border-border text-foreground'>
                 Email
               </Button>
-              <Button size='sm' variant='outline' className='border-[#334155] text-[#F1F5F9]'>
+              <Button size='sm' variant='outline' className='border-border text-foreground'>
                 Slack
               </Button>
             </div>
           </div>
-          <p className='text-sm text-[#94A3B8]'>
+          <p className='text-sm text-muted-foreground'>
             {meeting.startedAt} • {meeting.duration} • {meeting.participantCount} participants
           </p>
           <div className='flex flex-wrap gap-1'>
@@ -547,12 +575,12 @@ function DetailScreen({
               <Badge
                 key={`detail-${tag}`}
                 variant='outline'
-                className='border-[#334155] bg-[#0f1d3f]/70 text-[#9db4db]'
+                className='border-border bg-muted/70 text-muted-foreground'
               >
                 #{tag}
               </Badge>
             ))}
-            <Button size='sm' variant='ghost' className='text-[#c5d4ee]'>
+            <Button size='sm' variant='ghost' className='text-foreground/80'>
               <IconTag className='mr-1 size-4' />
               Add tag
             </Button>
@@ -563,7 +591,7 @@ function DetailScreen({
       <Card className={SURFACE}>
         <CardContent>
           <Tabs defaultValue='summary' className='w-full'>
-            <TabsList variant='line' className='mb-4 w-full justify-start rounded-xl bg-[#0f1d3f]/60 p-1'>
+            <TabsList variant='line' className='mb-4 w-full justify-start rounded-xl bg-muted/60 p-1'>
               <TabsTrigger value='summary'>Summary</TabsTrigger>
               <TabsTrigger value='transcript'>Transcript</TabsTrigger>
               <TabsTrigger value='actions'>Action Items</TabsTrigger>
@@ -572,12 +600,12 @@ function DetailScreen({
             </TabsList>
             <TabsContent value='summary' className='space-y-3'>
               <div>
-                <h3 className='text-sm font-semibold text-[#F1F5F9]'>Executive Summary</h3>
-                <p className='text-sm text-[#c5d4ee]'>{meeting.aiSummary}</p>
+                <h3 className='text-sm font-semibold text-foreground'>Executive Summary</h3>
+                <p className='text-sm text-foreground/80'>{meeting.aiSummary}</p>
               </div>
               <div>
-                <h3 className='text-sm font-semibold text-[#F1F5F9]'>Key Decisions</h3>
-                <ul className='list-inside list-disc space-y-1 text-sm text-[#c5d4ee]'>
+                <h3 className='text-sm font-semibold text-foreground'>Key Decisions</h3>
+                <ul className='list-inside list-disc space-y-1 text-sm text-foreground/80'>
                   {meeting.decisions.map((decision) => (
                     <li key={decision}>{decision}</li>
                   ))}
@@ -586,22 +614,22 @@ function DetailScreen({
             </TabsContent>
             <TabsContent value='transcript' className='space-y-2'>
               {meeting.transcript.map((line) => (
-                <div key={line.id} className='rounded-md border border-[#334155]/70 bg-[#0F172A]/70 p-2'>
-                  <p className='text-xs text-[#94A3B8]'>
+                <div key={line.id} className='rounded-md border border-border/70 bg-muted/70 p-2'>
+                  <p className='text-xs text-muted-foreground'>
                     [{line.timestamp}] {line.speaker}
                   </p>
-                  <p className='text-sm text-[#dbe8ff]'>{line.text}</p>
+                  <p className='text-sm text-foreground/85'>{line.text}</p>
                 </div>
               ))}
             </TabsContent>
             <TabsContent value='actions' className='space-y-2'>
               {meeting.actionItems.map((item) => (
-                <div key={item.id} className='rounded-md border border-[#334155]/70 bg-[#0F172A]/70 p-2'>
+                <div key={item.id} className='rounded-md border border-border/70 bg-muted/70 p-2'>
                   <div className='flex flex-wrap items-center gap-2'>
                     <Badge variant={priorityVariant(item.priority)}>{item.priority}</Badge>
-                    <p className='text-xs text-[#94A3B8]'>{item.timestamp}</p>
+                    <p className='text-xs text-muted-foreground'>{item.timestamp}</p>
                   </div>
-                  <p className='mt-1 text-sm text-[#dbe8ff]'>
+                  <p className='mt-1 text-sm text-foreground/85'>
                     @{item.assignee} - {item.task}
                   </p>
                 </div>
@@ -611,7 +639,7 @@ function DetailScreen({
               <Textarea
                 defaultValue={meeting.notes}
                 rows={7}
-                className='border-[#334155] bg-[#0F172A]/60 text-[#F1F5F9]'
+                className={COPILOT_INPUT}
               />
             </TabsContent>
             <TabsContent value='chat' className='space-y-2'>
@@ -629,9 +657,9 @@ function DetailScreen({
                     setDetailAskInput(event.currentTarget.value);
                   }}
                   placeholder='Ask this meeting anything...'
-                  className='border-[#334155] bg-[#0F172A]/60 text-[#F1F5F9]'
+                  className={COPILOT_INPUT}
                 />
-                <Button type='submit' disabled={isAsking} className='bg-[#3B82F6] text-white'>
+                <Button type='submit' disabled={isAsking} className='bg-primary text-primary-foreground'>
                   Ask
                 </Button>
               </form>
@@ -642,9 +670,9 @@ function DetailScreen({
                 </p>
               )}
               {aiAnswers.map((answer) => (
-                <div key={answer.id} className='rounded-md border border-[#334155]/70 bg-[#0F172A]/70 p-2'>
-                  <p className='text-xs text-[#94A3B8]'>{answer.question}</p>
-                  <p className='text-sm text-[#dbe8ff]'>{answer.answer}</p>
+                <div key={answer.id} className='rounded-md border border-border/70 bg-muted/70 p-2'>
+                  <p className='text-xs text-muted-foreground'>{answer.question}</p>
+                  <p className='text-sm text-foreground/85'>{answer.answer}</p>
                   <p className='text-xs text-[#06B6D4]'>Timestamp: {answer.timestamp}</p>
                 </div>
               ))}
@@ -655,23 +683,23 @@ function DetailScreen({
 
       <Card className={SURFACE}>
         <CardHeader>
-          <CardTitle className='text-[#F1F5F9]'>AI Insights</CardTitle>
+          <CardTitle className='text-foreground'>AI Insights</CardTitle>
         </CardHeader>
         <CardContent className='space-y-3'>
           <div>
-            <p className='text-xs font-semibold tracking-[0.15em] text-[#94A3B8] uppercase'>Action Items</p>
+            <p className='text-xs font-semibold tracking-[0.15em] text-muted-foreground uppercase'>Action Items</p>
             {meeting.actionItems.map((item) => (
-              <p key={`insight-${item.id}`} className='mt-1 text-sm text-[#c5d4ee]'>
+              <p key={`insight-${item.id}`} className='mt-1 text-sm text-foreground/80'>
                 @{item.assignee} - {item.task} ({item.timestamp})
               </p>
             ))}
           </div>
           <div>
-            <p className='text-xs font-semibold tracking-[0.15em] text-[#94A3B8] uppercase'>Quick Stats</p>
-            <p className='mt-1 text-sm text-[#c5d4ee]'>Speaking time: John 45%, Sarah 30%, Marcus 25%</p>
-            <p className='text-sm text-[#c5d4ee]'>Total sentences: 248 • Avg speed: 145 words/min</p>
+            <p className='text-xs font-semibold tracking-[0.15em] text-muted-foreground uppercase'>Quick Stats</p>
+            <p className='mt-1 text-sm text-foreground/80'>Speaking time: John 45%, Sarah 30%, Marcus 25%</p>
+            <p className='text-sm text-foreground/80'>Total sentences: 248 • Avg speed: 145 words/min</p>
           </div>
-          <div className='rounded-lg border border-[#10B981]/40 bg-[#082d2a]/70 p-2 text-xs text-[#9ff6d5]'>
+          <div className='rounded-lg border border-emerald-500/40 bg-[var(--copilot-success-bg)] p-2 text-xs text-[var(--copilot-success-text)]'>
             <IconCircleCheckFilled className='mr-1 inline size-3.5' />
             Meeting analyzed successfully. AI confidence is high.
           </div>
@@ -686,28 +714,28 @@ function CalendarScreen() {
     <section className='space-y-4'>
       <Card className={SURFACE}>
         <CardHeader className='flex-row items-center justify-between'>
-          <CardTitle className='text-[#F1F5F9]'>Google Calendar</CardTitle>
+          <CardTitle className='text-foreground'>Google Calendar</CardTitle>
           <Badge className='bg-[#10B981] text-white'>Connected</Badge>
         </CardHeader>
         <CardContent className='space-y-3'>
-          <p className='text-sm text-[#c5d4ee]'>john@company.com</p>
+          <p className='text-sm text-foreground/80'>john@company.com</p>
           <div className='space-y-2'>
             {calendarEvents.map((event) => (
-              <div key={event.id} className='rounded-lg border border-[#334155]/70 bg-[#0F172A]/70 p-3'>
-                <p className='text-sm font-semibold text-[#F1F5F9]'>{event.title}</p>
-                <p className='text-xs text-[#94A3B8]'>{event.time}</p>
-                <p className='text-xs text-[#94A3B8]'>{event.location}</p>
-                <p className='mt-2 text-xs text-[#c5d4ee]'>{event.note}</p>
+              <div key={event.id} className='rounded-lg border border-border/70 bg-muted/70 p-3'>
+                <p className='text-sm font-semibold text-foreground'>{event.title}</p>
+                <p className='text-xs text-muted-foreground'>{event.time}</p>
+                <p className='text-xs text-muted-foreground'>{event.location}</p>
+                <p className='mt-2 text-xs text-foreground/80'>{event.note}</p>
                 <div className='mt-2 flex gap-2'>
-                  <Button size='sm' variant='outline' className='border-[#334155] text-[#F1F5F9]'>
+                  <Button size='sm' variant='outline' className='border-border text-foreground'>
                     Start Recording
                   </Button>
                   {event.recurring ? (
-                    <Button size='sm' variant='ghost' className='text-[#c5d4ee]'>
+                    <Button size='sm' variant='ghost' className='text-foreground/80'>
                       Auto-Record
                     </Button>
                   ) : (
-                    <Button size='sm' variant='ghost' className='text-[#c5d4ee]'>
+                    <Button size='sm' variant='ghost' className='text-foreground/80'>
                       Set Reminder
                     </Button>
                   )}
@@ -725,7 +753,7 @@ function SettingsScreen() {
   return (
     <section className='space-y-4'>
       <Tabs defaultValue='integrations'>
-        <TabsList className='rounded-xl border border-[#334155]/70 bg-[#0f1d3f]/70 p-1'>
+        <TabsList className='rounded-xl border border-border/70 bg-muted/70 p-1'>
           <TabsTrigger value='general'>General</TabsTrigger>
           <TabsTrigger value='audio'>Audio</TabsTrigger>
           <TabsTrigger value='ai'>AI Preferences</TabsTrigger>
@@ -735,27 +763,27 @@ function SettingsScreen() {
         <TabsContent value='general'>
           <Card className={SURFACE}>
             <CardContent className='space-y-2'>
-              <p className='text-sm text-[#c5d4ee]'>Language: English</p>
-              <p className='text-sm text-[#c5d4ee]'>Time format: 12h</p>
-              <p className='text-sm text-[#c5d4ee]'>Theme control available in top-right toggle.</p>
+              <p className='text-sm text-foreground/80'>Language: English</p>
+              <p className='text-sm text-foreground/80'>Time format: 12h</p>
+              <p className='text-sm text-foreground/80'>Theme control available in top-right toggle.</p>
             </CardContent>
           </Card>
         </TabsContent>
         <TabsContent value='audio'>
           <Card className={SURFACE}>
             <CardContent className='space-y-2'>
-              <p className='text-sm text-[#c5d4ee]'>Input device: MacBook Microphone</p>
-              <p className='text-sm text-[#c5d4ee]'>Noise suppression: Enabled</p>
-              <p className='text-sm text-[#c5d4ee]'>Echo cancellation: Enabled</p>
+              <p className='text-sm text-foreground/80'>Input device: MacBook Microphone</p>
+              <p className='text-sm text-foreground/80'>Noise suppression: Enabled</p>
+              <p className='text-sm text-foreground/80'>Echo cancellation: Enabled</p>
             </CardContent>
           </Card>
         </TabsContent>
         <TabsContent value='ai'>
           <Card className={SURFACE}>
             <CardContent className='space-y-2'>
-              <p className='text-sm text-[#c5d4ee]'>Summary length: Detailed</p>
-              <p className='text-sm text-[#c5d4ee]'>Action item sensitivity: Balanced</p>
-              <p className='text-sm text-[#c5d4ee]'>Response style: Explanatory</p>
+              <p className='text-sm text-foreground/80'>Summary length: Detailed</p>
+              <p className='text-sm text-foreground/80'>Action item sensitivity: Balanced</p>
+              <p className='text-sm text-foreground/80'>Response style: Explanatory</p>
             </CardContent>
           </Card>
         </TabsContent>
@@ -763,13 +791,13 @@ function SettingsScreen() {
           <div className='space-y-3'>
             <Card className={SURFACE}>
               <CardHeader className='flex-row items-center justify-between'>
-                <CardTitle className='text-[#F1F5F9]'>
+                <CardTitle className='text-foreground'>
                   <IconMail className='mr-2 inline size-4' />
                   Gmail
                 </CardTitle>
                 <Badge className='bg-[#10B981] text-white'>Connected</Badge>
               </CardHeader>
-              <CardContent className='space-y-1 text-sm text-[#c5d4ee]'>
+              <CardContent className='space-y-1 text-sm text-foreground/80'>
                 <p>Auto-generate follow-up emails</p>
                 <p>Include transcript attachment</p>
                 <p>Smart recipient detection</p>
@@ -777,13 +805,13 @@ function SettingsScreen() {
             </Card>
             <Card className={SURFACE}>
               <CardHeader className='flex-row items-center justify-between'>
-                <CardTitle className='text-[#F1F5F9]'>
+                <CardTitle className='text-foreground'>
                   <IconBrandSlack className='mr-2 inline size-4' />
                   Slack
                 </CardTitle>
                 <Badge className='bg-[#10B981] text-white'>Connected</Badge>
               </CardHeader>
-              <CardContent className='space-y-1 text-sm text-[#c5d4ee]'>
+              <CardContent className='space-y-1 text-sm text-foreground/80'>
                 <p>Default channel: #product-team</p>
                 <p>Summary schedule: End of day (6:00 PM)</p>
                 <p>Thread summaries by meeting</p>
@@ -791,13 +819,13 @@ function SettingsScreen() {
             </Card>
             <Card className={SURFACE}>
               <CardHeader className='flex-row items-center justify-between'>
-                <CardTitle className='text-[#F1F5F9]'>
+                <CardTitle className='text-foreground'>
                   <IconCalendarEvent className='mr-2 inline size-4' />
                   Google Calendar
                 </CardTitle>
                 <Badge className='bg-[#10B981] text-white'>Connected</Badge>
               </CardHeader>
-              <CardContent className='space-y-1 text-sm text-[#c5d4ee]'>
+              <CardContent className='space-y-1 text-sm text-foreground/80'>
                 <p>Show upcoming meetings in app</p>
                 <p>Pre-meeting reminders: 5 minutes</p>
                 <p>Sync frequency: Every 15 minutes</p>
@@ -808,9 +836,9 @@ function SettingsScreen() {
         <TabsContent value='privacy'>
           <Card className={SURFACE}>
             <CardContent className='space-y-2'>
-              <p className='text-sm text-[#c5d4ee]'>Data retention: 90 days</p>
-              <p className='text-sm text-[#c5d4ee]'>Auto-delete old meetings: Off</p>
-              <p className='text-sm text-[#c5d4ee]'>Export all data available from dashboard exports.</p>
+              <p className='text-sm text-foreground/80'>Data retention: 90 days</p>
+              <p className='text-sm text-foreground/80'>Auto-delete old meetings: Off</p>
+              <p className='text-sm text-foreground/80'>Export all data available from dashboard exports.</p>
             </CardContent>
           </Card>
         </TabsContent>
@@ -840,20 +868,15 @@ function FloatingWidget({
   const ss = (elapsedSeconds % 60).toString().padStart(2, '0');
 
   return (
-    <div className='fixed right-4 bottom-4 z-40 w-80 rounded-2xl border border-[#3B82F6]/40 bg-[linear-gradient(140deg,rgba(30,58,138,0.35),rgba(15,23,42,0.9))] p-3 shadow-[0_18px_45px_rgba(30,58,138,0.45)] backdrop-blur-xl'>
-      <p className='mb-1 text-sm font-semibold text-[#F1F5F9]'>AI Meeting Copilot</p>
-      <p className='text-sm text-[#dbe8ff]'>🔴 Recording {mm}:{ss}</p>
-      <p className='mt-1 text-xs text-[#94A3B8]'>Product Sync Meeting</p>
+    <div className={cn('fixed right-4 bottom-4 z-40 w-80 p-3', SURFACE)}>
+      <p className='mb-1 text-sm font-semibold text-foreground'>AI Meeting Copilot</p>
+      <p className='text-sm text-foreground/85'>🔴 Recording {mm}:{ss}</p>
+      <p className='mt-1 text-xs text-muted-foreground'>Product Sync Meeting</p>
       <div className='mt-2 flex gap-2'>
-        <Button size='sm' variant='outline' className='border-[#3B82F6]/70 text-white' onClick={onAsk}>
+        <Button size='sm' variant='outline' className='border-primary/50 text-primary' onClick={onAsk}>
           Ask AI
         </Button>
-        <Button
-          size='sm'
-          variant='outline'
-          className='border-[#334155] bg-[#0F172A]/60 text-[#F1F5F9]'
-          onClick={onPauseResume}
-        >
+        <Button size='sm' variant='outline' className={COPILOT_BTN_OUTLINE} onClick={onPauseResume}>
           <IconPlayerPause className='mr-1.5 size-3.5' />
           Pause
         </Button>
@@ -1111,33 +1134,33 @@ export default function MeetingCopilotApp() {
     setIsRecordingPaused((current) => !current);
   };
 
+  const pageMeta = PAGE_META[view];
+
   return (
-    <div className='relative min-h-dvh overflow-hidden bg-[#050A1A] text-slate-100'>
-      <div className='pointer-events-none absolute -top-24 -left-24 size-80 rounded-full bg-[#1E3A8A]/35 blur-3xl' />
-      <div className='pointer-events-none absolute top-20 right-0 size-[26rem] rounded-full bg-[#3B82F6]/20 blur-3xl' />
-      <div className='pointer-events-none absolute bottom-0 left-1/3 size-[30rem] rounded-full bg-[#06B6D4]/12 blur-3xl' />
-      <div className='mx-auto flex min-h-dvh max-w-[1800px]'>
+    <div className='relative flex h-dvh flex-col overflow-hidden bg-background text-foreground'>
+      <div className='pointer-events-none absolute -top-24 -left-24 size-80 rounded-full bg-[var(--copilot-glow-primary)] blur-3xl' />
+      <div className='pointer-events-none absolute top-20 right-0 size-[26rem] rounded-full bg-[var(--copilot-glow-secondary)] blur-3xl' />
+      <div className='pointer-events-none absolute bottom-0 left-1/3 size-[30rem] rounded-full bg-cyan-500/10 blur-3xl dark:bg-[#06B6D4]/12' />
+      <div className='relative z-10 mx-auto flex h-full min-h-0 w-full max-w-[1800px]'>
         <AppSidebar
           activeView={view}
           onNavigate={setView}
           onStartRecording={startRecording}
           selectedMeeting={selectedMeeting}
         />
-        <div className='flex min-h-dvh flex-1 flex-col'>
-          <header className='sticky top-0 z-20 border-b border-[#334155]/60 bg-[#060b1d]/85 backdrop-blur'>
+        <div className='flex min-h-0 min-w-0 flex-1 flex-col'>
+          <header className='sticky top-0 z-20 shrink-0 border-b border-border bg-background/95 backdrop-blur-md supports-[backdrop-filter]:bg-background/85'>
             <div className='flex items-center justify-between px-5 py-4'>
               <div>
-                <h1 className='text-lg font-semibold text-[#F1F5F9]'>Dashboard</h1>
-                <p className='text-xs text-[#94A3B8]'>
-                  Real-time transcription, intelligence, and meeting follow-up automation.
-                </p>
+                <h1 className='text-lg font-semibold text-foreground'>{pageMeta.title}</h1>
+                <p className='text-xs text-muted-foreground'>{pageMeta.description}</p>
               </div>
               <div className='flex items-center gap-3'>
-                <Badge variant='outline' className='border-[#06B6D4]/60 bg-[#0b2740] text-[#67e8f9]'>
+                <Badge variant='outline' className='border-cyan-500/50 bg-cyan-500/10 text-cyan-700 dark:text-[#67e8f9]'>
                   <IconBolt className='mr-1 size-3.5' />
                   Live AI
                 </Badge>
-                <Badge variant='outline' className='border-[#334155] bg-[#0F172A]/80 text-[#c5d4ee]'>
+                <Badge variant='outline' className='border-border bg-muted/60 text-foreground/80'>
                   {runtimeMode === 'desktop' ? `Desktop${desktopPlatform ? ` · ${desktopPlatform}` : ''}` : 'Web Preview'}
                 </Badge>
                 <ThemeToggle />
@@ -1145,7 +1168,7 @@ export default function MeetingCopilotApp() {
             </div>
           </header>
 
-          <main className='flex-1 p-4 md:p-6'>
+          <main className='min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 md:p-6'>
             {view === 'dashboard' && (
               <DashboardScreen
                 filteredMeetings={filteredMeetings}

@@ -1,0 +1,21 @@
+/* Meeting Copilot — theme-aware surfaces (light = white canvas, dark = deep navy) */
+
+:root {
+  --copilot-glow-primary: rgb(59 130 246 / 0.14);
+  --copilot-glow-secondary: rgb(6 182 212 / 0.1);
+  --copilot-nav-hover: oklch(0.96 0.01 264);
+  --copilot-accent-muted: oklch(0.94 0.04 222);
+  --copilot-highlight-bg: oklch(0.96 0.03 222);
+  --copilot-success-bg: oklch(0.95 0.04 165);
+  --copilot-success-text: oklch(0.45 0.1 165);
+}
+
+.dark {
+  --copilot-glow-primary: rgb(30 58 138 / 0.35);
+  --copilot-glow-secondary: rgb(59 130 246 / 0.2);
+  --copilot-nav-hover: #16244a;
+  --copilot-accent-muted: rgb(30 58 138 / 0.3);
+  --copilot-highlight-bg: rgb(11 39 64 / 0.7);
+  --copilot-success-bg: rgb(8 45 42 / 0.7);
+  --copilot-success-text: #9ff6d5;
+}
