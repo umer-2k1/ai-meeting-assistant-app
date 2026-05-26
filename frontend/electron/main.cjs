@@ -1,5 +1,8 @@
+const fs = require('node:fs');
 const path = require('node:path');
-const { app, BrowserWindow, Menu, Tray, globalShortcut, ipcMain, screen } = require('electron');
+const { app, BrowserWindow, Menu, Tray, globalShortcut, ipcMain, screen, nativeImage } = require('electron');
+
+const APP_NAME = 'AI Meeting Copilot';
 
 const isTestMode = process.env.ELECTRON_TEST_MODE === '1';
 
@@ -41,6 +44,60 @@ const transcriptTemplates = [
   { speaker: 'Marcus Wong', text: 'Action item: publish the release readiness checklist by Friday.' },
   { speaker: 'John Martinez', text: 'Decision: Dark Mode ships in Q3 with phased rollout.' }
 ];
+
+function resolveAppIconPath() {
+  const iconsDir = path.join(__dirname, 'icons');
+
+  if (process.platform === 'win32') {
+    const icoPath = path.join(iconsDir, 'icon.ico');
+    if (fs.existsSync(icoPath)) return icoPath;
+  }
+
+  if (process.platform === 'darwin') {
+    const icnsPath = path.join(iconsDir, 'icon.icns');
+    if (fs.existsSync(icnsPath)) return icnsPath;
+  }
+
+  const pngPath = path.join(iconsDir, 'icon.png');
+  if (fs.existsSync(pngPath)) return pngPath;
+
+  const fallbackWebp = path.join(__dirname, '..', 'public', 'favicon', 'favicon-512.webp');
+  if (fs.existsSync(fallbackWebp)) return fallbackWebp;
+
+  return null;
+}
+
+function loadAppIconImage() {
+  const iconPath = resolveAppIconPath();
+  if (!iconPath) return null;
+
+  const image = nativeImage.createFromPath(iconPath);
+  if (image.isEmpty()) {
+    console.warn('[desktop] Failed to load app icon from', iconPath);
+    return null;
+  }
+
+  return image;
+}
+
+function applyWindowIcon(win) {
+  if (!win || win.isDestroyed()) return;
+
+  const image = loadAppIconImage();
+  if (!image) return;
+
+  win.setIcon(image);
+}
+
+function applyDockIcon() {
+  if (process.platform !== 'darwin' || !app.dock) return;
+
+  const image = loadAppIconImage();
+  if (!image) return;
+
+  app.dock.setIcon(image);
+  app.dock.show();
+}
 
 function formatTimestamp(seconds) {
   const mm = String(Math.floor(seconds / 60)).padStart(2, '0');
@@ -163,13 +220,17 @@ function stopRecording() {
 }
 
 function createMainWindow() {
+  const iconPath = resolveAppIconPath();
+
   mainWindow = new BrowserWindow({
     width: 1480,
     height: 920,
     minWidth: 1120,
     minHeight: 760,
     backgroundColor: '#050A1A',
-    title: 'AI Meeting Copilot',
+    title: APP_NAME,
+    show: false,
+    ...(iconPath ? { icon: iconPath } : {}),
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
@@ -188,6 +249,12 @@ function createMainWindow() {
   } else {
     mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
   }
+
+  mainWindow.once('ready-to-show', () => {
+    applyWindowIcon(mainWindow);
+    applyDockIcon();
+    mainWindow.show();
+  });
 
   mainWindow.on('closed', () => {
     mainWindow = null;
@@ -331,9 +398,14 @@ function createWidgetWindow() {
 }
 
 function createTray() {
-  const iconPath = path.join(__dirname, '..', 'public', 'favicon.ico');
-  tray = new Tray(iconPath);
-  tray.setToolTip('AI Meeting Copilot');
+  const iconImage = loadAppIconImage();
+  if (!iconImage) {
+    console.warn('[desktop] Tray icon unavailable — run pnpm check:electron to generate icons.');
+    return;
+  }
+
+  tray = new Tray(iconImage.resize({ width: 22, height: 22 }));
+  tray.setToolTip(APP_NAME);
 
   const contextMenu = Menu.buildFromTemplate([
     {
@@ -504,9 +576,16 @@ function registerIpcHandlers() {
   });
 }
 
+app.setName(APP_NAME);
+
+if (process.platform === 'win32') {
+  app.setAppUserModelId('com.aimmeetingcopilot.desktop');
+}
+
 app.whenReady().then(() => {
   registerIpcHandlers();
   createMainWindow();
+  applyDockIcon();
   if (!isTestMode) {
     createWidgetWindow();
     createTray();

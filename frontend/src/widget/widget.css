@@ -39,38 +39,98 @@ body,
   cursor: ns-resize;
 }
 
-/* Compact pill only — subtle glow without large shadow bleed */
-@keyframes widget-live-pulse {
-  0%,
-  100% {
-    box-shadow:
-      0 0 0 1px rgba(6, 182, 212, 0.45),
-      0 0 10px rgba(6, 182, 212, 0.25);
-  }
+/* Rotating shiny snake border (no box-shadow bleed) */
+@property --widget-border-angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
 
-  50% {
-    box-shadow:
-      0 0 0 1px rgba(59, 130, 246, 0.65),
-      0 0 14px rgba(6, 182, 212, 0.35);
+@keyframes widget-snake-spin {
+  to {
+    --widget-border-angle: 360deg;
   }
 }
 
-.widget-live-ring {
-  animation: widget-live-pulse 2s ease-in-out infinite;
+.widget-live-frame {
+  position: relative;
+  display: flex;
+  max-width: 100%;
 }
 
-/* Expanded panel — border pulse only, no heavy drop shadow */
-@keyframes widget-live-border-pulse {
-  0%,
-  100% {
-    border-color: rgba(59, 130, 246, 0.35);
-  }
-
-  50% {
-    border-color: rgba(6, 182, 212, 0.75);
-  }
+.widget-live-frame--pill {
+  border-radius: 9999px;
 }
 
-.widget-live-border {
-  animation: widget-live-border-pulse 2s ease-in-out infinite;
+.widget-live-frame--panel {
+  border-radius: 22px;
+  height: 100%;
+  width: 100%;
+}
+
+.widget-live-snake::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 2px;
+  background: conic-gradient(
+    from var(--widget-border-angle),
+    rgba(15, 23, 42, 0.15) 0deg,
+    rgba(15, 23, 42, 0.15) 235deg,
+    #06b6d4 275deg,
+    #38bdf8 305deg,
+    #e0f2fe 330deg,
+    #3b82f6 350deg,
+    #06b6d4 360deg
+  );
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  animation: widget-snake-spin 2.4s linear infinite;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.widget-live-snake::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: inherit;
+  background: conic-gradient(
+    from var(--widget-border-angle),
+    transparent 0deg,
+    transparent 250deg,
+    rgba(6, 182, 212, 0.45) 300deg,
+    rgba(59, 130, 246, 0.35) 360deg
+  );
+  filter: blur(10px);
+  opacity: 0.65;
+  animation: widget-snake-spin 2.4s linear infinite;
+  pointer-events: none;
+  z-index: -1;
+}
+
+.widget-live-frame__inner {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  border-radius: inherit;
+}
+
+.widget-live-frame--pill .widget-live-frame__inner {
+  overflow: hidden;
+}
+
+.widget-live-frame--panel .widget-live-frame__inner {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  overflow: hidden;
 }

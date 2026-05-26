@@ -6,6 +6,16 @@ This folder contains the desktop runtime foundation for Milestone 2.
 
 - `main.cjs` - Electron main process, tray, shortcuts, IPC handlers, and the system-wide floating widget window (CommonJS; required because package `type` is `module`)
 - `preload.cjs` - secure bridge exposed to the renderer (`window.desktop`)
+- `icons/icon.png` - dock/taskbar/tray icon (generated from `public/favicon/favicon-512.webp` via `pnpm check:electron`)
+
+## App icon
+
+Icons are loaded from `electron/icons/` and applied to:
+
+- Main window (`BrowserWindow` + macOS Dock via `app.dock.setIcon`)
+- Menu bar tray
+
+Run `node scripts/generate-electron-icons.mjs` (also runs in `pnpm check:electron`) if `icon.png` is missing.
 
 ## System Floating Widget
 

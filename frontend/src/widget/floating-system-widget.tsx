@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 
 import {
   IconAdjustmentsHorizontal,
@@ -27,6 +27,31 @@ function formatTimer(totalSeconds: number) {
     .padStart(2, '0');
   const ss = (totalSeconds % 60).toString().padStart(2, '0');
   return `${mm}:${ss}`;
+}
+
+function WidgetLiveFrame({
+  live,
+  variant,
+  className,
+  children
+}: {
+  live: boolean;
+  variant: 'pill' | 'panel';
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      className={cn(
+        'widget-live-frame',
+        variant === 'pill' ? 'widget-live-frame--pill' : 'widget-live-frame--panel',
+        live && 'widget-live-snake',
+        className
+      )}
+    >
+      <div className='widget-live-frame__inner'>{children}</div>
+    </div>
+  );
 }
 
 function MessageToggleButton({
@@ -155,11 +180,10 @@ export default function FloatingSystemWidget() {
     return null;
   }
 
-  const shellClass = cn(
-    'relative overflow-hidden rounded-full border border-[#334155]/90',
-    'bg-[linear-gradient(140deg,rgba(30,58,138,0.42),rgba(15,23,42,0.92))]',
-    'shadow-[0_10px_28px_rgba(0,0,0,0.45)] backdrop-blur-xl',
-    isLive && 'widget-live-ring'
+  const pillShellClass = cn(
+    'flex w-full max-w-[288px] items-center justify-between gap-2 rounded-full',
+    'border border-[#334155]/90 bg-[linear-gradient(140deg,rgba(30,58,138,0.42),rgba(15,23,42,0.92))] backdrop-blur-xl',
+    isLive && 'border-transparent'
   );
 
   if (!expanded) {
@@ -168,13 +192,11 @@ export default function FloatingSystemWidget() {
         className='widget-drag-handle flex h-full w-full items-center justify-center p-1'
         onPointerDown={onDragPointerDown}
       >
-        <div
-          className={cn(
-            shellClass,
-            'widget-drag-handle flex w-full max-w-[288px] items-center justify-between gap-2 px-2 py-1.5'
-          )}
-          onPointerDown={onDragPointerDown}
-        >
+        <WidgetLiveFrame live={isLive} variant='pill' className='w-full max-w-[288px]'>
+          <div
+            className={cn('widget-drag-handle px-2 py-1.5', pillShellClass)}
+            onPointerDown={onDragPointerDown}
+          >
           <MessageToggleButton expanded={false} onClick={toggleExpanded} />
 
           <span className='min-w-[52px] text-center font-mono text-xs font-semibold tracking-wide text-[#E2E8F0]'>
@@ -216,20 +238,21 @@ export default function FloatingSystemWidget() {
               <IconAdjustmentsHorizontal className='size-3.5' />
             </button>
           </div>
-        </div>
+          </div>
+        </WidgetLiveFrame>
       </div>
     );
   }
 
   return (
     <div className='box-border flex h-full w-full p-1.5'>
-      <div
-        className={cn(
-          'relative flex h-full min-h-0 w-full flex-col overflow-hidden rounded-[22px] border border-[#3B82F6]/40',
-          'bg-[linear-gradient(160deg,#0B1227_0%,#050A1A_100%)]',
-          isLive && 'widget-live-border'
-        )}
-      >
+      <WidgetLiveFrame live={isLive} variant='panel' className='h-full min-h-0 w-full'>
+        <div
+          className={cn(
+            'relative flex h-full min-h-0 w-full flex-col bg-[linear-gradient(160deg,#0B1227_0%,#050A1A_100%)]',
+            isLive ? 'border border-transparent' : 'border border-[#3B82F6]/40'
+          )}
+        >
         <div
           className='widget-drag-handle flex shrink-0 items-center justify-between border-b border-[#334155]/70 px-4 py-3'
           onPointerDown={onDragPointerDown}
@@ -413,7 +436,8 @@ export default function FloatingSystemWidget() {
             />
           </svg>
         </button>
-      </div>
+        </div>
+      </WidgetLiveFrame>
     </div>
   );
 }
