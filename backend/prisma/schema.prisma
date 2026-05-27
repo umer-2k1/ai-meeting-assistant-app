@@ -1,0 +1,341 @@
+// This is your Prisma schema file
+// Learn more: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ========================================
+// User & Authentication
+// ========================================
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String?
+  avatarUrl     String?
+  
+  // Google OAuth fields
+  googleId      String?   @unique
+  googleEmail   String?
+  accessToken   String?   @db.Text
+  refreshToken  String?   @db.Text
+  
+  // Preferences
+  timezone      String    @default("UTC")
+  language      String    @default("en")
+  
+  // Timestamps
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  lastLoginAt   DateTime?
+  
+  // Relations
+  meetings      Meeting[]
+  chatMessages  AIChatMessage[]
+  notes         MeetingNote[]
+  
+  @@index([email])
+  @@index([googleId])
+}
+
+// ========================================
+// Meetings
+// ========================================
+
+model Meeting {
+  id                String              @id @default(cuid())
+  title             String
+  description       String?             @db.Text
+  startTime         DateTime
+  endTime           DateTime?
+  duration          Int?                // Duration in seconds
+  status            MeetingStatus       @default(SCHEDULED)
+  
+  // Recording metadata
+  audioUrl          String?
+  audioDuration     Int?                // Duration in seconds
+  recordingStarted  DateTime?
+  recordingEnded    DateTime?
+  
+  // Platform info
+  platform          String?             // "zoom", "meet", "teams", "in-person"
+  platformMeetingId String?
+  platformUrl       String?
+  
+  // AI-generated content
+  aiSummary         String?             @db.Text
+  summaryHtml       String?             @db.Text
+  keyDecisions      String[]
+  risks             String[]
+  highlights        String[]
+  
+  // Vector embedding for semantic search
+  embeddingId       String?             @unique
+  
+  // Relations
+  userId            String
+  user              User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  attendees         MeetingAttendee[]
+  transcript        TranscriptLine[]
+  actionItems       ActionItem[]
+  chatMessages      AIChatMessage[]
+  notes             MeetingNote[]
+  tags              MeetingTag[]
+  
+  // Timestamps
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  
+  @@index([userId])
+  @@index([startTime])
+  @@index([status])
+}
+
+enum MeetingStatus {
+  SCHEDULED
+  LIVE
+  PROCESSING
+  COMPLETED
+  CANCELLED
+}
+
+// ========================================
+// Meeting Attendees
+// ========================================
+
+model MeetingAttendee {
+  id              String    @id @default(cuid())
+  meetingId       String
+  meeting         Meeting   @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  
+  name            String
+  email           String?
+  role            String?   // "organizer", "required", "optional"
+  
+  // Enrichment data
+  linkedinUrl     String?
+  company         String?
+  title           String?
+  bio             String?   @db.Text
+  
+  // Timestamps
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  @@index([meetingId])
+  @@index([email])
+}
+
+// ========================================
+// Transcript
+// ========================================
+
+model TranscriptLine {
+  id              String    @id @default(cuid())
+  meetingId       String
+  meeting         Meeting   @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  
+  speaker         String
+  text            String    @db.Text
+  timestamp       String    // Format: "00:12:34"
+  timestampSeconds Int      // Seconds from start
+  
+  // Metadata
+  confidence      Float?    // 0.0 to 1.0
+  highlighted     Boolean   @default(false)
+  
+  // Vector embedding for semantic search
+  embeddingId     String?
+  
+  // Timestamps
+  createdAt       DateTime  @default(now())
+  
+  @@index([meetingId])
+  @@index([timestampSeconds])
+}
+
+// ========================================
+// Action Items
+// ========================================
+
+model ActionItem {
+  id              String          @id @default(cuid())
+  meetingId       String
+  meeting         Meeting         @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  
+  task            String          @db.Text
+  assignee        String?
+  dueDate         DateTime?
+  priority        Priority        @default(MEDIUM)
+  status          ActionStatus    @default(PENDING)
+  
+  // Context
+  timestamp       String?         // Where in meeting it was mentioned
+  context         String?         @db.Text
+  
+  // Timestamps
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  completedAt     DateTime?
+  
+  @@index([meetingId])
+  @@index([status])
+  @@index([dueDate])
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum ActionStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+// ========================================
+// AI Chat Messages (In-Meeting + Post-Meeting)
+// ========================================
+
+model AIChatMessage {
+  id              String    @id @default(cuid())
+  meetingId       String?
+  meeting         Meeting?  @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  
+  userId          String
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  question        String    @db.Text
+  answer          String    @db.Text
+  
+  // Context used for answer
+  contextType     String?   // "transcript", "summary", "action_items", "history"
+  contextSnippet  String?   @db.Text
+  
+  // Metadata
+  model           String?   // Which LLM was used
+  tokensUsed      Int?
+  responseTime    Int?      // Milliseconds
+  
+  // Timestamps
+  createdAt       DateTime  @default(now())
+  
+  @@index([meetingId])
+  @@index([userId])
+}
+
+// ========================================
+// Meeting Notes (User's Personal Notes)
+// ========================================
+
+model MeetingNote {
+  id              String    @id @default(cuid())
+  meetingId       String
+  meeting         Meeting   @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  
+  userId          String
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  content         String    @db.Text
+  contentHtml     String?   @db.Text
+  
+  // Timestamps
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  @@index([meetingId])
+  @@index([userId])
+}
+
+// ========================================
+// Tags
+// ========================================
+
+model MeetingTag {
+  id              String    @id @default(cuid())
+  meetingId       String
+  meeting         Meeting   @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  
+  name            String
+  color           String?   // Hex color code
+  
+  // Timestamps
+  createdAt       DateTime  @default(now())
+  
+  @@unique([meetingId, name])
+  @@index([meetingId])
+}
+
+// ========================================
+// Vector Embeddings (for Qdrant tracking)
+// ========================================
+
+model VectorEmbedding {
+  id              String    @id @default(cuid())
+  
+  // Reference
+  entityType      String    // "meeting", "transcript_line", "summary"
+  entityId        String
+  
+  // Qdrant metadata
+  qdrantId        String    @unique
+  collectionName  String
+  
+  // Embedding metadata
+  model           String    @default("gemini")
+  dimension       Int       @default(768)
+  
+  // Timestamps
+  createdAt       DateTime  @default(now())
+  
+  @@index([entityType, entityId])
+  @@index([qdrantId])
+}
+
+// ========================================
+// Integration Logs (For tracking exports/shares)
+// ========================================
+
+model IntegrationLog {
+  id              String          @id @default(cuid())
+  
+  // What was shared
+  entityType      String          // "meeting", "summary", "transcript"
+  entityId        String
+  
+  // Integration details
+  integrationType IntegrationType
+  destination     String?         // Channel ID, email address, etc.
+  
+  // Status
+  status          String          @default("pending") // "pending", "success", "failed"
+  error           String?         @db.Text
+  
+  // Metadata
+  metadata        Json?
+  
+  // Timestamps
+  createdAt       DateTime        @default(now())
+  
+  @@index([entityType, entityId])
+  @@index([integrationType])
+}
+
+enum IntegrationType {
+  SLACK
+  EMAIL
+  PDF_EXPORT
+  MARKDOWN_EXPORT
+  CALENDAR_SYNC
+}
