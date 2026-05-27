@@ -1,44 +1,155 @@
 # TODO
 
-## Milestone 1 - Web Prototype Baseline (Completed)
+## Phase 5 - Integrations & Export (Pending)
 
-- [x] Build requirement-aligned frontend screens and flows.
-- [x] Add backend API scaffold with mock endpoints.
-- [x] Connect Ask AI to backend endpoint with fallback behavior.
-- [x] Establish docs and delivery tracking structure.
+### Slack Integration
+- [ ] Create Slack Bot app
+- [ ] OAuth flow for workspace connection
+- [ ] Send summary to selected channel
+- [ ] Format meeting cards for Slack
+- [ ] Handle thread replies
+- [ ] Store integration logs
 
-## Milestone 2 - Desktop Foundation (In Progress)
+### Email Delivery
+- [ ] SendGrid integration
+- [ ] Email template design
+- [ ] Recipient selection UI
+- [ ] Attachment support (PDF)
+- [ ] Schedule delivery
+- [ ] Delivery status tracking
 
-- [x] Add Electron main process scaffold.
-- [x] Add secure preload bridge (`contextIsolation` + `nodeIntegration` disabled).
-- [x] Add renderer IPC wiring for start/pause/stop recording and transcript events.
-- [x] Add tray menu and global shortcut (`Cmd/Ctrl+K`) for recording control.
-- [x] Add robust dual-process dev command (run Vite + Electron together).
-- [ ] Add desktop-focused error banners and reconnect handling for IPC failures.
-- [x] Add first integration test covering renderer -> preload -> main event flow.
+### Google Calendar Sync (MCP)
+- [ ] Wait for MCP server setup
+- [ ] Fetch calendar events
+- [ ] Create meeting from calendar invite
+- [ ] Sync attendees
+- [ ] Update calendar with recording link
+- [ ] Pre-meeting reminder notifications
 
-## Milestone 3 - Real Recording + STT
+### Export Features
+- [ ] PDF export service
+- [ ] Markdown export
+- [ ] DOCX export (Word)
+- [ ] JSON export
+- [ ] Batch export multiple meetings
+- [ ] Export templates
 
-- [ ] Implement Electron audio capture service.
-- [ ] Stream audio to Deepgram and handle reconnect logic.
-- [ ] Persist recording sessions and lifecycle state changes.
-- [ ] Push transcript updates to renderer via IPC/SSE in stable batches.
-- [ ] Add recording-state notifications.
+## Phase 6 - Pre-Meeting Intelligence (Pending)
 
-## Milestone 4 - Core Intelligence + Data Platform
+### Attendee Enrichment
+- [ ] LinkedIn profile scraping (via Serper API)
+- [ ] Company information lookup
+- [ ] Bio/role summary
+- [ ] Past meeting history with attendee
+- [ ] Relationship mapping
 
-- [ ] Add Prisma schema and initial migration.
-- [ ] Persist meetings, transcripts, notes, and action items.
-- [ ] Implement transcript chunking and embeddings.
-- [ ] Integrate Groq summarization and action extraction.
-- [ ] Add post-meeting generation pipeline trigger.
+### Meeting Context
+- [ ] Retrieve past meetings with same attendees
+- [ ] Open action items from previous meetings
+- [ ] Pending follow-ups
+- [ ] Related meeting threads
+- [ ] Context summary generation
 
-## Milestone 5 - Integrations, Export, and Release Hardening
+### Suggested Talking Points
+- [ ] Agenda extraction from description
+- [ ] Topic suggestion based on history
+- [ ] Reminders from previous meetings
+- [ ] Client request tracking
+- [ ] Pre-meeting brief generation
 
-- [ ] Implement OAuth for Slack, Gmail, and Google Calendar.
-- [ ] Build summary delivery jobs (Slack + email).
-- [ ] Build export generation for PDF/TXT/JSON/DOCX.
-- [ ] Add end-to-end tests for full meeting lifecycle.
-- [ ] Add accessibility audit and keyboard-navigation tests.
-- [ ] Add observability logs and service health dashboards.
-- [ ] Prepare Electron package and signing pipeline.
+## Technical Debt & Improvements
+
+### Code Quality
+- [ ] Add comprehensive error handling
+- [ ] Implement retry logic for API calls
+- [ ] Add request validation (Zod schemas)
+- [ ] Improve TypeScript types
+- [ ] Add JSDoc comments
+
+### Testing
+- [ ] Unit tests for services
+- [ ] Integration tests for API routes
+- [ ] E2E tests for recording flow
+- [ ] Load testing for concurrent recordings
+- [ ] Accessibility testing
+
+### Performance
+- [ ] Optimize embedding generation (batch)
+- [ ] Cache frequently accessed meetings
+- [ ] Lazy load transcript lines
+- [ ] Compress audio before upload
+- [ ] Add pagination to meeting lists
+
+### Developer Experience
+- [ ] Docker Compose for local dev
+- [ ] Database seeding with realistic data
+- [ ] API documentation (Swagger/OpenAPI)
+- [ ] Postman collection
+- [ ] Setup scripts automation
+
+### Security Hardening
+- [ ] Rate limiting on API endpoints
+- [ ] Input sanitization
+- [ ] SQL injection prevention audit
+- [ ] CORS policy review
+- [ ] Security headers (Helmet.js)
+
+## Infrastructure & DevOps (Future)
+
+### Deployment
+- [ ] Dockerfile for backend
+- [ ] CI/CD pipeline (GitHub Actions)
+- [ ] Staging environment
+- [ ] Production environment
+- [ ] Database migrations automation
+- [ ] Health check endpoints
+
+### Monitoring & Observability
+- [ ] Application logging (Winston/Pino)
+- [ ] Error tracking (Sentry)
+- [ ] Performance monitoring (DataDog/New Relic)
+- [ ] API metrics dashboard
+- [ ] User analytics
+
+### Electron Desktop
+- [ ] Code signing (macOS/Windows)
+- [ ] Auto-update mechanism
+- [ ] Crash reporting
+- [ ] DMG/MSI installers
+- [ ] App Store submission
+
+## Feature Enhancements (v2.0)
+
+### Advanced AI
+- [ ] Multi-language support (30+ languages)
+- [ ] Custom vocabulary training
+- [ ] Sentiment analysis
+- [ ] Topic modeling
+- [ ] Meeting quality scoring
+
+### Collaboration
+- [ ] Shared notes with team
+- [ ] Comment threads on transcript
+- [ ] @mention notifications
+- [ ] Team workspaces
+- [ ] Permission management
+
+### Customization
+- [ ] Custom action item templates
+- [ ] Meeting templates
+- [ ] Custom AI prompts
+- [ ] Branding customization
+- [ ] Export templates
+
+---
+
+**Priority Order:**
+1. API key configuration & testing
+2. Slack integration
+3. Email delivery
+4. Pre-meeting intelligence
+5. Export features
+6. Calendar sync (depends on MCP)
+
+See [`docs/completed.md`](completed.md) for what's already done.
+See [`docs/in-progress.md`](in-progress.md) for current work.
