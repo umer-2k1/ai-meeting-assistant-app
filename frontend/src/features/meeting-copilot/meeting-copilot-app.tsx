@@ -27,7 +27,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Textarea } from '@/components/ui/textarea';
+import { RichTextEditor } from '@/components/editor';
 import ThemeToggle from '@/components/ui/theme-toggle';
 import { cn } from '@/lib/utils';
 
@@ -641,10 +641,14 @@ function DetailScreen({
               ))}
             </TabsContent>
             <TabsContent value='notes'>
-              <Textarea
-                defaultValue={meeting.notes}
-                rows={7}
-                className={COPILOT_INPUT}
+              <RichTextEditor
+                content={meeting.notes}
+                onChange={(content) => {
+                  // TODO: Save notes to backend
+                  console.log('Notes updated:', content);
+                }}
+                placeholder='Add meeting notes, key takeaways, or follow-up items...'
+                minHeight='400px'
               />
             </TabsContent>
             <TabsContent value='chat' className='space-y-2'>
