@@ -6,8 +6,7 @@ import TaskList from '@tiptap/extension-task-list';
 import TaskItem from '@tiptap/extension-task-item';
 import Highlight from '@tiptap/extension-highlight';
 import Typography from '@tiptap/extension-typography';
-import TextStyle from '@tiptap/extension-text-style';
-import Color from '@tiptap/extension-color';
+import { Color, TextStyle } from '@tiptap/extension-text-style';
 import { useEffect } from 'react';
 
 import { cn } from '@/lib/utils';
@@ -23,6 +22,10 @@ export interface RichTextEditorProps {
   className?: string;
   minHeight?: string;
   autofocus?: boolean;
+  /** Hide formatting toolbar (e.g. read-only summary) */
+  showToolbar?: boolean;
+  /** `document` = borderless inline doc surface */
+  variant?: 'default' | 'document';
 }
 
 export interface EditorConfig {
@@ -106,7 +109,9 @@ export function RichTextEditor({
   editable = true,
   className,
   minHeight = '200px',
-  autofocus = false
+  autofocus = false,
+  showToolbar = true,
+  variant = 'default'
 }: RichTextEditorProps) {
   const editor = useRichTextEditor(content, {
     placeholder,
@@ -130,11 +135,13 @@ export function RichTextEditor({
   return (
     <div
       className={cn(
-        'editor-container overflow-hidden rounded-lg border border-border bg-background',
+        variant === 'default' &&
+          'editor-container overflow-hidden rounded-lg border border-border bg-background',
+        variant === 'document' && 'editor-container editor-container--document overflow-hidden',
         className
       )}
     >
-      {editable && <EditorToolbar editor={editor} />}
+      {editable && showToolbar && <EditorToolbar editor={editor} />}
       <div className='editor-wrapper' style={{ minHeight }}>
         <EditorContent editor={editor} />
       </div>

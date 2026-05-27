@@ -33,12 +33,39 @@ export const meetings: Meeting[] = [
     id: 'meeting-1',
     title: 'Product Sync Meeting',
     status: 'live',
+    displayDate: 'May 27, 2026',
     startedAt: 'Today, 10:30 AM',
     duration: '45 min',
+    audioDurationSeconds: 45 * 60,
     participantCount: 5,
     summarySnippet:
       'Discussed Q3 roadmap priorities and decided to launch Dark Mode while moving API latency to P0.',
-    tags: ['roadmap', 'design', 'q3'],
+    tags: ['roadmap', 'design', 'q3', 'ai-notes'],
+    summaryHtml: `
+      <div class="editor-callout">
+        <span class="editor-callout-icon">✨</span>
+        <p><em>This summary was generated automatically from your meeting recording. Review and edit before sharing.</em></p>
+      </div>
+      <h2>Record without a bot in your call</h2>
+      <blockquote>
+        <p><em>The team aligned on shipping Dark Mode in Q3 while treating mobile API latency as a sprint P0.</em></p>
+      </blockquote>
+      <p>
+        The discussion covered roadmap priorities, design dependencies, and engineering capacity.
+        Sarah flagged <mark data-color="#DBEAFE" style="background-color: #DBEAFE">automatic</mark>
+        transcript quality as a requirement for client-facing demos.
+      </p>
+      <ul class="editor-tip-list">
+        <li>Confirm Dark Mode design tokens before sprint planning</li>
+        <li>Share latency benchmarks with the mobile team by Friday</li>
+        <li>Schedule a follow-up with stakeholders after P0 fixes land</li>
+      </ul>
+      <h3>Key decisions</h3>
+      <ul>
+        <li>API latency issue elevated to P0 priority</li>
+        <li>Dark Mode feature approved for Q3 launch</li>
+      </ul>
+    `,
     decisions: [
       'API latency issue elevated to P0 priority',
       'Dark Mode feature approved for Q3 launch'
@@ -63,7 +90,7 @@ export const meetings: Meeting[] = [
       }
     ],
     notes:
-      'Need to align onboarding content with Dark Mode rollout. Investigate mobile API timeout threshold.',
+      '<p>Need to align onboarding content with <strong>Dark Mode</strong> rollout.</p><p>Investigate mobile API timeout threshold.</p>',
     aiSummary:
       'The team focused on Q3 priorities with emphasis on Dark Mode delivery and reducing mobile API latency. A key decision was to treat latency as sprint P0.'
   },

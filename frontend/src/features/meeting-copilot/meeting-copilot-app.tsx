@@ -7,7 +7,6 @@ import {
   IconCalendarEvent,
   IconCircleFilled,
   IconClock,
-  IconCircleCheckFilled,
   IconFileText,
   IconFolders,
   IconInfoCircle,
@@ -18,7 +17,6 @@ import {
   IconSearch,
   IconSettings,
   IconSparkles,
-  IconTag,
   IconUsers
 } from '@tabler/icons-react';
 
@@ -26,8 +24,6 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { RichTextEditor } from '@/components/editor';
 import ThemeToggle from '@/components/ui/theme-toggle';
 import { cn } from '@/lib/utils';
 
@@ -47,6 +43,7 @@ import {
 } from './copilot-styles';
 import './copilot-theme.css';
 import CalendarScreen from './calendar-screen';
+import MeetingDetailScreen from './meeting-detail/meeting-detail-screen';
 import { meetings, quickAiAnswers, starterTranscript } from './mock-data';
 import type { AiAnswer, Meeting, TranscriptLine } from './types';
 
@@ -65,12 +62,6 @@ const SIDEBAR_LINKS: Array<{
   { id: 'calendar', label: 'Calendar', icon: IconCalendarEvent },
   { id: 'settings', label: 'Settings', icon: IconSettings }
 ];
-
-function priorityVariant(priority: 'high' | 'medium' | 'low') {
-  if (priority === 'high') return 'destructive';
-  if (priority === 'medium') return 'default';
-  return 'outline';
-}
 
 const QUICK_ASK_PROMPTS = [
   'Who mentioned pricing discussion?',
@@ -523,201 +514,6 @@ function LiveScreen({
   );
 }
 
-function DetailScreen({
-  meeting,
-  aiAnswers,
-  setView,
-  detailAskInput,
-  setDetailAskInput,
-  onAskAi,
-  isAsking,
-  askError
-}: {
-  meeting: Meeting;
-  aiAnswers: AiAnswer[];
-  setView: (view: View) => void;
-  detailAskInput: string;
-  setDetailAskInput: (value: string) => void;
-  onAskAi: (question?: string) => Promise<void>;
-  isAsking: boolean;
-  askError: string | null;
-}) {
-  return (
-    <section className='grid gap-4 xl:grid-cols-[1fr_320px]'>
-      <Card className={cn(SURFACE, 'xl:col-span-2')}>
-        <CardHeader className='space-y-3'>
-          <button
-            type='button'
-            onClick={() => {
-              setView('dashboard');
-            }}
-            className='text-left text-xs text-muted-foreground hover:text-foreground'
-          >
-            ← Back to Dashboard
-          </button>
-          <div className='flex flex-wrap items-center justify-between gap-2'>
-            <CardTitle className='text-xl text-foreground'>{meeting.title}</CardTitle>
-            <div className='flex flex-wrap gap-2'>
-              <Button size='sm' variant='outline' className='border-border text-foreground'>
-                Share
-              </Button>
-              <Button size='sm' variant='outline' className='border-border text-foreground'>
-                Export
-              </Button>
-              <Button size='sm' variant='outline' className='border-border text-foreground'>
-                Email
-              </Button>
-              <Button size='sm' variant='outline' className='border-border text-foreground'>
-                Slack
-              </Button>
-            </div>
-          </div>
-          <p className='text-sm text-muted-foreground'>
-            {meeting.startedAt} • {meeting.duration} • {meeting.participantCount} participants
-          </p>
-          <div className='flex flex-wrap gap-1'>
-            {meeting.tags.map((tag) => (
-              <Badge
-                key={`detail-${tag}`}
-                variant='outline'
-                className='border-border bg-muted/70 text-muted-foreground'
-              >
-                #{tag}
-              </Badge>
-            ))}
-            <Button size='sm' variant='ghost' className='text-foreground/80'>
-              <IconTag className='mr-1 size-4' />
-              Add tag
-            </Button>
-          </div>
-        </CardHeader>
-      </Card>
-
-      <Card className={SURFACE}>
-        <CardContent>
-          <Tabs defaultValue='summary' className='w-full'>
-            <TabsList variant='line' className='mb-4 w-full justify-start rounded-xl bg-muted/60 p-1'>
-              <TabsTrigger value='summary'>Summary</TabsTrigger>
-              <TabsTrigger value='transcript'>Transcript</TabsTrigger>
-              <TabsTrigger value='actions'>Action Items</TabsTrigger>
-              <TabsTrigger value='notes'>Notes</TabsTrigger>
-              <TabsTrigger value='chat'>AI Chat</TabsTrigger>
-            </TabsList>
-            <TabsContent value='summary' className='space-y-3'>
-              <div>
-                <h3 className='text-sm font-semibold text-foreground'>Executive Summary</h3>
-                <p className='text-sm text-foreground/80'>{meeting.aiSummary}</p>
-              </div>
-              <div>
-                <h3 className='text-sm font-semibold text-foreground'>Key Decisions</h3>
-                <ul className='list-inside list-disc space-y-1 text-sm text-foreground/80'>
-                  {meeting.decisions.map((decision) => (
-                    <li key={decision}>{decision}</li>
-                  ))}
-                </ul>
-              </div>
-            </TabsContent>
-            <TabsContent value='transcript' className='space-y-2'>
-              {meeting.transcript.map((line) => (
-                <div key={line.id} className='rounded-md border border-border/70 bg-muted/70 p-2'>
-                  <p className='text-xs text-muted-foreground'>
-                    [{line.timestamp}] {line.speaker}
-                  </p>
-                  <p className='text-sm text-foreground/85'>{line.text}</p>
-                </div>
-              ))}
-            </TabsContent>
-            <TabsContent value='actions' className='space-y-2'>
-              {meeting.actionItems.map((item) => (
-                <div key={item.id} className='rounded-md border border-border/70 bg-muted/70 p-2'>
-                  <div className='flex flex-wrap items-center gap-2'>
-                    <Badge variant={priorityVariant(item.priority)}>{item.priority}</Badge>
-                    <p className='text-xs text-muted-foreground'>{item.timestamp}</p>
-                  </div>
-                  <p className='mt-1 text-sm text-foreground/85'>
-                    @{item.assignee} - {item.task}
-                  </p>
-                </div>
-              ))}
-            </TabsContent>
-            <TabsContent value='notes'>
-              <RichTextEditor
-                content={meeting.notes}
-                onChange={(content) => {
-                  // TODO: Save notes to backend
-                  console.log('Notes updated:', content);
-                }}
-                placeholder='Add meeting notes, key takeaways, or follow-up items...'
-                minHeight='400px'
-              />
-            </TabsContent>
-            <TabsContent value='chat' className='space-y-2'>
-              <form
-                className='mb-2 flex gap-2'
-                onSubmit={async (event) => {
-                  event.preventDefault();
-                  await onAskAi(detailAskInput);
-                  setDetailAskInput('');
-                }}
-              >
-                <Input
-                  value={detailAskInput}
-                  onChange={(event) => {
-                    setDetailAskInput(event.currentTarget.value);
-                  }}
-                  placeholder='Ask this meeting anything...'
-                  className={COPILOT_INPUT}
-                />
-                <Button type='submit' disabled={isAsking} className='bg-primary text-primary-foreground'>
-                  Ask
-                </Button>
-              </form>
-              {askError && (
-                <p className='inline-flex items-center gap-1 text-xs text-[#F59E0B]'>
-                  <IconInfoCircle className='size-3.5' />
-                  {askError}
-                </p>
-              )}
-              {aiAnswers.map((answer) => (
-                <div key={answer.id} className='rounded-md border border-border/70 bg-muted/70 p-2'>
-                  <p className='text-xs text-muted-foreground'>{answer.question}</p>
-                  <p className='text-sm text-foreground/85'>{answer.answer}</p>
-                  <p className='text-xs text-[#06B6D4]'>Timestamp: {answer.timestamp}</p>
-                </div>
-              ))}
-            </TabsContent>
-          </Tabs>
-        </CardContent>
-      </Card>
-
-      <Card className={SURFACE}>
-        <CardHeader>
-          <CardTitle className='text-foreground'>AI Insights</CardTitle>
-        </CardHeader>
-        <CardContent className='space-y-3'>
-          <div>
-            <p className='text-xs font-semibold tracking-[0.15em] text-muted-foreground uppercase'>Action Items</p>
-            {meeting.actionItems.map((item) => (
-              <p key={`insight-${item.id}`} className='mt-1 text-sm text-foreground/80'>
-                @{item.assignee} - {item.task} ({item.timestamp})
-              </p>
-            ))}
-          </div>
-          <div>
-            <p className='text-xs font-semibold tracking-[0.15em] text-muted-foreground uppercase'>Quick Stats</p>
-            <p className='mt-1 text-sm text-foreground/80'>Speaking time: John 45%, Sarah 30%, Marcus 25%</p>
-            <p className='text-sm text-foreground/80'>Total sentences: 248 • Avg speed: 145 words/min</p>
-          </div>
-          <div className='rounded-lg border border-emerald-500/40 bg-[var(--copilot-success-bg)] p-2 text-xs text-[var(--copilot-success-text)]'>
-            <IconCircleCheckFilled className='mr-1 inline size-3.5' />
-            Meeting analyzed successfully. AI confidence is high.
-          </div>
-        </CardContent>
-      </Card>
-    </section>
-  );
-}
-
 function FloatingWidget({
   isRecording,
   elapsedSeconds,
@@ -1106,7 +902,7 @@ export default function MeetingCopilotApp() {
               />
             )}
             {view === 'detail' && (
-              <DetailScreen
+              <MeetingDetailScreen
                 meeting={selectedMeeting}
                 aiAnswers={aiAnswers}
                 setView={setView}

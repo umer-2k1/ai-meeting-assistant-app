@@ -2,6 +2,7 @@
 
 - `project-scope.md` - requirement coverage and implemented scope
 - `milestones.md` - milestone baseline with status and scope
+- `meeting-details.md` - meeting detail screen features, data model, and pending integrations
 - `completed.md` - shipped items done in the current implementation
 - `in-progress.md` - active workstreams currently being built
 - `pending.md` - planned but not started items

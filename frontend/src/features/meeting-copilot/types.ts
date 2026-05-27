@@ -44,14 +44,24 @@ export type Meeting = {
   id: string;
   title: string;
   status: MeetingStatus;
+  /** Human-readable date shown in detail header, e.g. May 27, 2026 */
+  displayDate?: string;
   startedAt: string;
   duration: string;
+  /** Parsed duration for audio player (seconds) */
+  audioDurationSeconds?: number;
+  /** Optional recording URL when backend provides it */
+  audioUrl?: string;
   participantCount: number;
   summarySnippet: string;
+  /** Rich HTML summary (Tiptap-compatible) for Summary tab */
+  summaryHtml?: string;
   tags: string[];
   decisions: string[];
   transcript: TranscriptLine[];
   actionItems: ActionItem[];
+  /** User notes — plain text or HTML */
   notes: string;
   aiSummary: string;
+  isFavorite?: boolean;
 };

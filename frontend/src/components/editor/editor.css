@@ -1,7 +1,36 @@
+/* Pull in theme + design tokens so @apply resolves shadcn utilities in this entry */
+@reference '../../styles/global.css';
+
 /* Rich Text Editor Styles - Notion-like appearance with theme support */
 
 .editor-container {
   @apply text-foreground;
+}
+
+.editor-container--document .editor-content {
+  @apply px-0 py-2;
+}
+
+/* Callout block (used in AI summary HTML) */
+.editor-content .editor-callout {
+  @apply my-4 flex gap-3 rounded-xl border border-border/70 bg-muted/40 px-4 py-3 text-sm italic text-foreground/90;
+}
+
+.editor-content .editor-callout-icon {
+  @apply mt-0.5 shrink-0 text-primary;
+}
+
+.editor-content .editor-tip-list {
+  @apply my-4 list-none space-y-2 pl-0;
+}
+
+.editor-content .editor-tip-list li {
+  @apply flex items-start gap-2 pl-0 text-sm italic text-foreground/85;
+}
+
+.editor-content .editor-tip-list li::before {
+  content: '💡';
+  @apply shrink-0;
 }
 
 .editor-wrapper {

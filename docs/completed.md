@@ -18,6 +18,16 @@
   - Ask AI interaction
   - Intelligence side panel
 - Meeting detail page implemented with multi-tab analysis and notes.
+- **Meeting detail (Spellar-style) refresh:**
+  - Header with date, favorites, and actions
+  - Colorful tag chips
+  - Audio player (scrubber, speed, skip)
+  - Share / Email / Web Link / Copy actions
+  - Export bar (Notion, Docs, Craft, Obsidian, Drive, Confluence)
+  - Tabs: Summary, My Notes, Transcript, Actions (count), AI Chat
+  - Rich HTML Summary tab (callouts, highlights, blockquotes)
+  - My Notes via centralized Tiptap editor
+  - Documented in `docs/meeting-details.md`
 - Calendar and Settings screens implemented with requirement-aligned content.
 - Floating recording widget implemented.
 - UI upgraded to a sleeker, glassy deep-blue theme aligned with `design-theme.png`:
