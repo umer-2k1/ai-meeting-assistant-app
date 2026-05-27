@@ -149,3 +149,18 @@ vite.config.ts.timestamp-*
 frontend/node_modules/
 frontend/dist/
 frontend/.env
+
+
+# Backend
+backend/node_modules/
+backend/dist/
+backend/.env
+
+
+# Environment
+frontend/.env
+backend/.env
+
+# Build folders
+frontend/dist/
+backend/build/
