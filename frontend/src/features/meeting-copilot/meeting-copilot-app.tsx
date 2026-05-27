@@ -872,7 +872,14 @@ export default function MeetingCopilotApp() {
             </div>
           </header>
 
-          <main className='min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 md:p-6'>
+          <main
+            className={cn(
+              'min-h-0 flex-1 p-4 md:p-6',
+              view === 'detail'
+                ? 'flex min-h-0 flex-col overflow-hidden overscroll-contain'
+                : 'overflow-y-auto overscroll-contain'
+            )}
+          >
             {view === 'dashboard' && (
               <DashboardScreen
                 filteredMeetings={filteredMeetings}

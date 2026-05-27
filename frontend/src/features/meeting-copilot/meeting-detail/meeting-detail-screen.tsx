@@ -7,12 +7,14 @@ import {
   IconInfoCircle,
   IconLink,
   IconMail,
+  IconRefresh,
   IconShare2,
   IconSparkles,
   IconStar,
   IconStarFilled,
   IconTag,
-  IconTrash
+  IconTrash,
+  IconUsers
 } from '@tabler/icons-react';
 import { toast } from 'sonner';
 
@@ -58,6 +60,12 @@ function buildSummaryHtml(meeting: Meeting): string {
   `;
 }
 
+function transcriptToPlainText(m: Meeting): string {
+  return m.transcript
+    .map((line) => `[${line.timestamp}] ${line.speaker}\n${line.text}`)
+    .join('\n\n');
+}
+
 type MeetingDetailScreenProps = {
   meeting: Meeting;
   aiAnswers: AiAnswer[];
@@ -68,6 +76,10 @@ type MeetingDetailScreenProps = {
   isAsking: boolean;
   askError: string | null;
 };
+
+/** Shared by tab panes that fill the card and scroll internally */
+const TAB_PANE =
+  'mt-0 flex min-h-0 flex-1 flex-col outline-none data-[state=inactive]:hidden';
 
 export default function MeetingDetailScreen({
   meeting,
@@ -86,6 +98,7 @@ export default function MeetingDetailScreen({
   const displayDate = meeting.displayDate ?? meeting.startedAt;
   const audioSeconds = meeting.audioDurationSeconds ?? 60;
   const actionCount = meeting.actionItems.length;
+  const speakerCount = new Set(meeting.transcript.map((l) => l.speaker)).size;
 
   const copyLink = async () => {
     const url = `${window.location.origin}/meetings/${meeting.id}`;
@@ -100,9 +113,9 @@ export default function MeetingDetailScreen({
   };
 
   return (
-    <section className='mx-auto max-w-4xl space-y-5'>
+    <section className='mx-auto flex max-w-4xl min-h-0 flex-1 flex-col gap-5'>
       {/* Header */}
-      <div className='space-y-4'>
+      <div className='shrink-0 space-y-4'>
         <button
           type='button'
           onClick={() => setView('dashboard')}
@@ -180,10 +193,10 @@ export default function MeetingDetailScreen({
       </div>
 
       {/* Audio */}
-      <MeetingAudioPlayer durationSeconds={audioSeconds} audioUrl={meeting.audioUrl} />
+      <MeetingAudioPlayer durationSeconds={audioSeconds} audioUrl={meeting.audioUrl} className='shrink-0' />
 
       {/* Primary actions */}
-      <div className='flex flex-wrap gap-2'>
+      <div className='flex shrink-0 flex-wrap gap-2'>
         <Button
           type='button'
           size='sm'
@@ -221,15 +234,15 @@ export default function MeetingDetailScreen({
       </div>
 
       {/* Export destinations */}
-      <MeetingExportBar meetingTitle={meeting.title} />
+      <MeetingExportBar meetingTitle={meeting.title} className='shrink-0' />
 
       {/* Tabs */}
-      <Card className={COPILOT_SURFACE}>
-        <CardContent className='pt-6'>
-          <Tabs defaultValue='summary' className='w-full'>
+      <Card className={cn(COPILOT_SURFACE, 'flex min-h-0 flex-1 flex-col')}>
+        <CardContent className='flex min-h-0 flex-1 flex-col pt-6'>
+          <Tabs defaultValue='summary' className='flex w-full min-h-0 flex-1 flex-col'>
             <TabsList
               variant='line'
-              className='mb-6 h-auto w-full flex-wrap justify-start gap-1 border-b border-border/60 bg-transparent p-0 pb-0'
+              className='mb-4 h-auto w-full shrink-0 flex-wrap justify-start gap-1 border-b border-border/60 bg-transparent p-0 pb-0'
             >
               <TabsTrigger
                 value='summary'
@@ -264,44 +277,111 @@ export default function MeetingDetailScreen({
               </TabsTrigger>
             </TabsList>
 
-            <TabsContent value='summary' className='mt-0'>
+            <TabsContent value='summary' className={cn(TAB_PANE, 'overflow-y-auto overscroll-contain')}>
               <RichTextEditor
                 content={buildSummaryHtml(meeting)}
                 editable={false}
                 showToolbar={false}
                 variant='document'
-                minHeight='320px'
+                minHeight='200px'
+                paneScroll
               />
             </TabsContent>
 
-            <TabsContent value='notes' className='mt-0'>
+            <TabsContent value='notes' className={cn(TAB_PANE, 'overflow-y-auto overscroll-contain')}>
               <RichTextEditor
                 content={myNotes}
                 onChange={setMyNotes}
                 placeholder='Capture your own notes, follow-ups, and ideas…'
                 variant='document'
-                minHeight='400px'
+                minHeight='240px'
+                paneScroll
               />
             </TabsContent>
 
-            <TabsContent value='transcript' className='mt-0 space-y-2'>
-              {meeting.transcript.map((line) => (
-                <div
-                  key={line.id}
-                  className={cn(
-                    'rounded-lg border border-border/70 p-3',
-                    line.highlighted ? 'border-primary/40 bg-primary/5' : 'bg-muted/40'
-                  )}
-                >
-                  <p className='text-xs text-muted-foreground'>
-                    {line.timestamp} · {line.speaker}
+            <TabsContent value='transcript' className={cn(TAB_PANE, 'overflow-hidden')}>
+              <div className='flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border/70 bg-muted/20 shadow-sm'>
+                <div className='flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border/60 bg-card/40 px-4 py-3'>
+                  <p className='text-sm font-medium text-foreground'>
+                    Transcript{' '}
+                    <span className='font-normal text-muted-foreground'>
+                      · {speakerCount} {speakerCount === 1 ? 'speaker' : 'speakers'}
+                    </span>
                   </p>
-                  <p className='mt-1 text-sm text-foreground/90'>{line.text}</p>
+                  <div className='flex flex-wrap items-center gap-2'>
+                    <Button
+                      type='button'
+                      size='sm'
+                      variant='outline'
+                      className={cn('h-8 rounded-full text-xs', COPILOT_BTN_OUTLINE)}
+                      onClick={() =>
+                        toast.info('Reanalyse transcript', {
+                          description: 'Will re-run diarization and ASR when the pipeline is connected.'
+                        })
+                      }
+                    >
+                      <IconRefresh className='mr-1 size-3.5' />
+                      Reanalyse
+                    </Button>
+                    <Button
+                      type='button'
+                      size='sm'
+                      variant='outline'
+                      className={cn('h-8 rounded-full text-xs', COPILOT_BTN_OUTLINE)}
+                      onClick={() =>
+                        toast.info('Manage speakers', {
+                          description: 'Rename speakers and merge profiles in a future release.'
+                        })
+                      }
+                    >
+                      <IconUsers className='mr-1 size-3.5' />
+                      Manage Speakers
+                    </Button>
+                    <Button
+                      type='button'
+                      size='sm'
+                      variant='outline'
+                      className={cn('h-8 rounded-full text-xs', COPILOT_BTN_OUTLINE)}
+                      onClick={async () => {
+                        await navigator.clipboard.writeText(transcriptToPlainText(meeting));
+                        toast.success('Transcript copied');
+                      }}
+                    >
+                      <IconCopy className='mr-1 size-3.5' />
+                      Copy All
+                    </Button>
+                  </div>
                 </div>
-              ))}
+
+                <div className='h-0.5 w-full shrink-0 bg-primary/35' aria-hidden />
+
+                <div className='min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-3'>
+                  {meeting.transcript.length === 0 ? (
+                    <p className='text-sm text-muted-foreground'>No transcript lines yet.</p>
+                  ) : (
+                    meeting.transcript.map((line) => (
+                      <article
+                        key={line.id}
+                        className={cn(
+                          'border-b border-border/50 py-4 last:border-b-0',
+                          line.highlighted && 'border-l-2 border-l-primary bg-primary/5 pl-3'
+                        )}
+                      >
+                        <div className='flex flex-wrap items-baseline gap-x-2 gap-y-0.5'>
+                          <span className='font-mono text-[11px] tabular-nums tracking-wide text-muted-foreground'>
+                            {line.timestamp}
+                          </span>
+                          <span className='text-sm font-medium text-primary'>{line.speaker}</span>
+                        </div>
+                        <p className='mt-1.5 text-[15px] leading-relaxed text-foreground/95'>{line.text}</p>
+                      </article>
+                    ))
+                  )}
+                </div>
+              </div>
             </TabsContent>
 
-            <TabsContent value='actions' className='mt-0 space-y-2'>
+            <TabsContent value='actions' className={cn(TAB_PANE, 'space-y-2 overflow-y-auto overscroll-contain pr-0.5')}>
               {meeting.actionItems.map((item) => (
                 <div
                   key={item.id}
@@ -337,9 +417,9 @@ export default function MeetingDetailScreen({
               ))}
             </TabsContent>
 
-            <TabsContent value='chat' className='mt-0 space-y-3'>
+            <TabsContent value='chat' className={cn(TAB_PANE, 'overflow-hidden')}>
               <form
-                className='flex gap-2'
+                className='flex shrink-0 gap-2'
                 onSubmit={async (event) => {
                   event.preventDefault();
                   await onAskAi(detailAskInput);
@@ -357,11 +437,12 @@ export default function MeetingDetailScreen({
                 </Button>
               </form>
               {askError && (
-                <p className='inline-flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400'>
+                <p className='inline-flex shrink-0 items-center gap-1 text-xs text-amber-600 dark:text-amber-400'>
                   <IconInfoCircle className='size-3.5' />
                   {askError}
                 </p>
               )}
+              <div className='mt-3 min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain pr-0.5'>
               {aiAnswers.length === 0 ? (
                 <p className='text-sm text-muted-foreground'>
                   Ask about decisions, speakers, or action items from this meeting.
@@ -375,6 +456,7 @@ export default function MeetingDetailScreen({
                   </div>
                 ))
               )}
+              </div>
             </TabsContent>
           </Tabs>
         </CardContent>

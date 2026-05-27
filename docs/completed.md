@@ -27,6 +27,7 @@
   - Tabs: Summary, My Notes, Transcript, Actions (count), AI Chat
   - Rich HTML Summary tab (callouts, highlights, blockquotes)
   - My Notes via centralized Tiptap editor
+  - Transcript tab read-only (theme tokens, no rich-text editor)
   - Documented in `docs/meeting-details.md`
 - Calendar and Settings screens implemented with requirement-aligned content.
 - Floating recording widget implemented.

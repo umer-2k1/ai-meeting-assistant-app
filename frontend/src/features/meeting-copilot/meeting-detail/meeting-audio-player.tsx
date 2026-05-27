@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
   IconPlayerPause,
@@ -13,8 +13,9 @@ import { cn } from '@/lib/utils';
 const PLAYBACK_RATES = [0.75, 1, 1.25, 1.5, 2] as const;
 
 function formatTime(seconds: number) {
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
+  const safe = Number.isFinite(seconds) ? Math.max(0, seconds) : 0;
+  const m = Math.floor(safe / 60);
+  const s = Math.floor(safe % 60);
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
@@ -30,67 +31,142 @@ export default function MeetingAudioPlayer({
   className
 }: MeetingAudioPlayerProps) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const effectiveDurationRef = useRef(Math.max(0.01, durationSeconds > 0 ? durationSeconds : 1));
+
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
+  const [effectiveDuration, setEffectiveDuration] = useState(() => effectiveDurationRef.current);
   const [rateIndex, setRateIndex] = useState(1);
 
   const playbackRate = PLAYBACK_RATES[rateIndex] ?? 1;
-  const duration = audioRef.current?.duration && Number.isFinite(audioRef.current.duration)
-    ? audioRef.current.duration
-    : durationSeconds;
-  const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
+
+  const clampTime = useCallback((t: number, max?: number) => {
+    const cap = max ?? effectiveDurationRef.current;
+    return Math.min(Math.max(0, t), cap);
+  }, []);
+
+  const applyDurationFromAudio = useCallback(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    const d = audio.duration;
+    if (Number.isFinite(d) && d > 0) {
+      effectiveDurationRef.current = d;
+      setEffectiveDuration(d);
+    } else {
+      const fallback = Math.max(0.01, durationSeconds > 0 ? durationSeconds : 1);
+      effectiveDurationRef.current = fallback;
+      setEffectiveDuration(fallback);
+    }
+  }, [durationSeconds]);
+
+  useEffect(() => {
+    const fallback = Math.max(0.01, durationSeconds > 0 ? durationSeconds : 1);
+    effectiveDurationRef.current = fallback;
+    setEffectiveDuration(fallback);
+    setCurrentTime(0);
+    setIsPlaying(false);
+  }, [audioUrl, durationSeconds]);
 
   useEffect(() => {
     const audio = audioRef.current;
-    if (!audio) return;
+    if (!audio || !audioUrl) return;
 
-    const onTimeUpdate = () => setCurrentTime(audio.currentTime);
-    const onEnded = () => setIsPlaying(false);
+    const onTimeUpdate = () => {
+      setCurrentTime(clampTime(audio.currentTime));
+    };
+    const onEnded = () => {
+      setIsPlaying(false);
+      const d = audio.duration;
+      const end = Number.isFinite(d) && d > 0 ? d : effectiveDurationRef.current;
+      setCurrentTime(end);
+    };
+    const onLoadedMetadata = () => {
+      applyDurationFromAudio();
+      setCurrentTime(clampTime(audio.currentTime));
+    };
+    const onDurationChange = () => {
+      applyDurationFromAudio();
+    };
 
     audio.addEventListener('timeupdate', onTimeUpdate);
     audio.addEventListener('ended', onEnded);
+    audio.addEventListener('loadedmetadata', onLoadedMetadata);
+    audio.addEventListener('durationchange', onDurationChange);
+
+    if (audio.readyState >= 1) {
+      applyDurationFromAudio();
+    }
+
     return () => {
       audio.removeEventListener('timeupdate', onTimeUpdate);
       audio.removeEventListener('ended', onEnded);
+      audio.removeEventListener('loadedmetadata', onLoadedMetadata);
+      audio.removeEventListener('durationchange', onDurationChange);
     };
-  }, [audioUrl]);
+  }, [audioUrl, applyDurationFromAudio, clampTime]);
 
   useEffect(() => {
-    if (audioRef.current) {
-      audioRef.current.playbackRate = playbackRate;
+    const audio = audioRef.current;
+    if (audio) {
+      audio.playbackRate = playbackRate;
     }
   }, [playbackRate]);
 
+  /** Demo playback when no file URL — advances currentTime so the slider fill matches elapsed time. */
+  useEffect(() => {
+    if (audioUrl || !isPlaying) return;
+
+    const tickMs = 100;
+    const id = window.setInterval(() => {
+      setCurrentTime((prev) => {
+        const max = effectiveDurationRef.current;
+        const next = prev + tickMs / 1000;
+        if (next >= max - 1e-3) {
+          window.setTimeout(() => setIsPlaying(false), 0);
+          return max;
+        }
+        return next;
+      });
+    }, tickMs);
+
+    return () => clearInterval(id);
+  }, [audioUrl, isPlaying]);
+
   const togglePlay = async () => {
     const audio = audioRef.current;
-    if (!audio || !audioUrl) {
-      setIsPlaying((prev) => !prev);
-      if (!audioUrl) {
-        setCurrentTime((t) => (isPlaying ? t : Math.min(t + 1, duration)));
+
+    if (audioUrl && audio) {
+      if (isPlaying) {
+        audio.pause();
+        setIsPlaying(false);
+      } else {
+        try {
+          await audio.play();
+          setIsPlaying(true);
+        } catch {
+          setIsPlaying(false);
+        }
       }
       return;
     }
 
-    if (isPlaying) {
-      audio.pause();
-      setIsPlaying(false);
-    } else {
-      await audio.play();
-      setIsPlaying(true);
+    setIsPlaying((prev) => !prev);
+  };
+
+  const seekSeconds = (seconds: number) => {
+    const next = clampTime(seconds);
+    setCurrentTime(next);
+    if (audioRef.current && audioUrl) {
+      audioRef.current.currentTime = next;
     }
   };
 
-  const seek = (value: number) => {
-    const next = (value / 100) * duration;
-    setCurrentTime(next);
-    if (audioRef.current) audioRef.current.currentTime = next;
+  const skip = (delta: number) => {
+    seekSeconds(currentTime + delta);
   };
 
-  const skip = (delta: number) => {
-    const next = Math.max(0, Math.min(duration, currentTime + delta));
-    setCurrentTime(next);
-    if (audioRef.current) audioRef.current.currentTime = next;
-  };
+  const rangeMax = Math.max(0.01, effectiveDuration);
+  const rangeValue = clampTime(currentTime, rangeMax);
 
   return (
     <div
@@ -99,7 +175,15 @@ export default function MeetingAudioPlayer({
         className
       )}
     >
-      {audioUrl ? <audio ref={audioRef} src={audioUrl} preload='metadata' /> : null}
+      {audioUrl ? (
+        <audio
+          key={audioUrl}
+          ref={audioRef}
+          src={audioUrl}
+          preload='metadata'
+          playsInline
+        />
+      ) : null}
 
       <Button
         type='button'
@@ -116,15 +200,17 @@ export default function MeetingAudioPlayer({
         <input
           type='range'
           min={0}
-          max={100}
-          value={progress}
-          onChange={(e) => seek(Number(e.currentTarget.value))}
+          max={rangeMax}
+          step={0.01}
+          value={rangeValue}
+          onInput={(e) => seekSeconds(Number(e.currentTarget.value))}
+          onChange={(e) => seekSeconds(Number(e.currentTarget.value))}
           className='h-1.5 w-full cursor-pointer appearance-none rounded-full bg-border accent-primary'
           aria-label='Playback position'
         />
         <div className='flex justify-between text-xs text-muted-foreground tabular-nums'>
           <span>{formatTime(currentTime)}</span>
-          <span>{formatTime(duration)}</span>
+          <span>{formatTime(effectiveDuration)}</span>
         </div>
       </div>
 
@@ -163,8 +249,8 @@ export default function MeetingAudioPlayer({
 
       {!audioUrl && (
         <p className='w-full text-xs text-muted-foreground'>
-          Demo playback — attach <code className='text-foreground/80'>audioUrl</code> on the meeting
-          for real audio.
+          Demo playback — attach <code className='text-foreground/80'>audioUrl</code> on the meeting for
+          real audio. Slider fill matches elapsed time against the meeting duration.
         </p>
       )}
     </div>

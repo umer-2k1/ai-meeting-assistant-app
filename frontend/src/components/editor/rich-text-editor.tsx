@@ -11,6 +11,7 @@ import { useEffect } from 'react';
 
 import { cn } from '@/lib/utils';
 
+import { ClassedParagraph } from './classed-paragraph';
 import { EditorToolbar } from './editor-toolbar';
 import './editor.css';
 
@@ -21,6 +22,13 @@ export interface RichTextEditorProps {
   editable?: boolean;
   className?: string;
   minHeight?: string;
+  /** Cap editor body height; enables internal scroll (toolbar stays fixed when shown). */
+  maxHeight?: string;
+  /**
+   * When true, the prose area does not scroll internally — the parent should use
+   * `overflow-y-auto` + `max-h-*` so one scrollbar controls the whole tab.
+   */
+  paneScroll?: boolean;
   autofocus?: boolean;
   /** Hide formatting toolbar (e.g. read-only summary) */
   showToolbar?: boolean;
@@ -45,6 +53,7 @@ export function useRichTextEditor(content: string, config: EditorConfig = {}) {
   return useEditor({
     extensions: [
       StarterKit.configure({
+        paragraph: false,
         heading: {
           levels: [1, 2, 3]
         },
@@ -54,6 +63,7 @@ export function useRichTextEditor(content: string, config: EditorConfig = {}) {
           }
         }
       }),
+      ClassedParagraph,
       Placeholder.configure({
         placeholder: placeholder ?? 'Start typing...',
         emptyEditorClass: 'is-editor-empty'
@@ -109,9 +119,11 @@ export function RichTextEditor({
   editable = true,
   className,
   minHeight = '200px',
+  maxHeight,
   autofocus = false,
   showToolbar = true,
-  variant = 'default'
+  variant = 'default',
+  paneScroll = false
 }: RichTextEditorProps) {
   const editor = useRichTextEditor(content, {
     placeholder,
@@ -135,14 +147,38 @@ export function RichTextEditor({
   return (
     <div
       className={cn(
+        variant === 'document' &&
+          cn(
+            'editor-container editor-container--document',
+            paneScroll ? 'overflow-visible' : 'overflow-hidden'
+          ),
         variant === 'default' &&
-          'editor-container overflow-hidden rounded-lg border border-border bg-background',
-        variant === 'document' && 'editor-container editor-container--document overflow-hidden',
+          cn(
+            'editor-container rounded-lg border border-border bg-background',
+            paneScroll ? 'overflow-visible' : 'overflow-hidden'
+          ),
+        (maxHeight || paneScroll) && 'flex min-h-0 flex-col',
+        paneScroll && 'overflow-visible',
         className
       )}
+      style={{
+        ...(maxHeight && !paneScroll ? { maxHeight } : {}),
+        ...(paneScroll && minHeight ? { minHeight } : {})
+      }}
     >
-      {editable && showToolbar && <EditorToolbar editor={editor} />}
-      <div className='editor-wrapper' style={{ minHeight }}>
+      {editable && showToolbar && (
+        <div className='shrink-0'>
+          <EditorToolbar editor={editor} />
+        </div>
+      )}
+      <div
+        className={cn(
+          'editor-wrapper overscroll-contain',
+          paneScroll ? 'min-h-0 overflow-visible' : 'overflow-y-auto',
+          maxHeight && !paneScroll && 'min-h-0 flex-1'
+        )}
+        style={{ minHeight: paneScroll ? undefined : minHeight }}
+      >
         <EditorContent editor={editor} />
       </div>
     </div>

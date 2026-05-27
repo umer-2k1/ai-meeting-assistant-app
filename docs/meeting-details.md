@@ -10,6 +10,7 @@ Reference layout inspired by Spellar-style meeting review: header metadata, audi
 | Audio player | `frontend/src/features/meeting-copilot/meeting-detail/meeting-audio-player.tsx` |
 | Export bar | `frontend/src/features/meeting-copilot/meeting-detail/meeting-export-bar.tsx` |
 | Tag styling | `frontend/src/features/meeting-copilot/meeting-detail/tag-styles.ts` |
+| Classed paragraph (TipTap) | `frontend/src/components/editor/classed-paragraph.ts` |
 | Rich text editor | `frontend/src/components/editor/` |
 | Types | `frontend/src/features/meeting-copilot/types.ts` |
 | Mock data | `frontend/src/features/meeting-copilot/mock-data.ts` |
@@ -48,13 +49,20 @@ Reference layout inspired by Spellar-style meeting review: header metadata, audi
 
 Notion+, Docs+, Craft+, Obsidian+, Drive+, Confluence+, **Export** — each shows an info toast until integrations are wired.
 
+### Transcript tab
+
+- **Header:** `Transcript · N speakers` with **Reanalyse**, **Manage Speakers**, **Copy All** (plain text built from `meeting.transcript`).
+- **Accent:** thin bar using theme `primary` (`bg-primary/35`).
+- **Body:** read-only list — timestamp (`text-muted-foreground`, mono), speaker (`text-primary`), body copy (`text-foreground/95`). Rows flagged `highlighted` get a left rail and subtle `bg-primary/5` (no rich-text editor).
+- **Rationale:** transcript stays faithful to ASR/diarization output; rich editing stays on **My Notes** and **Summary**.
+
 ### 6. Tabs
 
 | Tab | Content | Editor |
 |-----|---------|--------|
 | **Summary** | AI-generated rich HTML | Read-only Tiptap (`variant="document"`) |
 | **My Notes** | User notes | Editable Tiptap with full toolbar |
-| **Transcript** | Speaker lines + timestamps | Plain list; highlighted lines styled |
+| **Transcript** | Read-only lines from `meeting.transcript` | None — use **My Notes** for manual highlights |
 | **Actions (N)** | Checklist action items | Local checkbox state |
 | **AI Chat** | Ask questions about the meeting | Existing `onAskAi` flow |
 
@@ -132,7 +140,7 @@ See also: `frontend/src/components/editor/README.md`
 - Action item checkboxes (local state)
 - Export destination buttons with toasts
 - Copy link / share toasts
-- Light + dark theme support
+- Transcript tab: read-only diarized lines, theme accent bar, Copy All as plain text
 
 ### ⏳ Pending (backend / integrations)
 
