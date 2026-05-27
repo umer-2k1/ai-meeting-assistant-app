@@ -16,6 +16,7 @@ import { askMeetingQuestion } from '@/features/meeting-copilot/api';
 import { meetings, starterTranscript } from '@/features/meeting-copilot/mock-data';
 import { cn } from '@/lib/utils';
 
+import { useWidgetThemeSync } from './use-widget-theme-sync';
 import { useWidgetWindowDrag } from './use-widget-window-drag';
 import { useWidgetWindowResize } from './use-widget-window-resize';
 
@@ -49,6 +50,16 @@ function WidgetLiveFrame({
         className
       )}
     >
+      {live && (
+        <>
+          <span className='widget-live-glow' aria-hidden>
+            <span className='widget-live-rotator' />
+          </span>
+          <span className='widget-live-ring' aria-hidden>
+            <span className='widget-live-rotator' />
+          </span>
+        </>
+      )}
       <div className='widget-live-frame__inner'>{children}</div>
     </div>
   );
@@ -68,9 +79,7 @@ function MessageToggleButton({
       aria-pressed={expanded}
       className={cn(
         'widget-no-drag inline-flex size-7 shrink-0 items-center justify-center rounded-full border transition',
-        expanded
-          ? 'border-[#06B6D4]/60 bg-[#0b2740]/80 text-[#67E8F9]'
-          : 'border-[#334155] bg-[#0F172A]/60 text-[#CBD5E1] hover:border-[#3B82F6]/50 hover:text-[#F8FAFC]'
+        expanded ? 'widget-message-btn widget-message-btn--active' : 'widget-message-btn'
       )}
       onClick={onClick}
     >
@@ -80,6 +89,8 @@ function MessageToggleButton({
 }
 
 export default function FloatingSystemWidget() {
+  useWidgetThemeSync();
+
   const [expanded, setExpanded] = useState(false);
   const [showHighlights, setShowHighlights] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
@@ -181,9 +192,8 @@ export default function FloatingSystemWidget() {
   }
 
   const pillShellClass = cn(
-    'flex w-full max-w-[288px] items-center justify-between gap-2 rounded-full',
-    'border border-[#334155]/90 bg-[linear-gradient(140deg,rgba(30,58,138,0.42),rgba(15,23,42,0.92))] backdrop-blur-xl',
-    isLive && 'border-transparent'
+    'widget-drag-handle widget-shell-pill flex w-full items-center justify-between gap-2 px-2 py-1.5 backdrop-blur-xl',
+    !isLive && 'border border-border'
   );
 
   if (!expanded) {
@@ -193,13 +203,10 @@ export default function FloatingSystemWidget() {
         onPointerDown={onDragPointerDown}
       >
         <WidgetLiveFrame live={isLive} variant='pill' className='w-full max-w-[288px]'>
-          <div
-            className={cn('widget-drag-handle px-2 py-1.5', pillShellClass)}
-            onPointerDown={onDragPointerDown}
-          >
+          <div className={pillShellClass} onPointerDown={onDragPointerDown}>
           <MessageToggleButton expanded={false} onClick={toggleExpanded} />
 
-          <span className='min-w-[52px] text-center font-mono text-xs font-semibold tracking-wide text-[#E2E8F0]'>
+          <span className='min-w-[52px] text-center font-mono text-xs font-semibold tracking-wide text-foreground'>
             {timerLabel}
           </span>
 
@@ -208,8 +215,8 @@ export default function FloatingSystemWidget() {
               type='button'
               aria-label={isPaused ? 'Resume recording' : 'Pause recording'}
               className={cn(
-                'widget-no-drag inline-flex size-7 items-center justify-center rounded-full border border-[#334155] bg-[#0F172A]/70 text-[#CBD5E1] transition hover:border-[#3B82F6]/50',
-                isLive && 'border-[#3B82F6]/70 text-[#93C5FD]'
+                'widget-no-drag widget-btn-icon inline-flex size-7 items-center justify-center rounded-full border transition',
+                isLive && 'border-primary/70 text-primary'
               )}
               onClick={() => {
                 void togglePause();
@@ -221,7 +228,7 @@ export default function FloatingSystemWidget() {
             <button
               type='button'
               aria-label='Stop recording'
-              className='widget-no-drag inline-flex size-7 items-center justify-center rounded-full border border-[#334155] bg-[#0F172A]/70 transition hover:border-[#EF4444]/60'
+              className='widget-no-drag widget-btn-icon inline-flex size-7 items-center justify-center rounded-full border transition hover:border-destructive/60'
               onClick={() => {
                 void stopRecording();
               }}
@@ -232,7 +239,7 @@ export default function FloatingSystemWidget() {
             <button
               type='button'
               aria-label='Open settings'
-              className='widget-no-drag inline-flex size-7 items-center justify-center rounded-full border border-[#334155] bg-[#0F172A]/70 text-[#CBD5E1] transition hover:border-[#3B82F6]/50'
+              className='widget-no-drag widget-btn-icon inline-flex size-7 items-center justify-center rounded-full border transition'
               onClick={openMainApp}
             >
               <IconAdjustmentsHorizontal className='size-3.5' />
@@ -245,16 +252,16 @@ export default function FloatingSystemWidget() {
   }
 
   return (
-    <div className='box-border flex h-full w-full p-1.5'>
-      <WidgetLiveFrame live={isLive} variant='panel' className='h-full min-h-0 w-full'>
+    <div className='flex h-full w-full min-h-0 p-1'>
+      <WidgetLiveFrame live={isLive} variant='panel' className='min-h-0 flex-1'>
         <div
           className={cn(
-            'relative flex h-full min-h-0 w-full flex-col bg-[linear-gradient(160deg,#0B1227_0%,#050A1A_100%)]',
-            isLive ? 'border border-transparent' : 'border border-[#3B82F6]/40'
+            'widget-shell-panel relative flex h-full min-h-0 w-full flex-col',
+            !isLive && 'border border-primary/40'
           )}
         >
         <div
-          className='widget-drag-handle flex shrink-0 items-center justify-between border-b border-[#334155]/70 px-4 py-3'
+          className='widget-drag-handle flex shrink-0 items-center justify-between border-b border-border/70 px-4 py-3'
           onPointerDown={onDragPointerDown}
         >
           <div className='flex items-center gap-2.5'>
@@ -262,7 +269,7 @@ export default function FloatingSystemWidget() {
             <div className='inline-flex size-8 items-center justify-center rounded-full bg-gradient-to-br from-[#1E3A8A] to-[#06B6D4] text-white'>
               <IconBolt className='size-4' />
             </div>
-            <span className='font-mono text-sm font-semibold text-[#F1F5F9]'>{timerLabel}</span>
+            <span className='font-mono text-sm font-semibold text-foreground'>{timerLabel}</span>
             {isLive && (
               <span className='rounded-full bg-[#EF4444]/20 px-2 py-0.5 text-[11px] font-medium text-[#FCA5A5]'>
                 LIVE
@@ -273,14 +280,14 @@ export default function FloatingSystemWidget() {
             <button
               type='button'
               aria-label='Pin widget'
-              className='widget-no-drag inline-flex size-8 items-center justify-center rounded-full border border-[#334155] text-[#CBD5E1]'
+              className='widget-no-drag widget-btn-icon inline-flex size-8 items-center justify-center rounded-full border'
             >
               <IconPin className='size-4' />
             </button>
             <button
               type='button'
               aria-label={isPaused ? 'Resume recording' : 'Pause recording'}
-              className='widget-no-drag inline-flex size-8 items-center justify-center rounded-full border border-[#334155] text-[#CBD5E1]'
+              className='widget-no-drag widget-btn-icon inline-flex size-8 items-center justify-center rounded-full border'
               onClick={() => {
                 void togglePause();
               }}
@@ -290,7 +297,7 @@ export default function FloatingSystemWidget() {
             <button
               type='button'
               aria-label='Stop recording'
-              className='widget-no-drag inline-flex size-8 items-center justify-center rounded-full border border-[#334155] text-[#EF4444]'
+              className='widget-no-drag widget-btn-icon inline-flex size-8 items-center justify-center rounded-full border text-destructive'
               onClick={() => {
                 void stopRecording();
               }}
@@ -301,11 +308,11 @@ export default function FloatingSystemWidget() {
         </div>
 
         <div className='widget-no-drag min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4'>
-          <div className='rounded-xl border border-[#334155]/70 bg-[#0F172A]/70 p-3'>
-            <p className='text-sm text-[#CBD5E1]'>Want to see last meeting highlights?</p>
+          <div className='widget-surface-muted rounded-xl border p-3'>
+            <p className='text-sm'>Want to see last meeting highlights?</p>
             <button
               type='button'
-              className='mt-2 rounded-full border border-[#334155] bg-[#111827] px-3 py-1.5 text-xs text-[#E2E8F0] hover:border-[#3B82F6]'
+              className='mt-2 rounded-full border border-border bg-background px-3 py-1.5 text-xs text-foreground hover:border-primary'
               onClick={() => {
                 setShowHighlights(true);
               }}
@@ -317,16 +324,16 @@ export default function FloatingSystemWidget() {
           {showHighlights && meeting && (
             <>
               <div>
-                <p className='text-sm font-semibold text-[#F8FAFC]'>
+                <p className='text-sm font-semibold text-foreground'>
                   Last Meeting: {meeting.title} 📅
                 </p>
               </div>
 
-              <div className='border-l-2 border-[#3B82F6] pl-3'>
-                <p className='mb-2 text-[11px] font-semibold tracking-[0.12em] text-[#94A3B8] uppercase'>
+              <div className='border-l-2 border-primary pl-3'>
+                <p className='widget-text-muted mb-2 text-[11px] font-semibold tracking-[0.12em] uppercase'>
                   Highlights
                 </p>
-                <ul className='space-y-1.5 text-sm text-[#CBD5E1]'>
+                <ul className='space-y-1.5 text-sm text-foreground/85'>
                   {meeting.decisions.map((decision) => (
                     <li key={decision}>• {decision}</li>
                   ))}
@@ -334,11 +341,11 @@ export default function FloatingSystemWidget() {
                 </ul>
               </div>
 
-              <div className='border-l-2 border-[#3B82F6] pl-3'>
-                <p className='mb-2 text-[11px] font-semibold tracking-[0.12em] text-[#94A3B8] uppercase'>
+              <div className='border-l-2 border-primary pl-3'>
+                <p className='widget-text-muted mb-2 text-[11px] font-semibold tracking-[0.12em] uppercase'>
                   Pending Action Items
                 </p>
-                <ul className='space-y-1.5 text-sm text-[#CBD5E1]'>
+                <ul className='space-y-1.5 text-sm text-foreground/85'>
                   {meeting.actionItems.map((item) => (
                     <li key={item.id}>
                       • @{item.assignee} {item.task.toLowerCase()}
@@ -350,24 +357,24 @@ export default function FloatingSystemWidget() {
           )}
 
           {askAnswer && (
-            <div className='rounded-lg border border-[#06B6D4]/40 bg-[#0b2740]/70 p-3 text-sm text-[#dbe8ff]'>
+            <div className='rounded-lg border border-cyan-500/40 bg-primary/10 p-3 text-sm text-foreground'>
               {askAnswer}
             </div>
           )}
         </div>
 
-        <div className='widget-no-drag shrink-0 space-y-3 border-t border-[#334155]/70 px-4 py-3'>
+        <div className='widget-no-drag shrink-0 space-y-3 border-t border-border/70 px-4 py-3'>
           <div className='flex flex-wrap items-center gap-2'>
             <button
               type='button'
-              className='rounded-full border border-[#334155] px-3 py-1.5 text-xs text-[#E2E8F0] hover:border-[#3B82F6]/50'
+              className='rounded-full border border-border bg-background px-3 py-1.5 text-xs text-foreground hover:border-primary/50'
               onClick={openMainApp}
             >
               Open summary 📄
             </button>
             <button
               type='button'
-              className='rounded-full border border-[#334155] px-3 py-1.5 text-xs text-[#E2E8F0] hover:border-[#3B82F6]/50'
+              className='rounded-full border border-border bg-background px-3 py-1.5 text-xs text-foreground hover:border-primary/50'
               onClick={openMainApp}
             >
               Send Email ✉️
@@ -375,7 +382,7 @@ export default function FloatingSystemWidget() {
           </div>
 
           <form
-            className='flex items-center gap-2 rounded-full border border-[#334155] bg-[#0F172A]/80 px-3 py-2'
+            className='widget-input-surface flex items-center gap-2 rounded-full border px-3 py-2'
             onSubmit={async (event) => {
               event.preventDefault();
               await submitQuestion();
@@ -387,19 +394,19 @@ export default function FloatingSystemWidget() {
                 setAskInput(event.currentTarget.value);
               }}
               placeholder='Ask me a question...'
-              className='flex-1 bg-transparent text-sm text-[#F8FAFC] outline-none placeholder:text-[#64748B]'
+              className='flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground'
             />
             <button
               type='submit'
               disabled={isAsking}
               aria-label='Submit question'
-              className='inline-flex size-8 items-center justify-center rounded-full bg-[#3B82F6] text-white disabled:opacity-60'
+              className='inline-flex size-8 items-center justify-center rounded-full bg-primary text-primary-foreground disabled:opacity-60'
             >
               <IconArrowUp className='size-4' />
             </button>
           </form>
 
-          <div className='flex items-center justify-between text-[11px] text-[#64748B]'>
+          <div className='widget-text-muted flex items-center justify-between text-[11px]'>
             <span className='inline-flex items-center gap-1'>
               <IconSparkles className='size-3.5' />
               AI Meeting Copilot
@@ -426,7 +433,7 @@ export default function FloatingSystemWidget() {
         <button
           type='button'
           aria-label='Resize widget'
-          className='widget-resize-handle widget-resize-corner widget-no-drag absolute right-0 bottom-0 flex size-5 items-end justify-end p-1 text-[#64748B]'
+          className='widget-resize-handle widget-resize-corner widget-no-drag widget-text-muted absolute right-0 bottom-0 flex size-5 items-end justify-end p-1'
           onPointerDown={cornerResize.onPointerDown}
         >
           <svg viewBox='0 0 12 12' className='size-3 opacity-80' aria-hidden>

@@ -2,6 +2,8 @@ type DesktopRecordingState = {
   isRecording: boolean;
   isPaused: boolean;
   elapsedSeconds: number;
+  blockedReason?: 'microphone';
+  permissionStatus?: string;
 };
 
 type DesktopTranscriptLine = {
@@ -29,9 +31,26 @@ type WidgetSizeLimits = WidgetSize & {
   maxHeight: number;
 };
 
+type ThemePreference = 'dark' | 'light' | 'system';
+
 type DesktopApi = {
   app: {
     getInfo: () => Promise<DesktopAppInfo>;
+  };
+  theme: {
+    broadcast: (preference: ThemePreference) => Promise<{ ok: boolean }>;
+    onChange: (callback: (preference: ThemePreference) => void) => () => void;
+  };
+  permissions: {
+    getAll: () => Promise<{
+      platform: string;
+      microphone: { status: string; granted: boolean; canRequest?: boolean };
+      accessibility: { status: string; granted: boolean; canRequest?: boolean };
+      notifications: { status: string; granted: boolean; canRequest?: boolean };
+    }>;
+    requestMicrophone: () => Promise<{ status: string; granted: boolean }>;
+    requestAccessibility: () => Promise<{ status: string; granted: boolean }>;
+    openSettings: (target: 'microphone' | 'accessibility' | 'notifications') => Promise<{ ok: boolean }>;
   };
   recording: {
     start: () => Promise<DesktopRecordingState>;

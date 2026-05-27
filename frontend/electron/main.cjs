@@ -2,6 +2,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { app, BrowserWindow, Menu, Tray, globalShortcut, ipcMain, screen, nativeImage } = require('electron');
 
+const permissions = require('./permissions.cjs');
+
 const APP_NAME = 'AI Meeting Copilot';
 
 const isTestMode = process.env.ELECTRON_TEST_MODE === '1';
@@ -471,7 +473,35 @@ function registerIpcHandlers() {
     versions: process.versions
   }));
 
-  ipcMain.handle('desktop:recording:start', () => startRecording());
+  ipcMain.handle('desktop:permissions:get-all', () => permissions.getAllPermissions());
+
+  ipcMain.handle('desktop:permissions:request-microphone', async () =>
+    permissions.requestMicrophonePermission()
+  );
+
+  ipcMain.handle('desktop:permissions:request-accessibility', () =>
+    permissions.requestAccessibilityPermission()
+  );
+
+  ipcMain.handle('desktop:permissions:open-settings', (_event, target) =>
+    permissions.openPermissionSettings(target)
+  );
+
+  ipcMain.handle('desktop:recording:start', async () => {
+    const mic = permissions.getMicrophonePermission();
+    if (!mic.granted) {
+      const result = await permissions.requestMicrophonePermission();
+      if (!result.granted) {
+        return {
+          ...recordingState,
+          blockedReason: 'microphone',
+          permissionStatus: result.status
+        };
+      }
+    }
+
+    return startRecording();
+  });
   ipcMain.handle('desktop:recording:pause-resume', () => pauseResumeRecording());
   ipcMain.handle('desktop:recording:stop', () => stopRecording());
   ipcMain.handle('desktop:recording:status', () => ({ ...recordingState }));
@@ -572,6 +602,11 @@ function registerIpcHandlers() {
 
   ipcMain.handle('desktop:widget:resize-end', () => {
     widgetResizeState = null;
+    return { ok: true };
+  });
+
+  ipcMain.handle('desktop:theme:broadcast', (_event, preference) => {
+    emit('theme:changed', preference);
     return { ok: true };
   });
 }

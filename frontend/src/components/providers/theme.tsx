@@ -3,8 +3,13 @@ import { createContext, use, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 
 import { storageKeys } from '@/lib/constants/keys';
+import {
+  applyResolvedTheme,
+  resolveThemePreference,
+  type ThemePreference
+} from '@/lib/theme/document-theme';
 
-type Theme = 'dark' | 'light' | 'system';
+type Theme = ThemePreference;
 
 type ThemeProvider = {
   children: ReactNode;
@@ -36,34 +41,28 @@ export default function ThemeProvider({
   });
 
   useEffect(() => {
-    const root = globalThis.document.documentElement;
-
-    const applyTheme = (resolved: 'light' | 'dark') => {
-      root.classList.remove('light', 'dark');
-      root.classList.add(resolved);
+    const applyTheme = () => {
+      applyResolvedTheme(resolveThemePreference(theme));
     };
 
     if (theme === 'system') {
       const media = globalThis.matchMedia('(prefers-color-scheme: dark)');
-      const syncSystemTheme = () => {
-        applyTheme(media.matches ? 'dark' : 'light');
-      };
-
-      syncSystemTheme();
-      media.addEventListener('change', syncSystemTheme);
+      applyTheme();
+      media.addEventListener('change', applyTheme);
       return () => {
-        media.removeEventListener('change', syncSystemTheme);
+        media.removeEventListener('change', applyTheme);
       };
     }
 
-    applyTheme(theme);
+    applyTheme();
   }, [theme]);
 
   const value = {
     theme,
-    setTheme: (theme: Theme) => {
-      localStorage.setItem(storageKey, theme);
-      setTheme(theme);
+    setTheme: (nextTheme: Theme) => {
+      localStorage.setItem(storageKey, nextTheme);
+      setTheme(nextTheme);
+      void globalThis.window.desktop?.theme?.broadcast(nextTheme);
     }
   };
 

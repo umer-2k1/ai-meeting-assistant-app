@@ -8,6 +8,18 @@ This folder contains the desktop runtime foundation for Milestone 2.
 - `preload.cjs` - secure bridge exposed to the renderer (`window.desktop`)
 - `icons/icon.png` - dock/taskbar/tray icon (generated from `public/favicon/favicon-512.webp` via `pnpm check:electron`)
 
+## macOS permissions
+
+The main process uses `systemPreferences` to read and request:
+
+- **Microphone** — `askForMediaAccess('microphone')` before recording starts
+- **Accessibility** — optional, for system-wide controls
+- **Notifications** — opens System Settings (user must enable manually)
+
+Renderer: **Settings → General → Permissions** (inspired by Granola-style permission rows).
+
+IPC: `desktop:permissions:*`
+
 ## App icon
 
 Icons are loaded from `electron/icons/` and applied to:

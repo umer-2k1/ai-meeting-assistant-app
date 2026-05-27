@@ -35,6 +35,12 @@ import { cn } from '@/lib/utils';
 
 import { askMeetingQuestion } from './api';
 import {
+  queryWebMicrophone,
+  requestDesktopMicrophone,
+  requestWebMicrophone
+} from './permissions';
+import SettingsPermissionsPanel from './settings-permissions-panel';
+import {
   COPILOT_BTN_OUTLINE,
   COPILOT_HIGHLIGHT_PANEL,
   COPILOT_INNER_PANEL,
@@ -749,10 +755,10 @@ function CalendarScreen() {
   );
 }
 
-function SettingsScreen() {
+function SettingsScreen({ isDesktop }: { isDesktop: boolean }) {
   return (
     <section className='space-y-4'>
-      <Tabs defaultValue='integrations'>
+      <Tabs defaultValue='general'>
         <TabsList className='rounded-xl border border-border/70 bg-muted/70 p-1'>
           <TabsTrigger value='general'>General</TabsTrigger>
           <TabsTrigger value='audio'>Audio</TabsTrigger>
@@ -760,9 +766,10 @@ function SettingsScreen() {
           <TabsTrigger value='integrations'>Integrations</TabsTrigger>
           <TabsTrigger value='privacy'>Privacy</TabsTrigger>
         </TabsList>
-        <TabsContent value='general'>
+        <TabsContent value='general' className='space-y-4'>
+          <SettingsPermissionsPanel isDesktop={isDesktop} />
           <Card className={SURFACE}>
-            <CardContent className='space-y-2'>
+            <CardContent className='space-y-2 pt-4'>
               <p className='text-sm text-foreground/80'>Language: English</p>
               <p className='text-sm text-foreground/80'>Time format: 12h</p>
               <p className='text-sm text-foreground/80'>Theme control available in top-right toggle.</p>
@@ -1073,24 +1080,61 @@ export default function MeetingCopilotApp() {
     setAskError(null);
     setIsRecordingPaused(false);
 
-    const desktopApi = globalThis.window.desktop;
-    if (runtimeMode === 'desktop' && desktopApi) {
-      void desktopApi.recording
-        .start()
-        .then((state) => {
-          setIsRecording(state.isRecording);
-          setIsRecordingPaused(state.isPaused);
-          setElapsedSeconds(state.elapsedSeconds);
-        })
-        .catch(() => {
-          setAskError('Desktop recording service unavailable; switched to web simulation.');
-          setRuntimeMode('web');
-          setIsRecording(true);
-        });
-      return;
-    }
+    const beginSession = () => {
+      const desktopApi = globalThis.window.desktop;
+      if (runtimeMode === 'desktop' && desktopApi) {
+        void desktopApi.recording
+          .start()
+          .then((state) => {
+            if (state.blockedReason === 'microphone') {
+              setAskError(
+                'Microphone access is required. Open Settings → General → Permissions to enable it.'
+              );
+              setView('settings');
+              return;
+            }
 
-    setIsRecording(true);
+            setIsRecording(state.isRecording);
+            setIsRecordingPaused(state.isPaused);
+            setElapsedSeconds(state.elapsedSeconds);
+          })
+          .catch(() => {
+            setAskError('Desktop recording service unavailable; switched to web simulation.');
+            setRuntimeMode('web');
+            setIsRecording(true);
+          });
+        return;
+      }
+
+      setIsRecording(true);
+    };
+
+    void (async () => {
+      if (runtimeMode === 'desktop' && globalThis.window.desktop?.permissions) {
+        const mic = await requestDesktopMicrophone();
+        if (!mic?.granted) {
+          setAskError(
+            'Microphone access is required to record. Enable it in Settings → General → Permissions.'
+          );
+          setView('settings');
+          return;
+        }
+        beginSession();
+        return;
+      }
+
+      const webMic = await queryWebMicrophone();
+      if (!webMic.granted) {
+        const requested = await requestWebMicrophone();
+        if (!requested.granted) {
+          setAskError('Microphone access was denied. Enable it in your browser site settings.');
+          setView('settings');
+          return;
+        }
+      }
+
+      beginSession();
+    })();
   };
 
   const stopRecording = () => {
@@ -1210,7 +1254,7 @@ export default function MeetingCopilotApp() {
               />
             )}
             {view === 'calendar' && <CalendarScreen />}
-            {view === 'settings' && <SettingsScreen />}
+            {view === 'settings' && <SettingsScreen isDesktop={runtimeMode === 'desktop'} />}
           </main>
         </div>
       </div>
