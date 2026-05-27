@@ -61,7 +61,9 @@ app.use('/auth', authRoutes);
 
 // API routes
 import meetingsRoutes from './routes/meetings.js';
+import liveRoutes from './routes/live.js';
 app.use('/api/meetings', meetingsRoutes);
+app.use('/api/live', liveRoutes);
 
 // Legacy endpoints - kept for backward compatibility with mock data fallback
 // Legacy endpoints - kept for backward compatibility with mock data fallback

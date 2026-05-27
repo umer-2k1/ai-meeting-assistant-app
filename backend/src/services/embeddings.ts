@@ -1,4 +1,5 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { searchTranscripts as searchTranscriptsInQdrant } from './vector-store.js';
 
 const GEMINI_API_KEY = process.env.GOOGLE_GEMINI_API_KEY;
 
@@ -81,4 +82,16 @@ ${summary.decisions.join('\n- ')}
   `.trim();
 
   return generateEmbedding(combinedText);
+}
+
+/**
+ * Search transcripts using RAG (for live chat)
+ * This wraps the vector store search with proper error handling
+ */
+export async function searchTranscripts(
+  queryEmbedding: number[],
+  meetingId?: string,
+  limit: number = 10
+) {
+  return searchTranscriptsInQdrant(queryEmbedding, meetingId, limit);
 }
