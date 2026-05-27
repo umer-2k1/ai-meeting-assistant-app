@@ -3,10 +3,14 @@ const path = require('node:path');
 const { app, BrowserWindow, Menu, Tray, globalShortcut, ipcMain, screen, nativeImage } = require('electron');
 
 const permissions = require('./permissions.cjs');
+const AudioRecordingService = require('./audio-recording-service.cjs');
 
 const APP_NAME = 'AI Meeting Copilot';
 
 const isTestMode = process.env.ELECTRON_TEST_MODE === '1';
+
+// Initialize audio recording service
+const audioService = new AudioRecordingService();
 
 const WIDGET_SIZES = {
   compact: { width: 300, height: 52 },
@@ -33,19 +37,11 @@ let widgetExpandedSize = { ...WIDGET_SIZES.expanded };
 const recordingState = {
   isRecording: false,
   isPaused: false,
-  elapsedSeconds: 0
+  elapsedSeconds: 0,
+  startTime: null,
 };
 
 let recordingTimer = null;
-let transcriptTimer = null;
-let transcriptIndex = 0;
-
-const transcriptTemplates = [
-  { speaker: 'John Martinez', text: "Let's align on Q3 launch priorities and risk mitigation." },
-  { speaker: 'Sarah Chen', text: 'We should keep monitoring mobile API latency daily.' },
-  { speaker: 'Marcus Wong', text: 'Action item: publish the release readiness checklist by Friday.' },
-  { speaker: 'John Martinez', text: 'Decision: Dark Mode ships in Q3 with phased rollout.' }
-];
 
 function resolveAppIconPath() {
   const iconsDir = path.join(__dirname, 'icons');
@@ -159,29 +155,14 @@ function syncWidgetVisibility() {
 }
 
 function startRecordingTimers() {
+  // Start elapsed time tracker
   if (!recordingTimer) {
+    recordingState.startTime = Date.now();
     recordingTimer = setInterval(() => {
       if (!recordingState.isRecording || recordingState.isPaused) return;
-      recordingState.elapsedSeconds += 1;
+      recordingState.elapsedSeconds = Math.floor((Date.now() - recordingState.startTime) / 1000);
       emitRecordingState();
     }, 1000);
-  }
-
-  if (!transcriptTimer) {
-    transcriptTimer = setInterval(() => {
-      if (!recordingState.isRecording || recordingState.isPaused) return;
-
-      const template = transcriptTemplates[transcriptIndex % transcriptTemplates.length];
-      transcriptIndex += 1;
-
-      emit('recording:transcript', {
-        id: `desktop-line-${Date.now()}`,
-        timestamp: formatTimestamp(recordingState.elapsedSeconds),
-        speaker: template.speaker,
-        text: template.text,
-        highlighted: transcriptIndex % 4 === 0
-      });
-    }, 4500);
   }
 }
 
@@ -190,35 +171,79 @@ function clearRecordingTimers() {
     clearInterval(recordingTimer);
     recordingTimer = null;
   }
-
-  if (transcriptTimer) {
-    clearInterval(transcriptTimer);
-    transcriptTimer = null;
-  }
+  recordingState.startTime = null;
 }
 
-function startRecording() {
-  recordingState.isRecording = true;
-  recordingState.isPaused = false;
-  startRecordingTimers();
-  emitRecordingStateAndSyncWidget();
-  return { ...recordingState };
+async function startRecording() {
+  try {
+    const meetingId = `meeting-${Date.now()}`;
+    
+    // Start audio recording with Deepgram
+    await audioService.startRecording(meetingId, {
+      onTranscript: (transcriptLine) => {
+        // Emit transcript to renderer
+        emit('recording:transcript', transcriptLine);
+      },
+      onError: (error) => {
+        console.error('[Recording] Error:', error);
+      },
+    });
+
+    recordingState.isRecording = true;
+    recordingState.isPaused = false;
+    startRecordingTimers();
+    emitRecordingStateAndSyncWidget();
+    
+    return { ...recordingState };
+  } catch (error) {
+    console.error('[Recording] Failed to start:', error);
+    return {
+      ...recordingState,
+      error: error.message,
+    };
+  }
 }
 
 function pauseResumeRecording() {
   if (!recordingState.isRecording) return { ...recordingState };
+  
   recordingState.isPaused = !recordingState.isPaused;
+  
+  if (recordingState.isPaused) {
+    audioService.pauseRecording();
+  } else {
+    audioService.resumeRecording();
+  }
+  
   emitRecordingState();
   return { ...recordingState };
 }
 
-function stopRecording() {
-  recordingState.isRecording = false;
-  recordingState.isPaused = false;
-  recordingState.elapsedSeconds = 0;
-  clearRecordingTimers();
-  emitRecordingStateAndSyncWidget();
-  return { ...recordingState };
+async function stopRecording() {
+  try {
+    // Stop audio service
+    const result = await audioService.stopRecording();
+    
+    recordingState.isRecording = false;
+    recordingState.isPaused = false;
+    recordingState.elapsedSeconds = 0;
+    clearRecordingTimers();
+    emitRecordingStateAndSyncWidget();
+    
+    return {
+      ...recordingState,
+      recordingPath: result.recordingPath,
+    };
+  } catch (error) {
+    console.error('[Recording] Failed to stop:', error);
+    recordingState.isRecording = false;
+    recordingState.isPaused = false;
+    recordingState.elapsedSeconds = 0;
+    clearRecordingTimers();
+    emitRecordingStateAndSyncWidget();
+    
+    return { ...recordingState, error: error.message };
+  }
 }
 
 function createMainWindow() {
