@@ -2,7 +2,7 @@
  * API client with authentication support
  */
 
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+const BACKEND_URL = import.meta.env['VITE_BACKEND_URL'] || 'http://localhost:3001';
 const TOKEN_KEY = 'ai_meeting_token';
 
 function getAuthToken(): string | null {
@@ -45,11 +45,18 @@ export async function apiRequest<T>(
       throw new Error('Authentication required');
     }
 
-    const error = await response.json().catch(() => ({ error: 'Request failed' }));
-    throw new Error(error.error || `HTTP ${response.status}`);
+    const errorBody: unknown = await response.json().catch(() => ({ error: 'Request failed' }));
+    const message =
+      typeof errorBody === 'object' &&
+      errorBody !== null &&
+      'error' in errorBody &&
+      typeof (errorBody as { error: unknown }).error === 'string'
+        ? (errorBody as { error: string }).error
+        : `HTTP ${response.status}`;
+    throw new Error(message);
   }
 
-  return response.json();
+  return response.json() as Promise<T>;
 }
 
 export const api = {

@@ -13,8 +13,9 @@ export const ClassedParagraph = Paragraph.extend({
         default: null,
         parseHTML: (element) => element.getAttribute('class'),
         renderHTML: (attributes) => {
-          if (!attributes.class) return {};
-          return { class: attributes.class };
+          const className = attributes['class'];
+          if (!className) return {};
+          return { class: className };
         }
       }
     };

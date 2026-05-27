@@ -19,7 +19,8 @@ const FALLBACK_PALETTE = [
 
 export function getTagClassName(tag: string): string {
   const key = tag.toLowerCase().replace(/\s+/g, '-');
-  if (TAG_PALETTE[key]) return TAG_PALETTE[key];
+  const paletteClass = TAG_PALETTE[key];
+  if (paletteClass) return paletteClass;
   const index = key.split('').reduce((sum, char) => sum + char.charCodeAt(0), 0);
-  return FALLBACK_PALETTE[index % FALLBACK_PALETTE.length] ?? FALLBACK_PALETTE[0];
+  return FALLBACK_PALETTE[index % FALLBACK_PALETTE.length] ?? FALLBACK_PALETTE[0]!;
 }

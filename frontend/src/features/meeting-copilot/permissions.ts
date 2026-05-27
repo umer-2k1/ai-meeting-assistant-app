@@ -21,22 +21,61 @@ export type DesktopPermissionsState = {
 
 export type PermissionTarget = 'microphone' | 'accessibility' | 'notifications';
 
+function toPermissionStatus(status: string): PermissionStatus {
+  const allowed: PermissionStatus[] = [
+    'granted',
+    'denied',
+    'not-determined',
+    'restricted',
+    'unknown',
+    'unsupported',
+  ];
+  return allowed.includes(status as PermissionStatus) ? (status as PermissionStatus) : 'unknown';
+}
+
+function toPermissionSnapshot(snapshot: {
+  status: string;
+  granted: boolean;
+  canRequest?: boolean;
+}): PermissionSnapshot {
+  return {
+    status: toPermissionStatus(snapshot.status),
+    granted: snapshot.granted,
+    ...(snapshot.canRequest !== undefined ? { canRequest: snapshot.canRequest } : {}),
+  };
+}
+
+function toDesktopPermissionsState(raw: {
+  platform: string;
+  microphone: { status: string; granted: boolean; canRequest?: boolean };
+  accessibility: { status: string; granted: boolean; canRequest?: boolean };
+  notifications: { status: string; granted: boolean; canRequest?: boolean };
+}): DesktopPermissionsState {
+  return {
+    platform: raw.platform,
+    microphone: toPermissionSnapshot(raw.microphone),
+    accessibility: toPermissionSnapshot(raw.accessibility),
+    notifications: toPermissionSnapshot(raw.notifications),
+  };
+}
+
 export async function fetchDesktopPermissions(): Promise<DesktopPermissionsState | null> {
   const api = globalThis.window.desktop?.permissions;
   if (!api) return null;
-  return api.getAll();
+  const raw = await api.getAll();
+  return toDesktopPermissionsState(raw);
 }
 
 export async function requestDesktopMicrophone(): Promise<PermissionSnapshot | null> {
   const api = globalThis.window.desktop?.permissions;
   if (!api) return null;
-  return api.requestMicrophone();
+  return toPermissionSnapshot(await api.requestMicrophone());
 }
 
 export async function requestDesktopAccessibility(): Promise<PermissionSnapshot | null> {
   const api = globalThis.window.desktop?.permissions;
   if (!api) return null;
-  return api.requestAccessibility();
+  return toPermissionSnapshot(await api.requestAccessibility());
 }
 
 export async function openDesktopPermissionSettings(target: PermissionTarget) {

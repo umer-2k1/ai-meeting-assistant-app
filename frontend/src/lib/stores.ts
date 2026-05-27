@@ -220,7 +220,7 @@ interface AIChatState {
 }
 
 export const useAIChatStore = create<AIChatState>()(
-  devtools((set) => ({
+  devtools<AIChatState>((set) => ({
     messages: [],
     isAsking: false,
     streamingMessageId: null,
@@ -246,15 +246,16 @@ export const useAIChatStore = create<AIChatState>()(
           },
         ],
       }),
-    appendToStream: (token) =>
-      set((state) => ({
-        currentAnswer: state.currentAnswer + token,
-        messages: state.messages.map((msg) =>
-          msg.id === state.streamingMessageId
-            ? { ...msg, answer: state.currentAnswer + token }
-            : msg
-        ),
-      })),
+    appendToStream: (token: string) =>
+      set((state) => {
+        const nextAnswer = state.currentAnswer + token;
+        return {
+          currentAnswer: nextAnswer,
+          messages: state.messages.map((msg) =>
+            msg.id === state.streamingMessageId ? { ...msg, answer: nextAnswer } : msg
+          ),
+        };
+      }),
     completeStream: () =>
       set((state) => ({
         isAsking: false,
@@ -264,14 +265,22 @@ export const useAIChatStore = create<AIChatState>()(
           msg.id === state.streamingMessageId ? { ...msg, isStreaming: false } : msg
         ),
       })),
-    setError: (messageId, error) =>
+    setError: (messageId: string, error: string) =>
       set((state) => ({
         isAsking: false,
+        streamingMessageId: null,
+        currentAnswer: '',
         messages: state.messages.map((msg) =>
           msg.id === messageId ? { ...msg, error, isStreaming: false } : msg
         ),
       })),
-    clearMessages: () => set({ messages: [], isAsking: false, streamingMessageId: null }),
+    clearMessages: () =>
+      set({
+        messages: [],
+        isAsking: false,
+        streamingMessageId: null,
+        currentAnswer: '',
+      }),
   }))
 );
 

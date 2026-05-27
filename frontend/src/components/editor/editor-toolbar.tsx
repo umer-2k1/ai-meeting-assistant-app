@@ -14,7 +14,6 @@ import {
   IconSeparator,
   IconLink,
   IconUnlink,
-  IconHighlight,
   IconCheckbox,
   IconCodeDots,
   IconArrowBack,
@@ -65,7 +64,7 @@ export function EditorToolbar({ editor }: EditorToolbarProps) {
   }
 
   const setLink = () => {
-    const previousUrl = editor.getAttributes('link').href;
+    const previousUrl = editor.getAttributes('link')['href'];
     const url = window.prompt('URL', previousUrl);
 
     if (url === null) {

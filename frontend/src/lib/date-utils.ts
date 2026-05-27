@@ -72,7 +72,9 @@ export function formatTimestamp(seconds: number): string {
 export function parseTimestamp(timestamp: string): number {
   const parts = timestamp.split(':').map(Number);
   if (parts.length === 3) {
-    const [hours, minutes, seconds] = parts;
+    const hours = parts[0] ?? 0;
+    const minutes = parts[1] ?? 0;
+    const seconds = parts[2] ?? 0;
     return hours * 3600 + minutes * 60 + seconds;
   }
   return 0;

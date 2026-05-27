@@ -1,4 +1,4 @@
-import { IconLogout, IconUser } from '@tabler/icons-react';
+import { IconLogout } from '@tabler/icons-react';
 import { useAuth } from '../contexts/auth-context';
 import {
   DropdownMenu,
@@ -18,11 +18,11 @@ export function UserProfile() {
   const initials = user.name
     ? user.name
         .split(' ')
-        .map((n) => n[0])
+        .map((n) => n.charAt(0))
         .join('')
         .toUpperCase()
         .slice(0, 2)
-    : user.email[0].toUpperCase();
+    : (user.email.charAt(0) || '?').toUpperCase();
 
   return (
     <DropdownMenu>

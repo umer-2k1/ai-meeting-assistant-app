@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { useAuth } from '../contexts/auth-context';
+import { useAuth, type User } from '@/contexts/auth-context';
 
 export default function AuthCallbackScreen() {
   const [searchParams] = useSearchParams();
@@ -13,7 +13,7 @@ export default function AuthCallbackScreen() {
 
     if (token && userParam) {
       try {
-        const user = JSON.parse(decodeURIComponent(userParam));
+        const user = JSON.parse(decodeURIComponent(userParam)) as User;
         setAuth(token, user);
         
         // Redirect to dashboard

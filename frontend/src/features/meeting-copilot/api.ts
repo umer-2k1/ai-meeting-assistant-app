@@ -78,7 +78,7 @@ function buildFallbackAnswer({
 }
 
 export async function askMeetingQuestion(payload: AskPayload): Promise<AskMeetingResponse> {
-  const backendUrl = (import.meta.env.VITE_BACKEND_URL as string | undefined) ?? 'http://localhost:4000';
+  const backendUrl = import.meta.env['VITE_BACKEND_URL'] ?? 'http://localhost:4000';
 
   const timeout = AbortSignal.timeout(4000);
   const response = await fetch(`${backendUrl}/api/ask-meeting`, {

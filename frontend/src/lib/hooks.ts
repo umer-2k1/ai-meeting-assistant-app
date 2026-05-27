@@ -2,6 +2,13 @@ import { useState, useEffect, useCallback } from 'react';
 import { useAIChatStore } from './stores';
 import { apiRequest } from './api-client';
 
+type SsePayload = {
+  token?: string;
+  done?: boolean;
+  error?: string;
+  timestamp?: string;
+};
+
 interface UseStreamingChatOptions {
   meetingId?: string;
   onComplete?: (answer: string) => void;
@@ -20,7 +27,7 @@ export function useStreamingChat(options: UseStreamingChatOptions = {}) {
       startStreaming(messageId, question);
 
       try {
-        const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+        const backendUrl = import.meta.env['VITE_BACKEND_URL'] || 'http://localhost:3001';
         const endpoint = options.meetingId
           ? `/api/live/meetings/${options.meetingId}/ask`
           : '/api/ask';
@@ -72,7 +79,7 @@ export function useStreamingChat(options: UseStreamingChatOptions = {}) {
           for (const line of lines) {
             if (line.startsWith('data: ')) {
               try {
-                const data = JSON.parse(line.slice(6));
+                const data = JSON.parse(line.slice(6)) as SsePayload;
 
                 if (data.token) {
                   fullAnswer += data.token;

@@ -58,8 +58,8 @@ export function ColorPicker({ editor, type, onClose }: ColorPickerProps) {
   
   const currentColor =
     type === 'text'
-      ? editor.getAttributes('textStyle').color || ''
-      : editor.getAttributes('highlight').color || '';
+      ? editor.getAttributes('textStyle')['color'] || ''
+      : editor.getAttributes('highlight')['color'] || '';
 
   const handleColorSelect = (color: string) => {
     if (type === 'text') {
@@ -146,8 +146,8 @@ export function ColorButton({ editor, type, icon, title }: ColorButtonProps) {
 
   const currentColor =
     type === 'text'
-      ? editor.getAttributes('textStyle').color || '#000000'
-      : editor.getAttributes('highlight').color || '';
+      ? editor.getAttributes('textStyle')['color'] || '#000000'
+      : editor.getAttributes('highlight')['color'] || '';
 
   return (
     <div className='relative'>
