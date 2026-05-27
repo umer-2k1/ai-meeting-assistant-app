@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import {
   IconAdjustmentsHorizontal,
@@ -28,41 +28,6 @@ function formatTimer(totalSeconds: number) {
     .padStart(2, '0');
   const ss = (totalSeconds % 60).toString().padStart(2, '0');
   return `${mm}:${ss}`;
-}
-
-function WidgetLiveFrame({
-  live,
-  variant,
-  className,
-  children
-}: {
-  live: boolean;
-  variant: 'pill' | 'panel';
-  className?: string;
-  children: ReactNode;
-}) {
-  return (
-    <div
-      className={cn(
-        'widget-live-frame',
-        variant === 'pill' ? 'widget-live-frame--pill' : 'widget-live-frame--panel',
-        live && 'widget-live-snake',
-        className
-      )}
-    >
-      {live && (
-        <>
-          <span className='widget-live-glow' aria-hidden>
-            <span className='widget-live-rotator' />
-          </span>
-          <span className='widget-live-ring' aria-hidden>
-            <span className='widget-live-rotator' />
-          </span>
-        </>
-      )}
-      <div className='widget-live-frame__inner'>{children}</div>
-    </div>
-  );
 }
 
 function MessageToggleButton({
@@ -192,8 +157,8 @@ export default function FloatingSystemWidget() {
   }
 
   const pillShellClass = cn(
-    'widget-drag-handle widget-shell-pill flex w-full items-center justify-between gap-2 px-2 py-1.5 backdrop-blur-xl',
-    !isLive && 'border border-border'
+    'widget-drag-handle widget-shell-pill flex w-full items-center justify-between gap-2 rounded-full border px-2 py-1.5 backdrop-blur-xl',
+    isLive ? 'border-primary/55' : 'border-border'
   );
 
   if (!expanded) {
@@ -202,8 +167,7 @@ export default function FloatingSystemWidget() {
         className='widget-drag-handle flex h-full w-full items-center justify-center p-1'
         onPointerDown={onDragPointerDown}
       >
-        <WidgetLiveFrame live={isLive} variant='pill' className='w-full max-w-[288px]'>
-          <div className={pillShellClass} onPointerDown={onDragPointerDown}>
+        <div className={cn(pillShellClass, 'w-full max-w-[288px]')} onPointerDown={onDragPointerDown}>
           <MessageToggleButton expanded={false} onClick={toggleExpanded} />
 
           <span className='min-w-[52px] text-center font-mono text-xs font-semibold tracking-wide text-foreground'>
@@ -245,21 +209,19 @@ export default function FloatingSystemWidget() {
               <IconAdjustmentsHorizontal className='size-3.5' />
             </button>
           </div>
-          </div>
-        </WidgetLiveFrame>
+        </div>
       </div>
     );
   }
 
   return (
     <div className='flex h-full w-full min-h-0 p-1'>
-      <WidgetLiveFrame live={isLive} variant='panel' className='min-h-0 flex-1'>
-        <div
-          className={cn(
-            'widget-shell-panel relative flex h-full min-h-0 w-full flex-col',
-            !isLive && 'border border-primary/40'
-          )}
-        >
+      <div
+        className={cn(
+          'widget-shell-panel relative flex h-full min-h-0 w-full flex-col overflow-hidden rounded-[22px] border',
+          isLive ? 'border-primary/55' : 'border-border'
+        )}
+      >
         <div
           className='widget-drag-handle flex shrink-0 items-center justify-between border-b border-border/70 px-4 py-3'
           onPointerDown={onDragPointerDown}
@@ -443,8 +405,7 @@ export default function FloatingSystemWidget() {
             />
           </svg>
         </button>
-        </div>
-      </WidgetLiveFrame>
+      </div>
     </div>
   );
 }

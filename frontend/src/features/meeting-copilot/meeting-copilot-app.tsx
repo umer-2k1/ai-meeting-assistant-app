@@ -4,7 +4,6 @@ import {
   IconArrowUp,
   IconArrowUpRight,
   IconBolt,
-  IconBrandSlack,
   IconCalendarEvent,
   IconCircleFilled,
   IconClock,
@@ -13,7 +12,6 @@ import {
   IconFolders,
   IconInfoCircle,
   IconLayoutDashboard,
-  IconMail,
   IconMicrophone,
   IconPlayerPause,
   IconPlayerStop,
@@ -39,7 +37,7 @@ import {
   requestDesktopMicrophone,
   requestWebMicrophone
 } from './permissions';
-import SettingsPermissionsPanel from './settings-permissions-panel';
+import SettingsScreen from './settings-screen';
 import {
   COPILOT_BTN_OUTLINE,
   COPILOT_HIGHLIGHT_PANEL,
@@ -48,7 +46,8 @@ import {
   COPILOT_SURFACE
 } from './copilot-styles';
 import './copilot-theme.css';
-import { calendarEvents, meetings, quickAiAnswers, starterTranscript } from './mock-data';
+import CalendarScreen from './calendar-screen';
+import { meetings, quickAiAnswers, starterTranscript } from './mock-data';
 import type { AiAnswer, Meeting, TranscriptLine } from './types';
 
 type View = 'dashboard' | 'live' | 'detail' | 'calendar' | 'settings';
@@ -715,145 +714,6 @@ function DetailScreen({
   );
 }
 
-function CalendarScreen() {
-  return (
-    <section className='space-y-4'>
-      <Card className={SURFACE}>
-        <CardHeader className='flex-row items-center justify-between'>
-          <CardTitle className='text-foreground'>Google Calendar</CardTitle>
-          <Badge className='bg-[#10B981] text-white'>Connected</Badge>
-        </CardHeader>
-        <CardContent className='space-y-3'>
-          <p className='text-sm text-foreground/80'>john@company.com</p>
-          <div className='space-y-2'>
-            {calendarEvents.map((event) => (
-              <div key={event.id} className='rounded-lg border border-border/70 bg-muted/70 p-3'>
-                <p className='text-sm font-semibold text-foreground'>{event.title}</p>
-                <p className='text-xs text-muted-foreground'>{event.time}</p>
-                <p className='text-xs text-muted-foreground'>{event.location}</p>
-                <p className='mt-2 text-xs text-foreground/80'>{event.note}</p>
-                <div className='mt-2 flex gap-2'>
-                  <Button size='sm' variant='outline' className='border-border text-foreground'>
-                    Start Recording
-                  </Button>
-                  {event.recurring ? (
-                    <Button size='sm' variant='ghost' className='text-foreground/80'>
-                      Auto-Record
-                    </Button>
-                  ) : (
-                    <Button size='sm' variant='ghost' className='text-foreground/80'>
-                      Set Reminder
-                    </Button>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
-    </section>
-  );
-}
-
-function SettingsScreen({ isDesktop }: { isDesktop: boolean }) {
-  return (
-    <section className='space-y-4'>
-      <Tabs defaultValue='general'>
-        <TabsList className='rounded-xl border border-border/70 bg-muted/70 p-1'>
-          <TabsTrigger value='general'>General</TabsTrigger>
-          <TabsTrigger value='audio'>Audio</TabsTrigger>
-          <TabsTrigger value='ai'>AI Preferences</TabsTrigger>
-          <TabsTrigger value='integrations'>Integrations</TabsTrigger>
-          <TabsTrigger value='privacy'>Privacy</TabsTrigger>
-        </TabsList>
-        <TabsContent value='general' className='space-y-4'>
-          <SettingsPermissionsPanel isDesktop={isDesktop} />
-          <Card className={SURFACE}>
-            <CardContent className='space-y-2 pt-4'>
-              <p className='text-sm text-foreground/80'>Language: English</p>
-              <p className='text-sm text-foreground/80'>Time format: 12h</p>
-              <p className='text-sm text-foreground/80'>Theme control available in top-right toggle.</p>
-            </CardContent>
-          </Card>
-        </TabsContent>
-        <TabsContent value='audio'>
-          <Card className={SURFACE}>
-            <CardContent className='space-y-2'>
-              <p className='text-sm text-foreground/80'>Input device: MacBook Microphone</p>
-              <p className='text-sm text-foreground/80'>Noise suppression: Enabled</p>
-              <p className='text-sm text-foreground/80'>Echo cancellation: Enabled</p>
-            </CardContent>
-          </Card>
-        </TabsContent>
-        <TabsContent value='ai'>
-          <Card className={SURFACE}>
-            <CardContent className='space-y-2'>
-              <p className='text-sm text-foreground/80'>Summary length: Detailed</p>
-              <p className='text-sm text-foreground/80'>Action item sensitivity: Balanced</p>
-              <p className='text-sm text-foreground/80'>Response style: Explanatory</p>
-            </CardContent>
-          </Card>
-        </TabsContent>
-        <TabsContent value='integrations'>
-          <div className='space-y-3'>
-            <Card className={SURFACE}>
-              <CardHeader className='flex-row items-center justify-between'>
-                <CardTitle className='text-foreground'>
-                  <IconMail className='mr-2 inline size-4' />
-                  Gmail
-                </CardTitle>
-                <Badge className='bg-[#10B981] text-white'>Connected</Badge>
-              </CardHeader>
-              <CardContent className='space-y-1 text-sm text-foreground/80'>
-                <p>Auto-generate follow-up emails</p>
-                <p>Include transcript attachment</p>
-                <p>Smart recipient detection</p>
-              </CardContent>
-            </Card>
-            <Card className={SURFACE}>
-              <CardHeader className='flex-row items-center justify-between'>
-                <CardTitle className='text-foreground'>
-                  <IconBrandSlack className='mr-2 inline size-4' />
-                  Slack
-                </CardTitle>
-                <Badge className='bg-[#10B981] text-white'>Connected</Badge>
-              </CardHeader>
-              <CardContent className='space-y-1 text-sm text-foreground/80'>
-                <p>Default channel: #product-team</p>
-                <p>Summary schedule: End of day (6:00 PM)</p>
-                <p>Thread summaries by meeting</p>
-              </CardContent>
-            </Card>
-            <Card className={SURFACE}>
-              <CardHeader className='flex-row items-center justify-between'>
-                <CardTitle className='text-foreground'>
-                  <IconCalendarEvent className='mr-2 inline size-4' />
-                  Google Calendar
-                </CardTitle>
-                <Badge className='bg-[#10B981] text-white'>Connected</Badge>
-              </CardHeader>
-              <CardContent className='space-y-1 text-sm text-foreground/80'>
-                <p>Show upcoming meetings in app</p>
-                <p>Pre-meeting reminders: 5 minutes</p>
-                <p>Sync frequency: Every 15 minutes</p>
-              </CardContent>
-            </Card>
-          </div>
-        </TabsContent>
-        <TabsContent value='privacy'>
-          <Card className={SURFACE}>
-            <CardContent className='space-y-2'>
-              <p className='text-sm text-foreground/80'>Data retention: 90 days</p>
-              <p className='text-sm text-foreground/80'>Auto-delete old meetings: Off</p>
-              <p className='text-sm text-foreground/80'>Export all data available from dashboard exports.</p>
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
-    </section>
-  );
-}
-
 function FloatingWidget({
   isRecording,
   elapsedSeconds,
@@ -1253,7 +1113,7 @@ export default function MeetingCopilotApp() {
                 askError={askError}
               />
             )}
-            {view === 'calendar' && <CalendarScreen />}
+            {view === 'calendar' && <CalendarScreen onStartRecording={startRecording} />}
             {view === 'settings' && <SettingsScreen isDesktop={runtimeMode === 'desktop'} />}
           </main>
         </div>

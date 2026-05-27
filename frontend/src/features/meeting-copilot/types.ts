@@ -31,6 +31,13 @@ export type CalendarEvent = {
   location: string;
   note: string;
   recurring?: boolean;
+  /** e.g. Today, Tomorrow — used to group the agenda */
+  dayLabel?: string;
+  startTime?: string;
+  endTime?: string;
+  attendees?: number;
+  /** Highlight as the imminent next meeting */
+  startsSoon?: boolean;
 };
 
 export type Meeting = {

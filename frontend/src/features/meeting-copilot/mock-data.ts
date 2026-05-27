@@ -138,17 +138,48 @@ export const calendarEvents: CalendarEvent[] = [
   {
     id: 'c-1',
     title: 'Client Strategy Review',
+    dayLabel: 'Today',
+    startTime: '2:00 PM',
+    endTime: '3:00 PM',
     time: 'Today, 2:00 PM - 3:00 PM',
     location: 'Zoom Meeting',
-    note: 'Meeting starts in 1 hour 15 minutes'
+    note: 'Starts in about 1 hour',
+    startsSoon: true,
+    attendees: 5
   },
   {
     id: 'c-2',
+    title: 'Product Design Critique',
+    dayLabel: 'Today',
+    startTime: '4:30 PM',
+    endTime: '5:15 PM',
+    time: 'Today, 4:30 PM - 5:15 PM',
+    location: 'Google Meet',
+    note: 'Review mobile onboarding flows',
+    attendees: 8
+  },
+  {
+    id: 'c-3',
     title: 'Weekly Team Standup',
+    dayLabel: 'Tomorrow',
+    startTime: '10:00 AM',
+    endTime: '10:30 AM',
     time: 'Tomorrow, 10:00 AM - 10:30 AM',
-    location: 'Recurring',
-    note: 'Auto-record available',
-    recurring: true
+    location: 'Recurring · Slack Huddle',
+    note: 'Auto-record enabled for this series',
+    recurring: true,
+    attendees: 12
+  },
+  {
+    id: 'c-4',
+    title: 'Q3 Planning Workshop',
+    dayLabel: 'Tomorrow',
+    startTime: '1:00 PM',
+    endTime: '3:00 PM',
+    time: 'Tomorrow, 1:00 PM - 3:00 PM',
+    location: 'Conference Room B',
+    note: 'Bring roadmap draft',
+    attendees: 15
   }
 ];
 
