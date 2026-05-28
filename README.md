@@ -372,6 +372,29 @@ See [`docs/todo.md`](docs/todo.md) for complete roadmap.
 
 ---
 
+## Start Services
+# Terminal 1: PostgreSQL + Qdrant (if using Docker)
+docker run -d -p 5432:5432 -e POSTGRES_PASSWORD=password postgres
+docker run -d -p 6333:6333 qdrant/qdrant
+
+# Terminal 2: Initialize Database
+cd backend
+pnpm db:push
+pnpm db:seed
+
+# Terminal 3: Start Backend
+cd backend
+pnpm dev
+
+# Terminal 4: Start Frontend
+cd frontend
+pnpm dev
+
+# Terminal 5: Start Electron
+cd frontend
+pnpm desktop:dev
+
+
 ## 📞 Support
 
 For technical support or questions:
