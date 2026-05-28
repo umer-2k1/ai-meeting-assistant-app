@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 import {
   IconBrandGoogle,
@@ -327,12 +327,14 @@ function AiPreferencesTab() {
 function IntegrationCard({
   config,
   connected,
+  connectedEmail,
   featureToggles,
   onConnectToggle,
   onFeatureToggle
 }: {
   config: IntegrationConfig;
   connected: boolean;
+  connectedEmail?: string;
   featureToggles: Record<string, boolean>;
   onConnectToggle: () => void;
   onFeatureToggle: (key: string, enabled: boolean) => void;
@@ -365,7 +367,14 @@ function IntegrationCard({
               {connected ? 'Connected' : 'Not connected'}
             </Badge>
           </div>
-          <p className='mt-1 text-sm text-muted-foreground'>{config.description}</p>
+          <p className='mt-1 text-sm text-muted-foreground'>
+            {config.description}
+            {connectedEmail && (
+              <span className='block mt-1 text-xs'>
+                {connectedEmail}
+              </span>
+            )}
+          </p>
         </div>
         <Button
           size='sm'
@@ -396,15 +405,116 @@ function IntegrationCard({
 
 function IntegrationsTab() {
   const [connected, setConnected] = useState<Record<IntegrationId, boolean>>({
-    gmail: true,
-    slack: true,
-    calendar: true
+    gmail: false,
+    slack: false,
+    calendar: false
   });
+  const [emails, setEmails] = useState<Record<IntegrationId, string | undefined>>({
+    gmail: undefined,
+    slack: undefined,
+    calendar: undefined
+  });
+  const [loading, setLoading] = useState(true);
   const [features, setFeatures] = useState<Record<IntegrationId, Record<string, boolean>>>({
     gmail: { autoFollowUp: true, attachTranscript: false, smartRecipients: true },
     slack: { defaultChannel: true, eodDigest: true, threadSummaries: true },
     calendar: { showUpcoming: true, preMeetingReminder: true, syncFrequent: true }
   });
+
+  // Fetch integration status on mount
+  useEffect(() => {
+    async function fetchStatus() {
+      try {
+        setLoading(true);
+        const { getIntegrationStatus } = await import('@/lib/integrations-api');
+        const status = await getIntegrationStatus();
+
+        setConnected({
+          gmail: status.gmail.connected,
+          slack: status.slack.connected,
+          calendar: status.calendar.connected
+        });
+
+        setEmails({
+          gmail: status.gmail.email,
+          slack: status.slack.email,
+          calendar: status.calendar.email
+        });
+      } catch (error) {
+        console.error('Failed to fetch integration status:', error);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    void fetchStatus();
+
+    // Check URL params for OAuth callback status
+    const params = new URLSearchParams(window.location.search);
+    const status = params.get('status');
+    if (status === 'connected') {
+      setTimeout(() => {
+        void fetchStatus();
+      }, 500);
+
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  }, []);
+
+  const handleConnect = async (integrationId: IntegrationId) => {
+    if (integrationId === 'gmail' || integrationId === 'calendar') {
+      try {
+        const { connectGoogle } = await import('@/lib/integrations-api');
+        const { authUrl } = await connectGoogle();
+
+        // Open OAuth flow in new window
+        window.open(authUrl, '_blank', 'width=600,height=700');
+      } catch (error) {
+        console.error('Failed to initiate OAuth:', error);
+        alert('Failed to connect. Please try again.');
+      }
+    } else {
+      // Slack not yet implemented
+      alert('Slack integration coming soon!');
+    }
+  };
+
+  const handleDisconnect = async (integrationId: IntegrationId) => {
+    if (integrationId === 'gmail' || integrationId === 'calendar') {
+      if (!confirm('Are you sure you want to disconnect? This will remove access to Calendar and Gmail features.')) {
+        return;
+      }
+      
+      try {
+        const { disconnectGoogle } = await import('@/lib/integrations-api');
+        await disconnectGoogle();
+        
+        // Update state
+        setConnected(prev => ({
+          ...prev,
+          gmail: false,
+          calendar: false
+        }));
+        
+        setEmails(prev => ({
+          ...prev,
+          gmail: undefined,
+          calendar: undefined
+        }));
+      } catch (error) {
+        console.error('Failed to disconnect:', error);
+        alert('Failed to disconnect. Please try again.');
+      }
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className='flex items-center justify-center py-12'>
+        <div className='size-8 animate-spin rounded-full border-4 border-primary border-t-transparent' />
+      </div>
+    );
+  }
 
   return (
     <div className='space-y-4'>
@@ -413,12 +523,14 @@ function IntegrationsTab() {
           key={integration.id}
           config={integration}
           connected={connected[integration.id]}
+          connectedEmail={emails[integration.id]}
           featureToggles={features[integration.id]}
           onConnectToggle={() => {
-            setConnected((prev) => ({
-              ...prev,
-              [integration.id]: !prev[integration.id]
-            }));
+            if (connected[integration.id]) {
+              handleDisconnect(integration.id);
+            } else {
+              handleConnect(integration.id);
+            }
           }}
           onFeatureToggle={(key, enabled) => {
             setFeatures((prev) => ({
@@ -432,8 +544,7 @@ function IntegrationsTab() {
       <div className='flex items-start gap-3 rounded-2xl border border-border/70 bg-muted/30 px-5 py-4'>
         <IconBrandGoogle className='mt-0.5 size-4 shrink-0 text-primary' />
         <p className='text-sm leading-relaxed text-muted-foreground'>
-          OAuth sign-in is simulated in this build. Connecting opens your browser to authorize
-          read-only calendar and send permissions.
+          Connecting opens Google in your default browser (same as sign-in). After you approve access, you’ll return to the app automatically.
         </p>
       </div>
     </div>
@@ -620,10 +731,16 @@ function AccountTab() {
   );
 }
 
-export default function SettingsScreen({ isDesktop }: { isDesktop: boolean }) {
+export default function SettingsScreen({
+  isDesktop,
+  defaultTab = 'general'
+}: {
+  isDesktop: boolean;
+  defaultTab?: string;
+}) {
   return (
     <section className='space-y-4'>
-      <Tabs defaultValue='general' className='gap-4'>
+      <Tabs defaultValue={defaultTab} className='gap-4'>
         <TabsList className='h-auto w-full flex-wrap justify-start gap-1 rounded-xl border border-border/70 bg-muted/70 p-1'>
           <TabsTrigger value='account' className='rounded-lg px-3'>
             Account

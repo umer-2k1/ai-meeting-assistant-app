@@ -7,10 +7,10 @@ export default function AuthCallbackScreen() {
   const navigate = useNavigate();
   const { setAuth } = useAuth();
 
-  useEffect(() => {
-    const token = searchParams.get('token');
-    const userParam = searchParams.get('user');
+  const token = searchParams.get('token');
+  const userParam = searchParams.get('user');
 
+  useEffect(() => {
     if (token && userParam) {
       try {
         const user = JSON.parse(decodeURIComponent(userParam)) as User;
@@ -25,7 +25,7 @@ export default function AuthCallbackScreen() {
     } else {
       navigate('/auth/error', { replace: true });
     }
-  }, [searchParams, navigate, setAuth]);
+  }, [token, userParam, navigate, setAuth]);
 
   return (
     <div className='flex min-h-screen items-center justify-center bg-background'>

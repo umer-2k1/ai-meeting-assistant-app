@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 
 import {
   IconBell,
@@ -327,9 +327,84 @@ function DayGroup({
 
 export default function CalendarScreen({ onStartRecording }: { onStartRecording: () => void }) {
   const { user } = useAuth();
-  // Calendar integration is intentionally gated behind MCP (no direct Google Calendar API here).
-  // Until MCP is configured, we show an empty agenda.
-  const calendarEvents: CalendarEvent[] = [];
+  const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  
+  // Fetch calendar events from Google Calendar API
+  useEffect(() => {
+    async function fetchCalendarEvents() {
+      try {
+        setLoading(true);
+        setError(null);
+        
+        const { getCalendarEvents } = await import('@/lib/integrations-api');
+        
+        // Fetch events for the next 30 days
+        const startDate = new Date();
+        const endDate = new Date();
+        endDate.setDate(endDate.getDate() + 30);
+        
+        const { events } = await getCalendarEvents(startDate, endDate, 50);
+        
+        // Transform API events to CalendarEvent format
+        const transformedEvents: CalendarEvent[] = events.map(event => ({
+          id: event.id,
+          title: event.title,
+          time: `${new Date(event.startTime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })} – ${new Date(event.endTime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`,
+          startTime: new Date(event.startTime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }),
+          endTime: new Date(event.endTime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }),
+          location: event.meetLink || event.location || 'No location',
+          note: event.description || '',
+          dayLabel: getDayLabel(new Date(event.startTime)),
+          attendees: event.attendees?.length,
+          recurring: event.recurring,
+          startsSoon: isStartingSoon(new Date(event.startTime))
+        }));
+        
+        setCalendarEvents(transformedEvents);
+      } catch (err) {
+        console.error('Failed to fetch calendar events:', err);
+        if (err instanceof Error && err.message.includes('not connected')) {
+          setError('calendar-not-connected');
+        } else {
+          setError('failed-to-fetch');
+        }
+        setCalendarEvents([]);
+      } finally {
+        setLoading(false);
+      }
+    }
+    
+    fetchCalendarEvents();
+    
+    // Poll for updates every 15 minutes
+    const interval = setInterval(fetchCalendarEvents, 15 * 60 * 1000);
+    
+    return () => clearInterval(interval);
+  }, []);
+  
+  // Helper function to determine day label
+  function getDayLabel(date: Date): string {
+    const today = new Date();
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    
+    if (date.toDateString() === today.toDateString()) {
+      return 'Today';
+    } else if (date.toDateString() === tomorrow.toDateString()) {
+      return 'Tomorrow';
+    } else {
+      return date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+    }
+  }
+  
+  // Helper function to check if event is starting soon (within next hour)
+  function isStartingSoon(startTime: Date): boolean {
+    const now = new Date();
+    const diff = startTime.getTime() - now.getTime();
+    return diff > 0 && diff < 60 * 60 * 1000;
+  }
 
   const [autoRecordById, setAutoRecordById] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(
@@ -346,7 +421,7 @@ export default function CalendarScreen({ onStartRecording }: { onStartRecording:
       map.set(day, list);
     }
     return map;
-  }, []);
+  }, [calendarEvents]);
 
   const todayEvents = grouped.get('Today') ?? [];
   const tomorrowEvents = grouped.get('Tomorrow') ?? [];
@@ -357,6 +432,32 @@ export default function CalendarScreen({ onStartRecording }: { onStartRecording:
   const setAutoRecord = (id: string, enabled: boolean) => {
     setAutoRecordById((prev) => ({ ...prev, [id]: enabled }));
   };
+
+  if (loading) {
+    return (
+      <section className='space-y-5'>
+        <CalendarConnectionCard email={user?.email} />
+        <div className='flex items-center justify-center py-12'>
+          <div className='size-8 animate-spin rounded-full border-4 border-primary border-t-transparent' />
+        </div>
+      </section>
+    );
+  }
+
+  if (error === 'calendar-not-connected') {
+    return (
+      <section className='space-y-5'>
+        <CalendarConnectionCard email={user?.email} />
+        <div className='py-12 text-center'>
+          <IconCalendarEvent className='mx-auto size-10 text-muted-foreground/50' />
+          <p className='mt-3 text-sm font-medium text-foreground'>Calendar not connected</p>
+          <p className='mt-1 text-sm text-muted-foreground'>
+            Connect your Google Calendar in Settings → Integrations to see your meetings here.
+          </p>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className='space-y-5'>
@@ -386,7 +487,9 @@ export default function CalendarScreen({ onStartRecording }: { onStartRecording:
       <div className='flex flex-wrap items-center justify-between gap-3'>
         <div>
           <p className='text-sm font-semibold text-foreground'>{formatTodayHeading()}</p>
-          <p className='text-xs text-muted-foreground'>Agenda will appear after Calendar MCP is connected</p>
+          <p className='text-xs text-muted-foreground'>
+            {calendarEvents.length === 0 ? 'No upcoming meetings' : `${calendarEvents.length} events loaded`}
+          </p>
         </div>
         <div className='inline-flex items-center gap-1 rounded-xl border border-border/70 bg-muted/50 p-1'>
           <Button size='icon-sm' variant='ghost' className='size-8 rounded-lg' aria-label='Previous week'>
@@ -443,7 +546,7 @@ export default function CalendarScreen({ onStartRecording }: { onStartRecording:
             <IconCalendarEvent className='mx-auto size-10 text-muted-foreground/50' />
             <p className='mt-3 text-sm font-medium text-foreground'>No upcoming meetings</p>
             <p className='mt-1 text-sm text-muted-foreground'>
-              Calendar syncing is enabled via MCP. Connect it in Settings → Integrations once the MCP server is available.
+              Your calendar is clear for the next 30 days.
             </p>
           </div>
         )}

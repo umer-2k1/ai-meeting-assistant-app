@@ -39,9 +39,53 @@ model User {
   meetings      Meeting[]
   chatMessages  AIChatMessage[]
   notes         MeetingNote[]
+  integrations  Integration[]
   
   @@index([email])
   @@index([googleId])
+}
+
+// ========================================
+// Integrations
+// ========================================
+
+model Integration {
+  id              String              @id @default(cuid())
+  userId          String
+  user            User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  provider        IntegrationProvider
+  
+  // OAuth tokens
+  accessToken     String?             @db.Text
+  refreshToken    String?             @db.Text
+  tokenExpiry     DateTime?
+  
+  // Scopes granted
+  scopes          String[]
+  
+  // Connection status
+  isActive        Boolean             @default(true)
+  
+  // Provider-specific configuration
+  metadata        Json?
+  
+  // Timestamps
+  connectedAt     DateTime            @default(now())
+  lastSyncAt      DateTime?
+  updatedAt       DateTime            @updatedAt
+  
+  @@unique([userId, provider])
+  @@index([userId])
+  @@index([provider])
+  @@index([isActive])
+}
+
+enum IntegrationProvider {
+  GOOGLE_CALENDAR
+  GMAIL
+  SLACK
+  MICROSOFT
 }
 
 // ========================================

@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import type { ReactNode } from 'react';
 
 export interface User {
@@ -71,7 +71,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const login = () => {
+  const login = useCallback(() => {
     const backendUrl = import.meta.env['VITE_BACKEND_URL'] || 'http://localhost:3001';
     const desktop = globalThis.window.desktop;
     // Desktop: open in system browser (uses existing Google session), then return via deep link
@@ -82,33 +82,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     // Web: navigate current tab
     window.location.href = `${backendUrl}/auth/google`;
-  };
+  }, []);
 
-  const logout = () => {
+  const logout = useCallback(() => {
     setUser(null);
     setToken(null);
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(USER_KEY);
-  };
+  }, []);
 
-  const setAuth = (newToken: string, newUser: User) => {
+  const setAuth = useCallback((newToken: string, newUser: User) => {
     setToken(newToken);
     setUser(newUser);
     localStorage.setItem(TOKEN_KEY, newToken);
     localStorage.setItem(USER_KEY, JSON.stringify(newUser));
-  };
+  }, []);
+
+  const value = useMemo<AuthContextType>(
+    () => ({
+      user,
+      token,
+      isLoading,
+      isAuthenticated: !!user && !!token,
+      login,
+      logout,
+      setAuth,
+    }),
+    [user, token, isLoading, login, logout, setAuth]
+  );
 
   return (
     <AuthContext.Provider
-      value={{
-        user,
-        token,
-        isLoading,
-        isAuthenticated: !!user && !!token,
-        login,
-        logout,
-        setAuth,
-      }}
+      value={value}
     >
       {children}
     </AuthContext.Provider>

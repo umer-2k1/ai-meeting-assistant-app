@@ -16,7 +16,7 @@ importers:
         version: 0.21.0
       '@langchain/community':
         specifier: ^0.3.22
-        version: 0.3.59(@browserbasehq/sdk@2.12.0)(@browserbasehq/stagehand@1.14.0(@playwright/test@1.60.0)(deepmerge@4.3.1)(dotenv@16.6.1)(openai@5.12.2(ws@8.21.0)(zod@3.25.76))(zod@3.25.76))(@ibm-cloud/watsonx-ai@1.7.12)(@langchain/core@1.1.48(openai@5.12.2(ws@8.21.0)(zod@3.25.76))(ws@8.21.0))(@langchain/groq@1.2.1(@langchain/core@1.1.48(openai@5.12.2(ws@8.21.0)(zod@3.25.76))(ws@8.21.0)))(@qdrant/js-client-rest@1.18.0(typescript@5.9.3))(axios@1.16.1)(google-auth-library@10.6.2)(ibm-cloud-sdk-core@5.4.20)(jsonwebtoken@9.0.3)(lodash@4.18.1)(openai@5.12.2(ws@8.21.0)(zod@3.25.76))(playwright@1.60.0)(weaviate-client@3.13.1)(ws@8.21.0)
+        version: 0.3.59(@browserbasehq/sdk@2.12.0)(@browserbasehq/stagehand@1.14.0(@playwright/test@1.60.0)(deepmerge@4.3.1)(dotenv@16.6.1)(openai@5.12.2(ws@8.21.0)(zod@3.25.76))(zod@3.25.76))(@ibm-cloud/watsonx-ai@1.7.12)(@langchain/core@1.1.48(openai@5.12.2(ws@8.21.0)(zod@3.25.76))(ws@8.21.0))(@langchain/groq@1.2.1(@langchain/core@1.1.48(openai@5.12.2(ws@8.21.0)(zod@3.25.76))(ws@8.21.0)))(@qdrant/js-client-rest@1.18.0(typescript@5.9.3))(axios@1.16.1)(google-auth-library@10.6.2)(googleapis@152.0.0)(ibm-cloud-sdk-core@5.4.20)(jsonwebtoken@9.0.3)(lodash@4.18.1)(openai@5.12.2(ws@8.21.0)(zod@3.25.76))(playwright@1.60.0)(weaviate-client@3.13.1)(ws@8.21.0)
       '@langchain/core':
         specifier: ^1.1.48
         version: 1.1.48(openai@5.12.2(ws@8.21.0)(zod@3.25.76))(ws@8.21.0)
@@ -56,6 +56,9 @@ importers:
       google-auth-library:
         specifier: ^10.6.2
         version: 10.6.2
+      googleapis:
+        specifier: ^152.0.0
+        version: 152.0.0
       jsonwebtoken:
         specifier: ^9.0.2
         version: 9.0.3
@@ -1331,6 +1334,14 @@ packages:
     resolution: {integrity: sha512-eAmLkjDjAFCVXg7A1unxHsLf961m6y17QFqXqAXGj/gVkKFrEICfStRfwUlGNfeCEjNRa32JEWOUTlYXPyyKvA==}
     engines: {node: '>=14'}
 
+  googleapis-common@8.0.1:
+    resolution: {integrity: sha512-eCzNACUXPb1PW5l0ULTzMHaL/ltPRADoPgjBlT8jWsTbxkCp6siv+qKJ/1ldaybCthGwsYFYallF7u9AkU4L+A==}
+    engines: {node: '>=18.0.0'}
+
+  googleapis@152.0.0:
+    resolution: {integrity: sha512-i/eo7ytwdWv9vONIY/MdUkSYOnGTtTMLP1y4eaTazGVArlmkH47Th07HLz8EYgIwsixqTR48bxAcdsGd9yoZqg==}
+    engines: {node: '>=18'}
+
   gopd@1.2.0:
     resolution: {integrity: sha512-ZUKRh6/kUFoAiTAtTYPZJ3hw9wNxx+BIBOijnlG9PnrJsCcSjs1wyyD6vJpaYtgnzDrKYRSqf3OO6Rfa93xsRg==}
     engines: {node: '>= 0.4'}
@@ -1959,6 +1970,9 @@ packages:
   url-parse@1.5.10:
     resolution: {integrity: sha512-WypcfiRhfeUP9vvF0j6rw0J3hrWrw6iZv3+22h6iRMJ/8z1Tj6XfLP4DsUix5MhMPnXpiHDoKyoZ/bdCkwBCiQ==}
 
+  url-template@2.0.8:
+    resolution: {integrity: sha512-XdVKMF4SJ0nP/O7XIPB0JwAEuT9lDIYnNsK8yGVe43y0AWoKeJNdv3ZNWh7ksJ6KqQFjOO6ox/VEitLnaVNufw==}
+
   utils-merge@1.0.1:
     resolution: {integrity: sha512-pMZTvIkT1d+TFGvDOqodOclx0QWkkgi6Tdoa8gC8ffGAAqz9pzPTZWAybbsHHoED/ztMtkv/VoYTYyShUn81hA==}
     engines: {node: '>= 0.4.0'}
@@ -2208,7 +2222,7 @@ snapshots:
 
   '@js-sdsl/ordered-map@4.4.2': {}
 
-  '@langchain/community@0.3.59(@browserbasehq/sdk@2.12.0)(@browserbasehq/stagehand@1.14.0(@playwright/test@1.60.0)(deepmerge@4.3.1)(dotenv@16.6.1)(openai@5.12.2(ws@8.21.0)(zod@3.25.76))(zod@3.25.76))(@ibm-cloud/watsonx-ai@1.7.12)(@langchain/core@1.1.48(openai@5.12.2(ws@8.21.0)(zod@3.25.76))(ws@8.21.0))(@langchain/groq@1.2.1(@langchain/core@1.1.48(openai@5.12.2(ws@8.21.0)(zod@3.25.76))(ws@8.21.0)))(@qdrant/js-client-rest@1.18.0(typescript@5.9.3))(axios@1.16.1)(google-auth-library@10.6.2)(ibm-cloud-sdk-core@5.4.20)(jsonwebtoken@9.0.3)(lodash@4.18.1)(openai@5.12.2(ws@8.21.0)(zod@3.25.76))(playwright@1.60.0)(weaviate-client@3.13.1)(ws@8.21.0)':
+  '@langchain/community@0.3.59(@browserbasehq/sdk@2.12.0)(@browserbasehq/stagehand@1.14.0(@playwright/test@1.60.0)(deepmerge@4.3.1)(dotenv@16.6.1)(openai@5.12.2(ws@8.21.0)(zod@3.25.76))(zod@3.25.76))(@ibm-cloud/watsonx-ai@1.7.12)(@langchain/core@1.1.48(openai@5.12.2(ws@8.21.0)(zod@3.25.76))(ws@8.21.0))(@langchain/groq@1.2.1(@langchain/core@1.1.48(openai@5.12.2(ws@8.21.0)(zod@3.25.76))(ws@8.21.0)))(@qdrant/js-client-rest@1.18.0(typescript@5.9.3))(axios@1.16.1)(google-auth-library@10.6.2)(googleapis@152.0.0)(ibm-cloud-sdk-core@5.4.20)(jsonwebtoken@9.0.3)(lodash@4.18.1)(openai@5.12.2(ws@8.21.0)(zod@3.25.76))(playwright@1.60.0)(weaviate-client@3.13.1)(ws@8.21.0)':
     dependencies:
       '@browserbasehq/stagehand': 1.14.0(@playwright/test@1.60.0)(deepmerge@4.3.1)(dotenv@16.6.1)(openai@5.12.2(ws@8.21.0)(zod@3.25.76))(zod@3.25.76)
       '@ibm-cloud/watsonx-ai': 1.7.12
@@ -2229,6 +2243,7 @@ snapshots:
       '@browserbasehq/sdk': 2.12.0
       '@qdrant/js-client-rest': 1.18.0(typescript@5.9.3)
       google-auth-library: 10.6.2
+      googleapis: 152.0.0
       jsonwebtoken: 9.0.3
       lodash: 4.18.1
       playwright: 1.60.0
@@ -2964,6 +2979,23 @@ snapshots:
 
   google-logging-utils@1.1.3: {}
 
+  googleapis-common@8.0.1:
+    dependencies:
+      extend: 3.0.2
+      gaxios: 7.1.4
+      google-auth-library: 10.6.2
+      qs: 6.15.2
+      url-template: 2.0.8
+    transitivePeerDependencies:
+      - supports-color
+
+  googleapis@152.0.0:
+    dependencies:
+      google-auth-library: 10.6.2
+      googleapis-common: 8.0.1
+    transitivePeerDependencies:
+      - supports-color
+
   gopd@1.2.0: {}
 
   graphql-request@6.1.0(graphql@16.14.0):
@@ -3535,6 +3567,8 @@ snapshots:
     dependencies:
       querystringify: 2.2.0
       requires-port: 1.0.0
+
+  url-template@2.0.8: {}
 
   utils-merge@1.0.1: {}
 

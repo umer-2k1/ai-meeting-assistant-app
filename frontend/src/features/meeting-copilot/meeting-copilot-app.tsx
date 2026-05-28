@@ -578,6 +578,7 @@ export default function MeetingCopilotApp() {
   }
 
   const [view, setView] = useState<View>('dashboard');
+  const [settingsDefaultTab, setSettingsDefaultTab] = useState('general');
   const [selectedMeetingId, setSelectedMeetingId] = useState(fallbackMeeting.id);
   const [searchText, setSearchText] = useState('');
   const [isRecording, setIsRecording] = useState(false);
@@ -591,6 +592,17 @@ export default function MeetingCopilotApp() {
   const [isAsking, setIsAsking] = useState(false);
   const [askError, setAskError] = useState<string | null>(null);
   const [aiAnswers, setAiAnswers] = useState<AiAnswer[]>(quickAiAnswers);
+
+  // Web OAuth return after connecting Google integrations
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const integrations = params.get('integrations');
+    if (integrations === 'connected' || integrations === 'error') {
+      setView('settings');
+      setSettingsDefaultTab('integrations');
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  }, []);
 
   useEffect(() => {
     const desktopApi = globalThis.window.desktop;
@@ -937,7 +949,12 @@ export default function MeetingCopilotApp() {
               />
             )}
             {view === 'calendar' && <CalendarScreen onStartRecording={startRecording} />}
-            {view === 'settings' && <SettingsScreen isDesktop={runtimeMode === 'desktop'} />}
+            {view === 'settings' && (
+              <SettingsScreen
+                isDesktop={runtimeMode === 'desktop'}
+                defaultTab={settingsDefaultTab}
+              />
+            )}
           </main>
         </div>
       </div>
