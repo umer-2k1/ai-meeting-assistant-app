@@ -47,8 +47,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsLoading(false);
   }, []);
 
+  // Desktop deep-link OAuth callback handler (external browser -> app)
+  useEffect(() => {
+    const desktop = globalThis.window.desktop;
+    if (!desktop?.auth?.onCallback) return;
+
+    return desktop.auth.onCallback((payload: { url?: string }) => {
+      try {
+        const url = payload?.url;
+        if (!url) return;
+
+        const parsed = new URL(url);
+        const tokenParam = parsed.searchParams.get('token');
+        const userParam = parsed.searchParams.get('user');
+
+        if (!tokenParam || !userParam) return;
+
+        const nextUser = JSON.parse(decodeURIComponent(userParam)) as User;
+        setAuth(tokenParam, nextUser);
+      } catch (error) {
+        console.error('Failed to handle desktop auth callback:', error);
+      }
+    });
+  }, []);
+
   const login = () => {
     const backendUrl = import.meta.env['VITE_BACKEND_URL'] || 'http://localhost:3001';
+    const desktop = globalThis.window.desktop;
+    // Desktop: open in system browser (uses existing Google session), then return via deep link
+    if (desktop?.auth?.openExternal) {
+      void desktop.auth.openExternal(`${backendUrl}/auth/google?source=desktop`);
+      return;
+    }
+
+    // Web: navigate current tab
     window.location.href = `${backendUrl}/auth/google`;
   };
 

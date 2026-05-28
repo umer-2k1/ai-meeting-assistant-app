@@ -37,6 +37,10 @@ type DesktopApi = {
   app: {
     getInfo: () => Promise<DesktopAppInfo>;
   };
+  auth: {
+    openExternal: (url: string) => Promise<{ ok: boolean }>;
+    onCallback: (callback: (payload: { url: string }) => void) => () => void;
+  };
   theme: {
     broadcast: (preference: ThemePreference) => Promise<{ ok: boolean }>;
     onChange: (callback: (preference: ThemePreference) => void) => () => void;

@@ -12,6 +12,7 @@ import {
   IconInfoCircle,
   IconLayoutDashboard,
   IconMicrophone,
+  IconLogout,
   IconPlayerPause,
   IconPlayerStop,
   IconSearch,
@@ -26,6 +27,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import ThemeToggle from '@/components/ui/theme-toggle';
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/contexts/auth-context';
+import { UserProfile } from '@/components/user-profile';
 
 import { askMeetingQuestion } from './api';
 import {
@@ -124,6 +127,7 @@ function AppSidebar({
   onStartRecording: () => void;
   selectedMeeting: Meeting;
 }) {
+  const { user, logout } = useAuth();
   return (
     <aside className='sticky top-0 hidden h-dvh w-64 shrink-0 flex-col overflow-y-auto overscroll-contain border-r border-border bg-sidebar p-4 text-sidebar-foreground lg:flex'>
       <div className='mb-3 inline-flex items-center gap-3 rounded-xl border border-primary/30 bg-card px-3 py-2'>
@@ -137,8 +141,8 @@ function AppSidebar({
       </div>
 
       <div className='rounded-xl border border-border bg-muted/40 p-3'>
-        <p className='text-sm font-semibold text-foreground'>John Doe</p>
-        <p className='text-xs text-muted-foreground'>john@company.com</p>
+        <p className='text-sm font-semibold text-foreground'>{user?.name || 'User'}</p>
+        <p className='text-xs text-muted-foreground'>{user?.email || '—'}</p>
       </div>
       <nav aria-label='Primary navigation' className='mt-4 space-y-1'>
         {SIDEBAR_LINKS.map((entry) => {
@@ -194,6 +198,17 @@ function AppSidebar({
       >
         <IconMicrophone className='mr-1.5 size-4' />
         New Recording
+      </Button>
+
+      <Button
+        variant='outline'
+        className='mt-2 rounded-xl border-border/70 bg-muted/40 text-muted-foreground hover:bg-muted'
+        onClick={() => {
+          logout();
+        }}
+      >
+        <IconLogout className='mr-1.5 size-4' />
+        Logout
       </Button>
     </aside>
   );
@@ -868,6 +883,7 @@ export default function MeetingCopilotApp() {
                   {runtimeMode === 'desktop' ? `Desktop${desktopPlatform ? ` · ${desktopPlatform}` : ''}` : 'Web Preview'}
                 </Badge>
                 <ThemeToggle />
+                <UserProfile />
               </div>
             </div>
           </header>

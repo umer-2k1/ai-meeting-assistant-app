@@ -20,9 +20,9 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
 import { COPILOT_BTN_OUTLINE, COPILOT_HIGHLIGHT_PANEL, COPILOT_SURFACE } from './copilot-styles';
-import { calendarEvents } from './mock-data';
 import { SettingsSwitch } from './settings-ui';
 import type { CalendarEvent } from './types';
+import { useAuth } from '@/contexts/auth-context';
 
 function parseDayLabel(event: CalendarEvent): string {
   if (event.dayLabel) return event.dayLabel;
@@ -38,7 +38,7 @@ function formatTodayHeading() {
   }).format(new Date());
 }
 
-function CalendarConnectionCard() {
+function CalendarConnectionCard({ email }: { email?: string }) {
   return (
     <div
       className={cn(
@@ -52,18 +52,23 @@ function CalendarConnectionCard() {
       <div className='min-w-0 flex-1'>
         <div className='flex flex-wrap items-center gap-2'>
           <p className='text-sm font-semibold text-foreground'>Google Calendar</p>
-          <Badge className='rounded-full border-0 bg-emerald-500/15 px-2 py-0 text-[11px] font-medium text-emerald-700 dark:text-emerald-400'>
-            Connected
+          <Badge
+            variant='outline'
+            className='rounded-full border-amber-500/40 bg-amber-500/10 px-2 py-0 text-[11px] font-medium text-amber-800 dark:text-amber-200'
+          >
+            Not connected (MCP)
           </Badge>
         </div>
-        <p className='mt-0.5 text-sm text-muted-foreground'>john@company.com · Synced 2 min ago</p>
+        <p className='mt-0.5 text-sm text-muted-foreground'>
+          {email ?? '—'} · Calendar sync will be enabled via MCP server.
+        </p>
       </div>
       <div className='flex shrink-0 flex-wrap gap-2'>
-        <Button size='sm' variant='outline' className={cn('rounded-full', COPILOT_BTN_OUTLINE)}>
+        <Button size='sm' variant='outline' className={cn('rounded-full', COPILOT_BTN_OUTLINE)} disabled>
           <IconRefresh className='mr-1.5 size-3.5' />
           Sync now
         </Button>
-        <Button size='sm' variant='ghost' className='rounded-full text-muted-foreground'>
+        <Button size='sm' variant='ghost' className='rounded-full text-muted-foreground' disabled>
           Manage
         </Button>
       </div>
@@ -321,6 +326,11 @@ function DayGroup({
 }
 
 export default function CalendarScreen({ onStartRecording }: { onStartRecording: () => void }) {
+  const { user } = useAuth();
+  // Calendar integration is intentionally gated behind MCP (no direct Google Calendar API here).
+  // Until MCP is configured, we show an empty agenda.
+  const calendarEvents: CalendarEvent[] = [];
+
   const [autoRecordById, setAutoRecordById] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(
       calendarEvents.filter((e) => e.recurring).map((e) => [e.id, true])
@@ -350,7 +360,7 @@ export default function CalendarScreen({ onStartRecording }: { onStartRecording:
 
   return (
     <section className='space-y-5'>
-      <CalendarConnectionCard />
+      <CalendarConnectionCard email={user?.email} />
 
       <div className='grid gap-3 sm:grid-cols-3'>
         <CalendarStat
@@ -376,7 +386,7 @@ export default function CalendarScreen({ onStartRecording }: { onStartRecording:
       <div className='flex flex-wrap items-center justify-between gap-3'>
         <div>
           <p className='text-sm font-semibold text-foreground'>{formatTodayHeading()}</p>
-          <p className='text-xs text-muted-foreground'>Agenda from your connected calendar</p>
+          <p className='text-xs text-muted-foreground'>Agenda will appear after Calendar MCP is connected</p>
         </div>
         <div className='inline-flex items-center gap-1 rounded-xl border border-border/70 bg-muted/50 p-1'>
           <Button size='icon-sm' variant='ghost' className='size-8 rounded-lg' aria-label='Previous week'>
@@ -433,7 +443,7 @@ export default function CalendarScreen({ onStartRecording }: { onStartRecording:
             <IconCalendarEvent className='mx-auto size-10 text-muted-foreground/50' />
             <p className='mt-3 text-sm font-medium text-foreground'>No upcoming meetings</p>
             <p className='mt-1 text-sm text-muted-foreground'>
-              Connect Google Calendar in Settings → Integrations.
+              Calendar syncing is enabled via MCP. Connect it in Settings → Integrations once the MCP server is available.
             </p>
           </div>
         )}

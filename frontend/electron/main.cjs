@@ -1,11 +1,12 @@
 const fs = require('node:fs');
 const path = require('node:path');
-const { app, BrowserWindow, Menu, Tray, globalShortcut, ipcMain, screen, nativeImage } = require('electron');
+const { app, BrowserWindow, Menu, Tray, globalShortcut, ipcMain, screen, nativeImage, shell } = require('electron');
 
 const permissions = require('./permissions.cjs');
 const AudioRecordingService = require('./audio-recording-service.cjs');
 
 const APP_NAME = 'AI Meeting Copilot';
+const DESKTOP_PROTOCOL = process.env.DESKTOP_PROTOCOL || 'ai-meeting-copilot';
 
 const isTestMode = process.env.ELECTRON_TEST_MODE === '1';
 
@@ -108,6 +109,49 @@ function emit(channel, payload) {
     if (!win || win.isDestroyed()) continue;
     win.webContents.send(channel, payload);
   }
+}
+
+function registerDeepLinking() {
+  // Register custom protocol for OAuth callback.
+  try {
+    if (process.defaultApp) {
+      if (process.argv.length >= 2) {
+        app.setAsDefaultProtocolClient(DESKTOP_PROTOCOL, process.execPath, [process.argv[1]]);
+      }
+    } else {
+      app.setAsDefaultProtocolClient(DESKTOP_PROTOCOL);
+    }
+  } catch (error) {
+    console.warn('[desktop] Failed to register protocol client', error);
+  }
+
+  // macOS deep link handler
+  app.on('open-url', (event, url) => {
+    event.preventDefault();
+    emit('auth:callback', { url });
+    if (mainWindow) {
+      mainWindow.show();
+      mainWindow.focus();
+    }
+  });
+
+  // Windows/Linux deep link handler (second instance)
+  const gotLock = app.requestSingleInstanceLock();
+  if (!gotLock) {
+    app.quit();
+    return;
+  }
+
+  app.on('second-instance', (_event, argv) => {
+    const deepLink = argv.find((arg) => typeof arg === 'string' && arg.startsWith(`${DESKTOP_PROTOCOL}://`));
+    if (deepLink) {
+      emit('auth:callback', { url: deepLink });
+      if (mainWindow) {
+        mainWindow.show();
+        mainWindow.focus();
+      }
+    }
+  });
 }
 
 function emitRecordingState() {
@@ -634,6 +678,16 @@ function registerIpcHandlers() {
     emit('theme:changed', preference);
     return { ok: true };
   });
+
+  ipcMain.handle('desktop:open-external', async (_event, url) => {
+    try {
+      await shell.openExternal(String(url));
+      return { ok: true };
+    } catch (error) {
+      console.error('[desktop] openExternal failed', error);
+      return { ok: false };
+    }
+  });
 }
 
 app.setName(APP_NAME);
@@ -644,6 +698,7 @@ if (process.platform === 'win32') {
 
 app.whenReady().then(() => {
   registerIpcHandlers();
+  registerDeepLinking();
   createMainWindow();
   applyDockIcon();
   if (!isTestMode) {

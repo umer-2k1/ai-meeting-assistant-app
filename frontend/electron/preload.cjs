@@ -15,6 +15,10 @@ contextBridge.exposeInMainWorld('desktop', {
   app: {
     getInfo: () => ipcRenderer.invoke('desktop:app-info')
   },
+  auth: {
+    openExternal: (url) => ipcRenderer.invoke('desktop:open-external', url),
+    onCallback: (callback) => registerListener('auth:callback', callback)
+  },
   permissions: {
     getAll: () => ipcRenderer.invoke('desktop:permissions:get-all'),
     requestMicrophone: () => ipcRenderer.invoke('desktop:permissions:request-microphone'),

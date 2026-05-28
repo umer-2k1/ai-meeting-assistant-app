@@ -66,7 +66,8 @@
     "tailwind-merge": "3.5.0",
     "vaul": "^1.1.2",
     "zod": "4.3.6",
-    "zustand": "^5.0.13"
+    "zustand": "^5.0.13",
+    "@deepgram/sdk": "^3.10.0"
   },
   "devDependencies": {
     "@commitlint/cli": "20.5.2",

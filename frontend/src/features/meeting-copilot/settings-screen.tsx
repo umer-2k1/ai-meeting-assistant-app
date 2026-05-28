@@ -15,6 +15,7 @@ import {
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import {
   Select,
   SelectContent,
@@ -27,6 +28,7 @@ import { cn } from '@/lib/utils';
 
 import SettingsPermissionsPanel from './settings-permissions-panel';
 import { SettingsRow, SettingsSection, SettingsSwitch } from './settings-ui';
+import { useAuth } from '@/contexts/auth-context';
 
 const AUDIO_DEVICES = [
   { value: 'default', label: 'System default' },
@@ -591,11 +593,41 @@ function GeneralTab({ isDesktop }: { isDesktop: boolean }) {
   );
 }
 
+function AccountTab() {
+  const { user, logout } = useAuth();
+
+  return (
+    <div className='space-y-4'>
+      <SettingsSection title='Account' description='Your signed-in profile and session controls.'>
+        <SettingsRow label='Name' description='Shown in the sidebar and profile menu.'>
+          <Input value={user?.name ?? ''} readOnly className='max-w-[320px]' />
+        </SettingsRow>
+        <SettingsRow label='Email' description='Email cannot be changed.'>
+          <Input value={user?.email ?? ''} readOnly className='max-w-[320px]' />
+        </SettingsRow>
+        <SettingsRow label='Session' description='Sign out of this device.'>
+          <Button
+            size='sm'
+            variant='outline'
+            className='rounded-full gap-1.5 text-destructive hover:border-destructive/50 hover:bg-destructive/10 hover:text-destructive'
+            onClick={logout}
+          >
+            Logout
+          </Button>
+        </SettingsRow>
+      </SettingsSection>
+    </div>
+  );
+}
+
 export default function SettingsScreen({ isDesktop }: { isDesktop: boolean }) {
   return (
     <section className='space-y-4'>
       <Tabs defaultValue='general' className='gap-4'>
         <TabsList className='h-auto w-full flex-wrap justify-start gap-1 rounded-xl border border-border/70 bg-muted/70 p-1'>
+          <TabsTrigger value='account' className='rounded-lg px-3'>
+            Account
+          </TabsTrigger>
           <TabsTrigger value='general' className='rounded-lg px-3'>
             General
           </TabsTrigger>
@@ -618,6 +650,9 @@ export default function SettingsScreen({ isDesktop }: { isDesktop: boolean }) {
 
         <TabsContent value='general' className='mt-0 space-y-4'>
           <GeneralTab isDesktop={isDesktop} />
+        </TabsContent>
+        <TabsContent value='account' className='mt-0 space-y-4'>
+          <AccountTab />
         </TabsContent>
         <TabsContent value='audio' className='mt-0'>
           <AudioSettingsTab />
