@@ -374,8 +374,7 @@ See [`docs/todo.md`](docs/todo.md) for complete roadmap.
 
 ## Start Services
 # Terminal 1: PostgreSQL + Qdrant (if using Docker)
-docker run -d -p 5432:5432 -e POSTGRES_PASSWORD=password postgres
-docker run -d -p 6333:6333 qdrant/qdrant
+docker-compose up -d
 
 # Terminal 2: Initialize Database
 cd backend
