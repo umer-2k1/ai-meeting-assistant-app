@@ -10,6 +10,7 @@ import {
 } from '../services/meeting.js';
 import { processMeeting, reprocessMeeting } from '../services/processing.js';
 import { answerMeetingQuestion } from '../services/ai.js';
+import { getRouteParam } from '../lib/params.js';
 
 const router = express.Router();
 
@@ -40,7 +41,8 @@ router.get('/', requireAuth, async (req, res) => {
  */
 router.get('/:id', requireAuth, async (req, res) => {
   try {
-    const meeting = await getMeetingWithDetails(req.params.id, req.user!.id);
+    const meetingId = getRouteParam(req.params.id);
+    const meeting = await getMeetingWithDetails(meetingId, req.user!.id);
 
     if (!meeting) {
       return res.status(404).json({ error: 'Meeting not found' });
@@ -87,13 +89,14 @@ router.post('/', requireAuth, async (req, res) => {
  */
 router.post('/:id/transcript', requireAuth, async (req, res) => {
   try {
+    const meetingId = getRouteParam(req.params.id);
     const { speaker, text, timestamp, timestampSeconds, confidence, highlighted } = req.body;
 
     if (!speaker || !text || !timestamp || timestampSeconds === undefined) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
-    const transcriptLine = await addTranscriptLine(req.params.id, {
+    const transcriptLine = await addTranscriptLine(meetingId, {
       speaker,
       text,
       timestamp,
@@ -115,18 +118,19 @@ router.post('/:id/transcript', requireAuth, async (req, res) => {
  */
 router.post('/:id/complete', requireAuth, async (req, res) => {
   try {
+    const meetingId = getRouteParam(req.params.id);
     const { audioPath } = req.body;
 
     // Update meeting status
-    const meeting = await completeMeeting(req.params.id);
+    const meeting = await completeMeeting(meetingId);
 
     // Upload audio if provided
     if (audioPath) {
-      await updateMeetingAudio(req.params.id, audioPath);
+      await updateMeetingAudio(meetingId, audioPath);
     }
 
     // Trigger async processing
-    processMeeting(req.params.id).catch((error) => {
+    processMeeting(meetingId).catch((error) => {
       console.error('Background processing error:', error);
     });
 
@@ -143,7 +147,8 @@ router.post('/:id/complete', requireAuth, async (req, res) => {
  */
 router.post('/:id/reprocess', requireAuth, async (req, res) => {
   try {
-    const result = await reprocessMeeting(req.params.id, req.user!.id);
+    const meetingId = getRouteParam(req.params.id);
+    const result = await reprocessMeeting(meetingId, req.user!.id);
     res.json(result);
   } catch (error) {
     console.error('Reprocess meeting error:', error);
@@ -157,13 +162,14 @@ router.post('/:id/reprocess', requireAuth, async (req, res) => {
  */
 router.post('/:id/ask', requireAuth, async (req, res) => {
   try {
+    const meetingId = getRouteParam(req.params.id);
     const { question } = req.body;
 
     if (!question) {
       return res.status(400).json({ error: 'Question is required' });
     }
 
-    const meeting = await getMeetingWithDetails(req.params.id, req.user!.id);
+    const meeting = await getMeetingWithDetails(meetingId, req.user!.id);
 
     if (!meeting) {
       return res.status(404).json({ error: 'Meeting not found' });

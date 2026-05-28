@@ -1,16 +1,6 @@
 import type { Request, Response, NextFunction } from 'express';
 import { extractTokenFromHeader, verifyToken } from '../lib/jwt.js';
 import prisma from '../lib/prisma.js';
-import type { User } from '@prisma/client';
-
-// Extend Express Request type to include user
-declare global {
-  namespace Express {
-    interface Request {
-      user?: User;
-    }
-  }
-}
 
 /**
  * Middleware to require authentication

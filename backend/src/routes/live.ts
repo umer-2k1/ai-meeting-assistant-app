@@ -8,6 +8,8 @@ import {
 } from '../services/meeting.js';
 import { answerMeetingQuestionStream } from '../services/ai-stream.js';
 import { searchTranscripts, generateEmbedding } from '../services/embeddings.js';
+import { storeTranscriptEmbedding } from '../services/vector-store.js';
+import { getRouteParam } from '../lib/params.js';
 
 const router = express.Router();
 
@@ -55,15 +57,16 @@ router.post('/meetings', requireAuth, async (req, res) => {
  */
 router.post('/meetings/:id/transcript', requireAuth, async (req, res) => {
   try {
+    const meetingId = getRouteParam(req.params.id);
     const validated = validateOrThrow(createTranscriptLineSchema, {
       ...req.body,
-      meetingId: req.params.id,
+      meetingId,
     });
 
-    const transcriptLine = await addTranscriptLine(req.params.id, validated);
+    const transcriptLine = await addTranscriptLine(meetingId, validated);
 
     // Generate embedding in background (don't block response)
-    const { embedTranscriptChunk, storeTranscriptEmbedding } = await import('../services/embeddings.js');
+    const { embedTranscriptChunk } = await import('../services/embeddings.js');
     const { default: prisma } = await import('../lib/prisma.js');
     
     embedTranscriptChunk({
@@ -73,7 +76,7 @@ router.post('/meetings/:id/transcript', requireAuth, async (req, res) => {
     })
       .then((embedding) => {
         return storeTranscriptEmbedding(transcriptLine.id, embedding, {
-          meetingId: req.params.id,
+          meetingId,
           speaker: transcriptLine.speaker,
           text: transcriptLine.text,
           timestamp: transcriptLine.timestamp,
@@ -108,6 +111,7 @@ router.post('/meetings/:id/transcript', requireAuth, async (req, res) => {
  */
 router.post('/meetings/:id/ask', requireAuth, async (req, res) => {
   try {
+    const meetingId = getRouteParam(req.params.id);
     const validated = validateOrThrow(askQuestionSchema, req.body);
 
     // Check if streaming is requested
@@ -118,7 +122,7 @@ router.post('/meetings/:id/ask', requireAuth, async (req, res) => {
       res.setHeader('Connection', 'keep-alive');
 
       // Get meeting with current transcript
-      const meeting = await getMeetingWithDetails(req.params.id, req.user!.id);
+      const meeting = await getMeetingWithDetails(meetingId, req.user!.id);
 
       if (!meeting) {
         res.write(`data: ${JSON.stringify({ error: 'Meeting not found' })}\n\n`);
@@ -128,12 +132,18 @@ router.post('/meetings/:id/ask', requireAuth, async (req, res) => {
 
       // Get relevant context using vector search
       const queryEmbedding = await generateEmbedding(validated.question);
-      const relevantSnippets = await searchTranscripts(queryEmbedding, req.params.id, 5);
+      const relevantSnippets = await searchTranscripts(queryEmbedding, meetingId, 5);
+
+      type TranscriptPayload = {
+        timestamp?: string;
+        speaker?: string;
+        text?: string;
+      };
 
       const transcriptContext = relevantSnippets
         .map((result) => {
-          const payload = result.payload as any;
-          return `[${payload.timestamp}] ${payload.speaker}: ${payload.text}`;
+          const payload = result.payload as TranscriptPayload;
+          return `[${payload.timestamp ?? ''}] ${payload.speaker ?? ''}: ${payload.text ?? ''}`;
         })
         .join('\n');
 
@@ -185,7 +195,7 @@ router.post('/meetings/:id/ask', requireAuth, async (req, res) => {
       );
     } else {
       // Non-streaming response (legacy)
-      const meeting = await getMeetingWithDetails(req.params.id, req.user!.id);
+      const meeting = await getMeetingWithDetails(meetingId, req.user!.id);
       
       if (!meeting) {
         return res.status(404).json({ error: 'Meeting not found' });

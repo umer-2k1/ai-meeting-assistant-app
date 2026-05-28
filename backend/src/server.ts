@@ -6,6 +6,7 @@ import session from 'express-session';
 import passport from './lib/passport.js';
 import authRoutes from './routes/auth.js';
 import { requireAuth, optionalAuth } from './middleware/auth.js';
+import { getRouteParam } from './lib/params.js';
 import { sampleMeetings, sampleTranscript } from './data.js';
 
 // Load environment variables
@@ -103,7 +104,7 @@ app.get('/api/meetings-legacy', optionalAuth, async (request, response) => {
 
 app.get('/api/meetings/:meetingId/transcript', optionalAuth, async (request, response) => {
   try {
-    const { meetingId } = request.params;
+    const meetingId = getRouteParam(request.params.meetingId);
 
     // If user is authenticated, fetch from database
     if (request.user) {
