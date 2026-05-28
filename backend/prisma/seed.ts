@@ -1,5 +1,4 @@
-import { PrismaClient, User } from '@prisma/client';
-import prisma from '../lib/prisma.js';
+import prisma from '../src/lib/prisma.js';
 
 /**
  * Seed database with initial data
@@ -93,7 +92,8 @@ async function seed() {
 seed()
   .catch((error) => {
     console.error('❌ Seeding failed:', error);
-    process.exit(1);
+    // Avoid importing Node builtins just for typing; still exit in Node.
+    (globalThis as any).process?.exit?.(1);
   })
   .finally(async () => {
     await prisma.$disconnect();

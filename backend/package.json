@@ -17,7 +17,7 @@
     "@deepgram/sdk": "^3.10.0",
     "@google/generative-ai": "^0.21.0",
     "@langchain/community": "^0.3.22",
-    "@langchain/core": "^0.3.28",
+    "@langchain/core": "^1.1.48",
     "@langchain/groq": "^1.2.1",
     "@langchain/qdrant": "^1.0.3",
     "@prisma/client": "^6.3.0",
