@@ -6,5 +6,7 @@
   <string>AI Meeting Copilot needs microphone access to transcribe your voice during meetings.</string>
   <key>NSCameraUsageDescription</key>
   <string>AI Meeting Copilot does not require the camera for meeting transcription.</string>
+  <key>NSScreenCaptureUsageDescription</key>
+  <string>AI Meeting Copilot needs Screen Recording access to capture system and meeting audio.</string>
 </dict>
 </plist>

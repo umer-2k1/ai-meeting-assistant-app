@@ -342,16 +342,7 @@ export function useSystemAudioTest(isDesktop: boolean) {
     setPhase('requesting');
 
     try {
-      const snapshot = await refreshPermission();
-
-      if (isDesktop && !snapshot.granted && snapshot.status !== 'unsupported') {
-        setVerdict('no-permission');
-        setPhase('error');
-        setError(
-          'Screen Recording permission is required for system audio on macOS. Open Settings to enable it, then try again.'
-        );
-        return;
-      }
+      await refreshPermission();
 
       await loadSources();
       releaseCapture();
@@ -422,6 +413,50 @@ export function useSystemAudioTest(isDesktop: boolean) {
     await refreshPermission();
   }, [refreshPermission]);
 
+  /** Triggers macOS TCC so the app appears under Screen Recording in System Settings. */
+  const registerScreenRecordingAccess = useCallback(async () => {
+    setPhase('requesting');
+    setError(null);
+
+    try {
+      await loadSources();
+
+      if (isDesktop && selectedSourceId && globalThis.window.desktop?.deviceCheck) {
+        try {
+          const stream = await acquireViaDesktopSource(selectedSourceId);
+          for (const track of stream.getTracks()) {
+            track.stop();
+          }
+        } catch {
+          // Denied or cancelled — app should still appear in Screen Recording list
+        }
+      } else if (typeof navigator.mediaDevices?.getDisplayMedia === 'function') {
+        try {
+          const stream = await acquireViaDisplayMedia();
+          for (const track of stream.getTracks()) {
+            track.stop();
+          }
+        } catch {
+          // User cancelled picker or denied
+        }
+      }
+
+      const snapshot = await refreshPermission();
+      if (snapshot.granted) {
+        setVerdict('idle');
+        setPhase('idle');
+        return;
+      }
+
+      setVerdict('no-permission');
+      setPhase('idle');
+    } catch (registerError) {
+      setError(getMediaErrorMessage(registerError));
+      setVerdict('error');
+      setPhase('error');
+    }
+  }, [isDesktop, loadSources, refreshPermission, selectedSourceId]);
+
   useEffect(() => {
     void refreshPermission();
     void loadSources();
@@ -456,6 +491,7 @@ export function useSystemAudioTest(isDesktop: boolean) {
     endTestAndPreview,
     discardPreview,
     openSystemAudioSettings,
+    registerScreenRecordingAccess,
     soundThreshold: SOUND_LEVEL_THRESHOLD,
   };
 }

@@ -14,9 +14,14 @@ type DesktopTranscriptLine = {
   highlighted?: boolean;
 };
 
-type DesktopAppInfo = {
+export type DesktopAppInfo = {
   platform: string;
   versions: Record<string, string>;
+  name?: string;
+  execPath?: string;
+  isPackaged?: boolean;
+  /** Name shown in System Settings → Screen Recording (often "Electron" during dev). */
+  settingsAppName?: string;
 };
 
 type WidgetSize = {

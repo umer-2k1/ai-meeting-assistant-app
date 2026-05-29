@@ -71,7 +71,7 @@ function getHelpText(id, platform, snapshot) {
     },
     systemAudio: {
       darwin:
-        'Open System Settings → Privacy & Security → Screen Recording and enable this app. macOS does not provide an in-app prompt for system audio.',
+        'In dev, enable the toggle for "Electron" under System Settings → Privacy & Security → Screen Recording (not "AI Meeting Copilot"). Run the system audio test once so the app appears in the list.',
       win32:
         'If system audio is blocked, allow desktop apps under Settings → Privacy & security. Windows may not show a separate in-app prompt.',
     },

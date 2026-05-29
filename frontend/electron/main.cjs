@@ -619,10 +619,25 @@ function configureMediaSessionPermissions() {
 }
 
 function registerIpcHandlers() {
-  ipcMain.handle('desktop:app-info', () => ({
-    platform: process.platform,
-    versions: process.versions
-  }));
+  ipcMain.handle('desktop:app-info', () => {
+    const execPath = process.execPath;
+    const isPackaged = app.isPackaged;
+    const displayName = app.getName();
+
+    let settingsAppName = displayName;
+    if (process.platform === 'darwin' && !isPackaged) {
+      settingsAppName = 'Electron';
+    }
+
+    return {
+      platform: process.platform,
+      versions: process.versions,
+      name: displayName,
+      execPath,
+      isPackaged,
+      settingsAppName,
+    };
+  });
 
   ipcMain.handle('desktop:permissions:get-all', () => permissions.getAllPermissions());
 

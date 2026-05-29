@@ -13,7 +13,6 @@ import {
   IconHeadphones,
   IconLayoutDashboard,
   IconMicrophone,
-  IconMicrophone2,
   IconLogout,
   IconPlayerPause,
   IconPlayerStop,
@@ -66,16 +65,8 @@ const SIDEBAR_LINKS: Array<{
   { id: 'dashboard', label: 'Dashboard', icon: IconLayoutDashboard },
   { id: 'live', label: 'Live Session', icon: IconMicrophone },
   { id: 'calendar', label: 'Calendar', icon: IconCalendarEvent },
+  { id: 'device-check', label: 'Device Check', icon: IconHeadphones },
   { id: 'settings', label: 'Settings', icon: IconSettings }
-];
-
-const DEVICE_CHECK_LINKS: Array<{
-  tab: DeviceCheckTab;
-  label: string;
-  icon: IconComponent;
-}> = [
-  { tab: 'microphone', label: 'Microphone Test', icon: IconMicrophone2 },
-  { tab: 'system-audio', label: 'System Audio Test', icon: IconHeadphones }
 ];
 
 const QUICK_ASK_PROMPTS = [
@@ -135,16 +126,12 @@ function createRealtimeLine(nextIndex: number): TranscriptLine {
 
 function AppSidebar({
   activeView,
-  deviceCheckTab,
   onNavigate,
-  onDeviceCheckTab,
   onStartRecording,
   selectedMeeting
 }: {
   activeView: View;
-  deviceCheckTab: DeviceCheckTab;
   onNavigate: (view: View) => void;
-  onDeviceCheckTab: (tab: DeviceCheckTab) => void;
   onStartRecording: () => void;
   selectedMeeting: Meeting;
 }) {
@@ -188,37 +175,6 @@ function AppSidebar({
           );
         })}
       </nav>
-
-      <div className='mt-5'>
-        <p className='mb-2 px-2 text-[11px] font-semibold tracking-[0.15em] text-muted-foreground uppercase'>
-          Device Check
-        </p>
-        <div className='space-y-1'>
-          {DEVICE_CHECK_LINKS.map((entry) => {
-            const Icon = entry.icon;
-            const isActive = activeView === 'device-check' && deviceCheckTab === entry.tab;
-            return (
-              <button
-                key={entry.tab}
-                type='button'
-                onClick={() => {
-                  onDeviceCheckTab(entry.tab);
-                  onNavigate('device-check');
-                }}
-                className={cn(
-                  'flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm transition-all duration-200',
-                  isActive
-                    ? 'bg-gradient-to-r from-[#1E3A8A] to-[#3B82F6] text-white shadow-[0_8px_24px_rgba(59,130,246,0.35)]'
-                    : 'text-muted-foreground hover:bg-[var(--copilot-nav-hover)] hover:text-foreground'
-                )}
-              >
-                <Icon className='size-4' />
-                {entry.label}
-              </button>
-            );
-          })}
-        </div>
-      </div>
 
       <div className='mt-5'>
         <p className='mb-2 px-2 text-[11px] font-semibold tracking-[0.15em] text-muted-foreground uppercase'>
@@ -816,17 +772,19 @@ export default function MeetingCopilotApp() {
           .then((state) => {
             if (state.blockedReason === 'microphone') {
               setAskError(
-                'Microphone access is required. Open Settings → General → Permissions to enable it.'
+                'Microphone access is required. Run the Microphone Test under Device Check to enable it.'
               );
-              setView('settings');
+              setDeviceCheckTab('microphone');
+              setView('device-check');
               return;
             }
 
             if (state.blockedReason === 'systemAudio') {
               setAskError(
-                'System audio recording is required. Open Settings → General → Permissions and follow the steps for System audio recording.'
+                'System audio recording is required. Run the System Audio Test under Device Check to enable it.'
               );
-              setView('settings');
+              setDeviceCheckTab('system-audio');
+              setView('device-check');
               return;
             }
 
@@ -850,9 +808,10 @@ export default function MeetingCopilotApp() {
         const mic = await requestDesktopMicrophone();
         if (!mic?.granted) {
           setAskError(
-            'Microphone access is required to record. Enable it in Settings → General → Permissions.'
+            'Microphone access is required to record. Run the Microphone Test under Device Check.'
           );
-          setView('settings');
+          setDeviceCheckTab('microphone');
+          setView('device-check');
           return;
         }
         beginSession();
@@ -924,9 +883,7 @@ export default function MeetingCopilotApp() {
       <div className='relative z-10 mx-auto flex h-full min-h-0 w-full max-w-[1800px]'>
         <AppSidebar
           activeView={view}
-          deviceCheckTab={deviceCheckTab}
           onNavigate={setView}
-          onDeviceCheckTab={setDeviceCheckTab}
           onStartRecording={startRecording}
           selectedMeeting={selectedMeeting}
         />

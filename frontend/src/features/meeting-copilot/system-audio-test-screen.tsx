@@ -11,11 +11,10 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { cn } from '@/lib/utils';
-
 import { COPILOT_SURFACE } from './copilot-styles';
 import { AudioPreview, LevelMeter, LiveAudioMonitor } from './device-check-ui';
 import type { PermissionStatus } from './permissions';
+import ScreenRecordingHelp from './screen-recording-help';
 import { useSystemAudioTest } from './use-system-audio-test';
 
 const SURFACE = COPILOT_SURFACE;
@@ -131,6 +130,7 @@ export default function SystemAudioTestScreen({ isDesktop }: { isDesktop: boolea
     endTestAndPreview,
     discardPreview,
     openSystemAudioSettings,
+    registerScreenRecordingAccess,
     soundThreshold,
   } = useSystemAudioTest(isDesktop);
 
@@ -162,7 +162,7 @@ export default function SystemAudioTestScreen({ isDesktop }: { isDesktop: boolea
               {isDesktop
                 ? permission.granted
                   ? 'Screen Recording is enabled for system audio capture.'
-                  : 'On macOS, enable Screen Recording for this app (may appear as Electron in dev).'
+                  : 'Enable Screen Recording for this app in macOS System Settings (see steps below).'
                 : 'Use the desktop app for full system audio capture.'}
             </span>
             <Button
@@ -178,16 +178,16 @@ export default function SystemAudioTestScreen({ isDesktop }: { isDesktop: boolea
             </Button>
           </div>
           {isDesktop && !permission.granted && permission.status !== 'unsupported' ? (
-            <Button
-              variant='outline'
-              size='sm'
-              className='rounded-full'
-              onClick={() => {
+            <ScreenRecordingHelp
+              isDesktop={isDesktop}
+              isRequesting={phase === 'requesting'}
+              onOpenSettings={() => {
                 void openSystemAudioSettings();
               }}
-            >
-              Open Screen Recording settings
-            </Button>
+              onRequestAccess={() => {
+                void registerScreenRecordingAccess();
+              }}
+            />
           ) : null}
         </CardContent>
       </Card>
