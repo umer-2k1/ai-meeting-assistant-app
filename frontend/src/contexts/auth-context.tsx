@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import type { ReactNode } from 'react';
+import { startGoogleSignIn } from '@/lib/google-auth';
 
 export interface User {
   id: string;
@@ -47,6 +48,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsLoading(false);
   }, []);
 
+  const setAuth = useCallback((newToken: string, newUser: User) => {
+    setToken(newToken);
+    setUser(newUser);
+    localStorage.setItem(TOKEN_KEY, newToken);
+    localStorage.setItem(USER_KEY, JSON.stringify(newUser));
+  }, []);
+
   // Desktop deep-link OAuth callback handler (external browser -> app)
   useEffect(() => {
     const desktop = globalThis.window.desktop;
@@ -55,7 +63,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return desktop.auth.onCallback((payload: { url?: string }) => {
       try {
         const url = payload?.url;
-        if (!url) return;
+        if (!url || !url.includes('auth/callback')) return;
 
         const parsed = new URL(url);
         const tokenParam = parsed.searchParams.get('token');
@@ -65,23 +73,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         const nextUser = JSON.parse(decodeURIComponent(userParam)) as User;
         setAuth(tokenParam, nextUser);
+
+        // Return to app UI after system-browser sign-in (deep link does not change route)
+        if (globalThis.window.location.pathname === '/login') {
+          globalThis.window.location.replace('/dashboard');
+        }
       } catch (error) {
         console.error('Failed to handle desktop auth callback:', error);
       }
     });
-  }, []);
+  }, [setAuth]);
 
   const login = useCallback(() => {
-    const backendUrl = import.meta.env['VITE_BACKEND_URL'] || 'http://localhost:3001';
-    const desktop = globalThis.window.desktop;
-    // Desktop: open in system browser (uses existing Google session), then return via deep link
-    if (desktop?.auth?.openExternal) {
-      void desktop.auth.openExternal(`${backendUrl}/auth/google?source=desktop`);
-      return;
-    }
-
-    // Web: navigate current tab
-    window.location.href = `${backendUrl}/auth/google`;
+    startGoogleSignIn();
   }, []);
 
   const logout = useCallback(() => {
@@ -89,13 +93,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setToken(null);
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(USER_KEY);
-  }, []);
-
-  const setAuth = useCallback((newToken: string, newUser: User) => {
-    setToken(newToken);
-    setUser(newUser);
-    localStorage.setItem(TOKEN_KEY, newToken);
-    localStorage.setItem(USER_KEY, JSON.stringify(newUser));
   }, []);
 
   const value = useMemo<AuthContextType>(

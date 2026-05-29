@@ -33,7 +33,7 @@ import MeetingAudioPlayer from './meeting-audio-player';
 import MeetingExportBar from './meeting-export-bar';
 import { getTagClassName } from './tag-styles';
 
-type View = 'dashboard' | 'live' | 'detail' | 'calendar' | 'settings';
+type View = 'dashboard' | 'live' | 'detail' | 'calendar' | 'device-check' | 'settings';
 
 function priorityVariant(priority: 'high' | 'medium' | 'low') {
   if (priority === 'high') return 'destructive' as const;

@@ -2,7 +2,7 @@ type DesktopRecordingState = {
   isRecording: boolean;
   isPaused: boolean;
   elapsedSeconds: number;
-  blockedReason?: 'microphone';
+  blockedReason?: 'microphone' | 'systemAudio';
   permissionStatus?: string;
 };
 
@@ -33,6 +33,23 @@ type WidgetSizeLimits = WidgetSize & {
 
 type ThemePreference = 'dark' | 'light' | 'system';
 
+type DesktopCaptureSource = {
+  id: string;
+  name: string;
+  displayId?: string;
+};
+
+type DesktopPermissionItem = {
+  id: 'microphone' | 'systemAudio' | 'notifications';
+  title: string;
+  description: string;
+  requestKind: 'systemPrompt' | 'settingsOnly';
+  icon: 'microphone' | 'systemAudio' | 'notifications';
+  snapshot: { status: string; granted: boolean; canRequest?: boolean };
+  action: 'enable' | 'openSettings' | 'none';
+  helpText: string | null;
+};
+
 type DesktopApi = {
   app: {
     getInfo: () => Promise<DesktopAppInfo>;
@@ -48,13 +65,14 @@ type DesktopApi = {
   permissions: {
     getAll: () => Promise<{
       platform: string;
-      microphone: { status: string; granted: boolean; canRequest?: boolean };
-      accessibility: { status: string; granted: boolean; canRequest?: boolean };
-      notifications: { status: string; granted: boolean; canRequest?: boolean };
+      items: DesktopPermissionItem[];
     }>;
     requestMicrophone: () => Promise<{ status: string; granted: boolean }>;
-    requestAccessibility: () => Promise<{ status: string; granted: boolean }>;
-    openSettings: (target: 'microphone' | 'accessibility' | 'notifications') => Promise<{ ok: boolean }>;
+    requestNotifications: () => Promise<{ status: string; granted: boolean }>;
+    openSettings: (target: 'microphone' | 'systemAudio' | 'notifications') => Promise<{ ok: boolean }>;
+  };
+  deviceCheck: {
+    listCaptureSources: () => Promise<DesktopCaptureSource[]>;
   };
   recording: {
     start: () => Promise<DesktopRecordingState>;

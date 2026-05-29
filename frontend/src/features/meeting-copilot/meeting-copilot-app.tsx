@@ -10,8 +10,10 @@ import {
   IconFileText,
   IconFolders,
   IconInfoCircle,
+  IconHeadphones,
   IconLayoutDashboard,
   IconMicrophone,
+  IconMicrophone2,
   IconLogout,
   IconPlayerPause,
   IconPlayerStop,
@@ -46,11 +48,12 @@ import {
 } from './copilot-styles';
 import './copilot-theme.css';
 import CalendarScreen from './calendar-screen';
+import DeviceCheckScreen, { type DeviceCheckTab } from './device-check-screen';
 import MeetingDetailScreen from './meeting-detail/meeting-detail-screen';
 import { meetings, quickAiAnswers, starterTranscript } from './mock-data';
 import type { AiAnswer, Meeting, TranscriptLine } from './types';
 
-type View = 'dashboard' | 'live' | 'detail' | 'calendar' | 'settings';
+type View = 'dashboard' | 'live' | 'detail' | 'calendar' | 'device-check' | 'settings';
 type RuntimeMode = 'web' | 'desktop';
 
 type IconComponent = typeof IconLayoutDashboard;
@@ -64,6 +67,15 @@ const SIDEBAR_LINKS: Array<{
   { id: 'live', label: 'Live Session', icon: IconMicrophone },
   { id: 'calendar', label: 'Calendar', icon: IconCalendarEvent },
   { id: 'settings', label: 'Settings', icon: IconSettings }
+];
+
+const DEVICE_CHECK_LINKS: Array<{
+  tab: DeviceCheckTab;
+  label: string;
+  icon: IconComponent;
+}> = [
+  { tab: 'microphone', label: 'Microphone Test', icon: IconMicrophone2 },
+  { tab: 'system-audio', label: 'System Audio Test', icon: IconHeadphones }
 ];
 
 const QUICK_ASK_PROMPTS = [
@@ -90,6 +102,11 @@ const PAGE_META: Record<View, { title: string; description: string }> = {
   calendar: {
     title: 'Calendar',
     description: 'Upcoming meetings and recording controls from your calendar.'
+  },
+  'device-check': {
+    title: 'Device Check',
+    description:
+      'Validate microphone input and system audio capture before joining or starting a meeting.'
   },
   settings: {
     title: 'Settings',
@@ -118,12 +135,16 @@ function createRealtimeLine(nextIndex: number): TranscriptLine {
 
 function AppSidebar({
   activeView,
+  deviceCheckTab,
   onNavigate,
+  onDeviceCheckTab,
   onStartRecording,
   selectedMeeting
 }: {
   activeView: View;
+  deviceCheckTab: DeviceCheckTab;
   onNavigate: (view: View) => void;
+  onDeviceCheckTab: (tab: DeviceCheckTab) => void;
   onStartRecording: () => void;
   selectedMeeting: Meeting;
 }) {
@@ -167,6 +188,37 @@ function AppSidebar({
           );
         })}
       </nav>
+
+      <div className='mt-5'>
+        <p className='mb-2 px-2 text-[11px] font-semibold tracking-[0.15em] text-muted-foreground uppercase'>
+          Device Check
+        </p>
+        <div className='space-y-1'>
+          {DEVICE_CHECK_LINKS.map((entry) => {
+            const Icon = entry.icon;
+            const isActive = activeView === 'device-check' && deviceCheckTab === entry.tab;
+            return (
+              <button
+                key={entry.tab}
+                type='button'
+                onClick={() => {
+                  onDeviceCheckTab(entry.tab);
+                  onNavigate('device-check');
+                }}
+                className={cn(
+                  'flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm transition-all duration-200',
+                  isActive
+                    ? 'bg-gradient-to-r from-[#1E3A8A] to-[#3B82F6] text-white shadow-[0_8px_24px_rgba(59,130,246,0.35)]'
+                    : 'text-muted-foreground hover:bg-[var(--copilot-nav-hover)] hover:text-foreground'
+                )}
+              >
+                <Icon className='size-4' />
+                {entry.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
 
       <div className='mt-5'>
         <p className='mb-2 px-2 text-[11px] font-semibold tracking-[0.15em] text-muted-foreground uppercase'>
@@ -578,7 +630,6 @@ export default function MeetingCopilotApp() {
   }
 
   const [view, setView] = useState<View>('dashboard');
-  const [settingsDefaultTab, setSettingsDefaultTab] = useState('general');
   const [selectedMeetingId, setSelectedMeetingId] = useState(fallbackMeeting.id);
   const [searchText, setSearchText] = useState('');
   const [isRecording, setIsRecording] = useState(false);
@@ -586,23 +637,13 @@ export default function MeetingCopilotApp() {
   const [elapsedSeconds, setElapsedSeconds] = useState(764);
   const [runtimeMode, setRuntimeMode] = useState<RuntimeMode>('web');
   const [desktopPlatform, setDesktopPlatform] = useState<string | null>(null);
+  const [deviceCheckTab, setDeviceCheckTab] = useState<DeviceCheckTab>('microphone');
   const [liveTranscript, setLiveTranscript] = useState<TranscriptLine[]>(starterTranscript);
   const [askInput, setAskInput] = useState('');
   const [detailAskInput, setDetailAskInput] = useState('');
   const [isAsking, setIsAsking] = useState(false);
   const [askError, setAskError] = useState<string | null>(null);
   const [aiAnswers, setAiAnswers] = useState<AiAnswer[]>(quickAiAnswers);
-
-  // Web OAuth return after connecting Google integrations
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const integrations = params.get('integrations');
-    if (integrations === 'connected' || integrations === 'error') {
-      setView('settings');
-      setSettingsDefaultTab('integrations');
-      window.history.replaceState({}, '', window.location.pathname);
-    }
-  }, []);
 
   useEffect(() => {
     const desktopApi = globalThis.window.desktop;
@@ -781,6 +822,14 @@ export default function MeetingCopilotApp() {
               return;
             }
 
+            if (state.blockedReason === 'systemAudio') {
+              setAskError(
+                'System audio recording is required. Open Settings → General → Permissions and follow the steps for System audio recording.'
+              );
+              setView('settings');
+              return;
+            }
+
             setIsRecording(state.isRecording);
             setIsRecordingPaused(state.isPaused);
             setElapsedSeconds(state.elapsedSeconds);
@@ -875,7 +924,9 @@ export default function MeetingCopilotApp() {
       <div className='relative z-10 mx-auto flex h-full min-h-0 w-full max-w-[1800px]'>
         <AppSidebar
           activeView={view}
+          deviceCheckTab={deviceCheckTab}
           onNavigate={setView}
+          onDeviceCheckTab={setDeviceCheckTab}
           onStartRecording={startRecording}
           selectedMeeting={selectedMeeting}
         />
@@ -949,12 +1000,14 @@ export default function MeetingCopilotApp() {
               />
             )}
             {view === 'calendar' && <CalendarScreen onStartRecording={startRecording} />}
-            {view === 'settings' && (
-              <SettingsScreen
+            {view === 'device-check' && (
+              <DeviceCheckScreen
                 isDesktop={runtimeMode === 'desktop'}
-                defaultTab={settingsDefaultTab}
+                activeTab={deviceCheckTab}
+                onTabChange={setDeviceCheckTab}
               />
             )}
+            {view === 'settings' && <SettingsScreen isDesktop={runtimeMode === 'desktop'} />}
           </main>
         </div>
       </div>

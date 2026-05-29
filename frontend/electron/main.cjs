@@ -1,6 +1,19 @@
 const fs = require('node:fs');
 const path = require('node:path');
-const { app, BrowserWindow, Menu, Tray, globalShortcut, ipcMain, screen, nativeImage, shell } = require('electron');
+const {
+  app,
+  BrowserWindow,
+  Menu,
+  Tray,
+  globalShortcut,
+  ipcMain,
+  screen,
+  nativeImage,
+  shell,
+  session,
+  systemPreferences,
+  desktopCapturer,
+} = require('electron');
 
 const permissions = require('./permissions.cjs');
 const AudioRecordingService = require('./audio-recording-service.cjs');
@@ -290,6 +303,45 @@ async function stopRecording() {
   }
 }
 
+function shouldOpenAuthInSystemBrowser(urlString) {
+  if (!urlString || typeof urlString !== 'string') return false;
+  if (urlString.startsWith(`${DESKTOP_PROTOCOL}://`)) return false;
+
+  try {
+    const url = new URL(urlString);
+    if (url.hostname === 'accounts.google.com') return true;
+    if (url.pathname.includes('/auth/google')) return true;
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+function openAuthInSystemBrowser(urlString) {
+  let target = urlString;
+  if (target.includes('/auth/google') && !target.includes('source=desktop')) {
+    target += target.includes('?') ? '&source=desktop' : '?source=desktop';
+  }
+  void shell.openExternal(target);
+}
+
+function attachSystemBrowserForOAuth(win) {
+  win.webContents.on('will-navigate', (event, url) => {
+    if (shouldOpenAuthInSystemBrowser(url)) {
+      event.preventDefault();
+      openAuthInSystemBrowser(url);
+    }
+  });
+
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (shouldOpenAuthInSystemBrowser(url)) {
+      openAuthInSystemBrowser(url);
+      return { action: 'deny' };
+    }
+    return { action: 'allow' };
+  });
+}
+
 function createMainWindow() {
   const iconPath = resolveAppIconPath();
 
@@ -320,6 +372,8 @@ function createMainWindow() {
   } else {
     mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
   }
+
+  attachSystemBrowserForOAuth(mainWindow);
 
   mainWindow.once('ready-to-show', () => {
     applyWindowIcon(mainWindow);
@@ -536,6 +590,34 @@ function registerGlobalShortcuts() {
   });
 }
 
+function configureMediaSessionPermissions() {
+  const ses = session.defaultSession;
+  const mediaPermissions = new Set(['media', 'audioCapture', 'videoCapture', 'clipboard-read']);
+
+  ses.setPermissionRequestHandler((_webContents, permission, callback) => {
+    if (mediaPermissions.has(permission)) {
+      callback(true);
+      return;
+    }
+    callback(false);
+  });
+
+  ses.setPermissionCheckHandler((_webContents, permission) => {
+    if (!mediaPermissions.has(permission)) {
+      return false;
+    }
+
+    if (process.platform === 'darwin' || process.platform === 'win32') {
+      const status = systemPreferences.getMediaAccessStatus?.('microphone');
+      if (status === 'granted') return true;
+      if (status === 'not-determined') return true;
+      return false;
+    }
+
+    return true;
+  });
+}
+
 function registerIpcHandlers() {
   ipcMain.handle('desktop:app-info', () => ({
     platform: process.platform,
@@ -548,25 +630,35 @@ function registerIpcHandlers() {
     permissions.requestMicrophonePermission()
   );
 
-  ipcMain.handle('desktop:permissions:request-accessibility', () =>
-    permissions.requestAccessibilityPermission()
+  ipcMain.handle('desktop:permissions:request-notifications', async () =>
+    permissions.requestNotificationPermission()
   );
 
   ipcMain.handle('desktop:permissions:open-settings', (_event, target) =>
     permissions.openPermissionSettings(target)
   );
 
+  ipcMain.handle('desktop:device-check:list-capture-sources', async () => {
+    const sources = await desktopCapturer.getSources({
+      types: ['screen', 'window'],
+      fetchWindowIcons: false,
+    });
+
+    return sources.map((source) => ({
+      id: source.id,
+      name: source.name,
+      displayId: source.display_id,
+    }));
+  });
+
   ipcMain.handle('desktop:recording:start', async () => {
-    const mic = permissions.getMicrophonePermission();
-    if (!mic.granted) {
-      const result = await permissions.requestMicrophonePermission();
-      if (!result.granted) {
-        return {
-          ...recordingState,
-          blockedReason: 'microphone',
-          permissionStatus: result.status
-        };
-      }
+    const access = await permissions.ensureRecordingPermissions();
+    if (!access.ok) {
+      return {
+        ...recordingState,
+        blockedReason: access.blockedReason,
+        permissionStatus: access.permissionStatus,
+      };
     }
 
     return startRecording();
@@ -697,6 +789,7 @@ if (process.platform === 'win32') {
 }
 
 app.whenReady().then(() => {
+  configureMediaSessionPermissions();
   registerIpcHandlers();
   registerDeepLinking();
   createMainWindow();

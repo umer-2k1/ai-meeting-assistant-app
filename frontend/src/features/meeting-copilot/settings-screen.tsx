@@ -544,7 +544,7 @@ function IntegrationsTab() {
       <div className='flex items-start gap-3 rounded-2xl border border-border/70 bg-muted/30 px-5 py-4'>
         <IconBrandGoogle className='mt-0.5 size-4 shrink-0 text-primary' />
         <p className='text-sm leading-relaxed text-muted-foreground'>
-          Connecting opens Google in your default browser (same as sign-in). After you approve access, you’ll return to the app automatically.
+          Connecting Gmail or Calendar opens a Google authorization window. You'll be redirected back after granting permissions.
         </p>
       </div>
     </div>
@@ -731,16 +731,10 @@ function AccountTab() {
   );
 }
 
-export default function SettingsScreen({
-  isDesktop,
-  defaultTab = 'general'
-}: {
-  isDesktop: boolean;
-  defaultTab?: string;
-}) {
+export default function SettingsScreen({ isDesktop }: { isDesktop: boolean }) {
   return (
     <section className='space-y-4'>
-      <Tabs defaultValue={defaultTab} className='gap-4'>
+      <Tabs defaultValue='general' className='gap-4'>
         <TabsList className='h-auto w-full flex-wrap justify-start gap-1 rounded-xl border border-border/70 bg-muted/70 p-1'>
           <TabsTrigger value='account' className='rounded-lg px-3'>
             Account

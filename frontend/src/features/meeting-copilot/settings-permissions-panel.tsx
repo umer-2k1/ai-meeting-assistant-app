@@ -1,230 +1,146 @@
 import { useCallback, useEffect, useState } from 'react';
 
-import {
-  IconBell,
-  IconCalendarEvent,
-  IconCircleCheck,
-  IconMicrophone,
-  IconWaveSine
-} from '@tabler/icons-react';
+import { IconBell, IconCircleCheck, IconDeviceDesktop, IconMicrophone } from '@tabler/icons-react';
 
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
 import {
-  fetchDesktopPermissions,
-  getWebNotificationPermission,
-  openDesktopPermissionSettings,
-  requestDesktopAccessibility,
-  requestDesktopMicrophone,
-  queryWebMicrophone,
-  requestWebMicrophone,
-  requestWebNotificationPermission,
-  type DesktopPermissionsState,
-  type PermissionSnapshot,
-  type PermissionTarget
+  fetchPermissionCatalog,
+  getDefaultPermissionCatalog,
+  requestPermissionItem,
+  type PermissionCatalog,
+  type PermissionIconKey,
+  type PermissionItem,
+  type PermissionTarget,
 } from './permissions';
 
-type PermissionRowConfig = {
-  id: PermissionTarget;
-  title: string;
-  description: string;
-  icon: typeof IconMicrophone;
-  iconClassName: string;
-  snapshot: PermissionSnapshot;
+const PERMISSION_ICONS = {
+  microphone: IconMicrophone,
+  systemAudio: IconDeviceDesktop,
+  notifications: IconBell,
+} as const;
+
+const PERMISSION_ICON_STYLES: Record<PermissionIconKey, string> = {
+  microphone: 'bg-[#3B82F6]',
+  systemAudio: 'bg-emerald-600',
+  notifications: 'bg-amber-500',
 };
 
 function PermissionRow({
-  row,
-  isDesktop,
+  item,
   isRequesting,
-  onEnable
+  onAction,
 }: {
-  row: PermissionRowConfig;
-  isDesktop: boolean;
+  item: PermissionItem;
   isRequesting: boolean;
-  onEnable: (id: PermissionTarget) => void;
+  onAction: (id: PermissionTarget) => void;
 }) {
-  const Icon = row.icon;
-  const enabled = row.snapshot.granted;
+  const Icon = PERMISSION_ICONS[item.icon];
+  const enabled = item.snapshot.granted;
+  const actionLabel =
+    item.action === 'openSettings' ? 'Open Settings' : item.action === 'enable' ? 'Enable' : null;
 
   return (
-    <div className='flex items-center gap-4 border-b border-border/60 py-4 last:border-b-0'>
-      <div
-        className={cn(
-          'inline-flex size-10 shrink-0 items-center justify-center rounded-xl text-white',
-          row.iconClassName
-        )}
-      >
-        <Icon className='size-5' stroke={1.75} />
-      </div>
-      <div className='min-w-0 flex-1'>
-        <p className='text-sm font-semibold text-foreground'>{row.title}</p>
-        <p className='mt-0.5 text-sm text-muted-foreground'>{row.description}</p>
-      </div>
-      {enabled ? (
-        <div className='inline-flex shrink-0 items-center gap-1.5 text-sm font-medium text-emerald-600 dark:text-emerald-400'>
-          <IconCircleCheck className='size-4' />
-          Enabled
-        </div>
-      ) : (
-        <Button
-          size='sm'
-          className='shrink-0 rounded-full px-4'
-          disabled={isRequesting}
-          onClick={() => {
-            onEnable(row.id);
-          }}
+    <div className='border-b border-border/60 py-4 last:border-b-0'>
+      <div className='flex items-center gap-4'>
+        <div
+          className={cn(
+            'inline-flex size-10 shrink-0 items-center justify-center rounded-xl text-white',
+            PERMISSION_ICON_STYLES[item.icon]
+          )}
         >
-          {row.snapshot.status === 'denied' && isDesktop ? 'Open Settings' : 'Enable'}
-        </Button>
-      )}
+          <Icon className='size-5' stroke={1.75} />
+        </div>
+        <div className='min-w-0 flex-1'>
+          <p className='text-sm font-semibold text-foreground'>{item.title}</p>
+          <p className='mt-0.5 text-sm text-muted-foreground'>{item.description}</p>
+        </div>
+        {enabled ? (
+          <div className='inline-flex shrink-0 items-center gap-1.5 text-sm font-medium text-emerald-600 dark:text-emerald-400'>
+            <IconCircleCheck className='size-4' />
+            Enabled
+          </div>
+        ) : actionLabel ? (
+          <Button
+            size='sm'
+            className='shrink-0 rounded-full px-4'
+            disabled={isRequesting}
+            onClick={() => {
+              onAction(item.id);
+            }}
+          >
+            {actionLabel}
+          </Button>
+        ) : null}
+      </div>
+      {!enabled && item.helpText ? (
+        <p className='mt-3 pl-14 text-xs leading-relaxed text-muted-foreground'>{item.helpText}</p>
+      ) : null}
     </div>
   );
 }
 
 export default function SettingsPermissionsPanel({ isDesktop }: { isDesktop: boolean }) {
-  const [permissions, setPermissions] = useState<DesktopPermissionsState | null>(null);
-  const [webMic, setWebMic] = useState<PermissionSnapshot>({
-    status: 'not-determined',
-    granted: false,
-    canRequest: true
-  });
-  const [webNotifications, setWebNotifications] = useState<PermissionSnapshot>({
-    status: 'not-determined',
-    granted: false
-  });
+  const isDesktopRuntime = isDesktop || Boolean(globalThis.window.desktop?.permissions);
+  const [catalog, setCatalog] = useState<PermissionCatalog>(() =>
+    getDefaultPermissionCatalog(isDesktopRuntime ? 'darwin' : 'web')
+  );
   const [requestingId, setRequestingId] = useState<PermissionTarget | null>(null);
 
   const refresh = useCallback(async () => {
-    if (isDesktop) {
-      const next = await fetchDesktopPermissions();
-      if (next) setPermissions(next);
-      return;
+    try {
+      const next = await fetchPermissionCatalog(isDesktopRuntime);
+      setCatalog(
+        next.items.length > 0
+          ? next
+          : getDefaultPermissionCatalog(next.platform || (isDesktopRuntime ? 'darwin' : 'web'))
+      );
+    } catch (error) {
+      console.error('[permissions] refresh failed', error);
+      setCatalog(getDefaultPermissionCatalog(isDesktopRuntime ? 'darwin' : 'web'));
     }
-
-    setWebMic(await queryWebMicrophone());
-    setWebNotifications(await getWebNotificationPermission());
-  }, [isDesktop]);
+  }, [isDesktopRuntime]);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
 
-  const handleEnable = async (id: PermissionTarget) => {
+  useEffect(() => {
+    if (!isDesktopRuntime) return;
+
+    const onFocus = () => {
+      void refresh();
+    };
+
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [isDesktopRuntime, refresh]);
+
+  const handleAction = async (id: PermissionTarget) => {
     setRequestingId(id);
 
     try {
-      if (isDesktop) {
-        if (id === 'microphone') {
-          const current = permissions?.microphone;
-          if (current?.status === 'denied') {
-            await openDesktopPermissionSettings('microphone');
-          } else {
-            await requestDesktopMicrophone();
-          }
-        } else if (id === 'accessibility') {
-          const current = permissions?.accessibility;
-          if (current?.status === 'denied') {
-            await openDesktopPermissionSettings('accessibility');
-          } else {
-            await requestDesktopAccessibility();
-          }
-        } else if (id === 'notifications') {
-          await openDesktopPermissionSettings('notifications');
-        }
-        await refresh();
-        return;
-      }
-
-      if (id === 'microphone') {
-        const result = await requestWebMicrophone();
-        setWebMic(result);
-      } else if (id === 'notifications') {
-        const result = await requestWebNotificationPermission();
-        setWebNotifications(result);
-      }
+      await requestPermissionItem(id, catalog);
+      await refresh();
     } finally {
       setRequestingId(null);
     }
   };
 
-  const micSnapshot: PermissionSnapshot = isDesktop
-    ? (permissions?.microphone ?? { status: 'unknown', granted: false })
-    : webMic;
-
-  const accessibilitySnapshot: PermissionSnapshot = isDesktop
-    ? (permissions?.accessibility ?? { status: 'unsupported', granted: true })
-    : { status: 'unsupported', granted: true };
-
-  const notificationSnapshot: PermissionSnapshot = isDesktop
-    ? (permissions?.notifications ?? { status: 'unknown', granted: false })
-    : webNotifications;
-
-  const rows: PermissionRowConfig[] = [
-    {
-      id: 'microphone',
-      title: 'Transcribe my voice',
-      description: 'Required to capture meeting audio and generate live transcripts.',
-      icon: IconMicrophone,
-      iconClassName: 'bg-[#3B82F6]',
-      snapshot: micSnapshot
-    },
-    ...(isDesktop
-      ? [
-          {
-            id: 'accessibility' as const,
-            title: 'System controls',
-            description: 'Allows global shortcuts and reliable control of the floating widget.',
-            icon: IconWaveSine,
-            iconClassName: 'bg-violet-500',
-            snapshot: accessibilitySnapshot
-          }
-        ]
-      : []),
-    {
-      id: 'notifications',
-      title: 'Meeting reminders',
-      description: 'Get notified before scheduled meetings and when summaries are ready.',
-      icon: IconBell,
-      iconClassName: 'bg-amber-500',
-      snapshot: notificationSnapshot
-    }
-  ];
-
   return (
-    <div className='space-y-6'>
-      <div className='rounded-2xl border border-border/70 bg-card/80 px-5 py-2'>
-        <p className='mb-1 text-xs font-semibold tracking-[0.14em] text-muted-foreground uppercase'>
-          Permissions
-        </p>
-        {rows.map((row) => (
-          <PermissionRow
-            key={row.id}
-            row={row}
-            isDesktop={isDesktop}
-            isRequesting={requestingId === row.id}
-            onEnable={handleEnable}
-          />
-        ))}
-      </div>
-
-      <div className='rounded-2xl border border-border/70 bg-muted/30 p-5'>
-        <div className='mb-2 flex items-center gap-2'>
-          <IconCalendarEvent className='size-4 text-primary' />
-          <p className='text-sm font-semibold text-foreground'>Notifications</p>
-        </div>
-        <p className='text-sm leading-relaxed text-muted-foreground'>
-          You will receive a notification 1 minute before your meeting starts so you can join and
-          begin recording on time. Enable microphone access before starting your first recording.
-        </p>
-        {isDesktop && (
-          <p className='mt-3 text-xs text-muted-foreground'>
-            On macOS, approve permissions in System Settings if no prompt appears. Use Open
-            Settings on each permission row when access was previously denied.
-          </p>
-        )}
-      </div>
+    <div className='rounded-2xl border border-border/70 bg-card/80 px-5 py-2'>
+      <p className='mb-1 text-xs font-semibold tracking-[0.14em] text-muted-foreground uppercase'>
+        Permissions
+      </p>
+      {catalog.items.map((item) => (
+        <PermissionRow
+          key={item.id}
+          item={item}
+          isRequesting={requestingId === item.id}
+          onAction={handleAction}
+        />
+      ))}
     </div>
   );
 }

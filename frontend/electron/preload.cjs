@@ -22,8 +22,11 @@ contextBridge.exposeInMainWorld('desktop', {
   permissions: {
     getAll: () => ipcRenderer.invoke('desktop:permissions:get-all'),
     requestMicrophone: () => ipcRenderer.invoke('desktop:permissions:request-microphone'),
-    requestAccessibility: () => ipcRenderer.invoke('desktop:permissions:request-accessibility'),
+    requestNotifications: () => ipcRenderer.invoke('desktop:permissions:request-notifications'),
     openSettings: (target) => ipcRenderer.invoke('desktop:permissions:open-settings', target)
+  },
+  deviceCheck: {
+    listCaptureSources: () => ipcRenderer.invoke('desktop:device-check:list-capture-sources'),
   },
   recording: {
     start: () => ipcRenderer.invoke('desktop:recording:start'),
