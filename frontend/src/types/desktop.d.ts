@@ -64,6 +64,7 @@ type DesktopApi = {
   auth: {
     openExternal: (url: string) => Promise<{ ok: boolean }>;
     onCallback: (callback: (payload: { url: string }) => void) => () => void;
+    consumePendingCallback: () => Promise<{ url: string } | null>;
   };
   theme: {
     broadcast: (preference: ThemePreference) => Promise<{ ok: boolean }>;

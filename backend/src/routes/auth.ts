@@ -7,6 +7,7 @@ import {
   isGoogleOAuthConfigured,
   mapAuthErrorToReason,
 } from '../lib/auth-config.js';
+import { buildDesktopAuthSuccessPage } from '../lib/desktop-auth-success-page.js';
 import type { User } from '@prisma/client';
 
 const router = express.Router();
@@ -25,7 +26,8 @@ function redirectWithAuthSuccess(req: express.Request, res: express.Response, us
 
   if (isDesktop) {
     const deepLink = `${DESKTOP_PROTOCOL}://auth/callback?token=${token}&user=${userPayload}`;
-    return res.redirect(deepLink);
+    res.type('html').send(buildDesktopAuthSuccessPage(deepLink));
+    return;
   }
 
   return res.redirect(`${getFrontendUrl()}/auth/callback?token=${token}&user=${userPayload}`);

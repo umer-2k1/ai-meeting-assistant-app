@@ -1,6 +1,6 @@
+import './load-env.js';
 import express from 'express';
 import cors from 'cors';
-import dotenv from 'dotenv';
 import cookieParser from 'cookie-parser';
 import session from 'express-session';
 import passport from './lib/passport.js';
@@ -14,9 +14,6 @@ import {
   isGoogleOAuthConfigured,
 } from './lib/auth-config.js';
 import prisma from './lib/prisma.js';
-
-// Load environment variables
-dotenv.config();
 
 const app = express();
 const port = Number(process.env.PORT ?? 3001);
@@ -272,11 +269,25 @@ async function startServer() {
     console.warn('[startup] DATABASE_URL is not set. Google sign-in will fail.');
   }
 
-  app.listen(port, () => {
+  const server = app.listen(port);
+
+  server.on('listening', () => {
     console.log(`🚀 AI Meeting Copilot Backend running on http://localhost:${port}`);
     console.log(`📊 Health check: http://localhost:${port}/api/health`);
     console.log(`🔐 Auth endpoint: http://localhost:${port}/auth/google`);
     console.log(`\n💡 To enable database features, set DATABASE_URL in .env`);
+  });
+
+  server.on('error', (error: NodeJS.ErrnoException) => {
+    if (error.code === 'EADDRINUSE') {
+      console.error(`\n[startup] Port ${port} is already in use by another process.`);
+      console.error('[startup] Google sign-in will hang until this backend is actually listening.');
+      console.error(`[startup] Free the port: lsof -i :${port}`);
+      console.error(`[startup] Or set a different PORT in backend/.env (and update VITE_BACKEND_URL in frontend/.env).`);
+    } else {
+      console.error('[startup] Failed to start server:', error);
+    }
+    process.exit(1);
   });
 }
 

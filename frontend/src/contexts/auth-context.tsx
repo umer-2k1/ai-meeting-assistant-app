@@ -60,9 +60,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const desktop = globalThis.window.desktop;
     if (!desktop?.auth?.onCallback) return;
 
-    return desktop.auth.onCallback((payload: { url?: string }) => {
+    const handleAuthCallbackUrl = (url?: string) => {
       try {
-        const url = payload?.url;
         if (!url || !url.includes('auth/callback')) return;
 
         const parsed = new URL(url);
@@ -74,13 +73,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const nextUser = JSON.parse(decodeURIComponent(userParam)) as User;
         setAuth(tokenParam, nextUser);
 
-        // Return to app UI after system-browser sign-in (deep link does not change route)
-        if (globalThis.window.location.pathname === '/login') {
+        if (globalThis.window.location.pathname !== '/dashboard') {
           globalThis.window.location.replace('/dashboard');
         }
       } catch (error) {
         console.error('Failed to handle desktop auth callback:', error);
       }
+    };
+
+    void desktop.auth.consumePendingCallback?.().then((pending) => {
+      if (pending?.url) handleAuthCallbackUrl(pending.url);
+    });
+
+    return desktop.auth.onCallback((payload: { url?: string }) => {
+      handleAuthCallbackUrl(payload?.url);
     });
   }, [setAuth]);
 

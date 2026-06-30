@@ -60,6 +60,38 @@ const recordingState = {
 
 let recordingTimer = null;
 
+/** Deep link received before the app/window is ready (macOS fires open-url early). */
+let pendingAuthDeepLink = null;
+/** Auth callback waiting for the renderer to subscribe (avoids lost IPC events). */
+let pendingAuthCallback = null;
+
+function isAuthDeepLink(url) {
+  return typeof url === 'string' && url.startsWith(`${DESKTOP_PROTOCOL}://`) && url.includes('auth/callback');
+}
+
+function handleAuthDeepLink(url) {
+  if (!isAuthDeepLink(url)) return;
+
+  pendingAuthDeepLink = null;
+  pendingAuthCallback = { url };
+  emit('auth:callback', { url });
+
+  if (mainWindow) {
+    mainWindow.show();
+    mainWindow.focus();
+  }
+}
+
+function flushPendingAuthDeepLink() {
+  if (pendingAuthDeepLink) {
+    handleAuthDeepLink(pendingAuthDeepLink);
+  }
+}
+
+function findAuthDeepLinkInArgv(argv) {
+  return argv.find((arg) => isAuthDeepLink(arg));
+}
+
 function resolveAppIconPath() {
   const iconsDir = path.join(__dirname, 'icons');
 
@@ -141,31 +173,11 @@ function registerDeepLinking() {
     console.warn('[desktop] Failed to register protocol client', error);
   }
 
-  // macOS deep link handler
-  app.on('open-url', (event, url) => {
-    event.preventDefault();
-    emit('auth:callback', { url });
-    if (mainWindow) {
-      mainWindow.show();
-      mainWindow.focus();
-    }
-  });
-
   // Windows/Linux deep link handler (second instance)
-  const gotLock = app.requestSingleInstanceLock();
-  if (!gotLock) {
-    app.quit();
-    return;
-  }
-
   app.on('second-instance', (_event, argv) => {
-    const deepLink = argv.find((arg) => typeof arg === 'string' && arg.startsWith(`${DESKTOP_PROTOCOL}://`));
+    const deepLink = findAuthDeepLinkInArgv(argv);
     if (deepLink) {
-      emit('auth:callback', { url: deepLink });
-      if (mainWindow) {
-        mainWindow.show();
-        mainWindow.focus();
-      }
+      handleAuthDeepLink(deepLink);
     }
   });
 }
@@ -814,6 +826,12 @@ function registerIpcHandlers() {
       return { ok: false };
     }
   });
+
+  ipcMain.handle('desktop:auth:consume-pending-callback', () => {
+    const pending = pendingAuthCallback;
+    pendingAuthCallback = null;
+    return pending;
+  });
 }
 
 app.setName(APP_NAME);
@@ -822,11 +840,34 @@ if (process.platform === 'win32') {
   app.setAppUserModelId('com.aimmeetingcopilot.desktop');
 }
 
+// Must register before app.ready — macOS can emit open-url during startup.
+app.on('open-url', (event, url) => {
+  event.preventDefault();
+  if (!isAuthDeepLink(url)) return;
+
+  if (app.isReady() && mainWindow) {
+    handleAuthDeepLink(url);
+  } else {
+    pendingAuthDeepLink = url;
+  }
+});
+
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  app.quit();
+} else {
+  const launchDeepLink = findAuthDeepLinkInArgv(process.argv);
+  if (launchDeepLink) {
+    pendingAuthDeepLink = launchDeepLink;
+  }
+}
+
 app.whenReady().then(() => {
   configureMediaSessionPermissions();
   registerIpcHandlers();
   registerDeepLinking();
   createMainWindow();
+  flushPendingAuthDeepLink();
   applyDockIcon();
   if (!isTestMode) {
     createWidgetWindow();

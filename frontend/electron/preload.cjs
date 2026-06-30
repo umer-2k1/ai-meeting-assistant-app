@@ -17,7 +17,8 @@ contextBridge.exposeInMainWorld('desktop', {
   },
   auth: {
     openExternal: (url) => ipcRenderer.invoke('desktop:open-external', url),
-    onCallback: (callback) => registerListener('auth:callback', callback)
+    onCallback: (callback) => registerListener('auth:callback', callback),
+    consumePendingCallback: () => ipcRenderer.invoke('desktop:auth:consume-pending-callback')
   },
   permissions: {
     getAll: () => ipcRenderer.invoke('desktop:permissions:get-all'),
