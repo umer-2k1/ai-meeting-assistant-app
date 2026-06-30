@@ -1,13 +1,22 @@
 #!/usr/bin/env node
 
 import { createRequire } from 'node:module';
+import { spawnSync } from 'node:child_process';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 try {
   const electronPath = require('electron');
   if (!electronPath || typeof electronPath !== 'string') {
     throw new Error('Electron path is empty');
+  }
+
+  if (process.platform === 'darwin') {
+    const patchScript = path.join(__dirname, 'patch-electron-plist.mjs');
+    spawnSync(process.execPath, [patchScript], { stdio: 'inherit' });
   }
 } catch (error) {
   const message = error instanceof Error ? error.message : String(error);

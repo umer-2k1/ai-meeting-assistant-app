@@ -21,7 +21,9 @@ contextBridge.exposeInMainWorld('desktop', {
   },
   permissions: {
     getAll: () => ipcRenderer.invoke('desktop:permissions:get-all'),
+    getSettings: () => ipcRenderer.invoke('desktop:permissions:get-settings'),
     requestMicrophone: () => ipcRenderer.invoke('desktop:permissions:request-microphone'),
+    requestAccessibility: () => ipcRenderer.invoke('desktop:permissions:request-accessibility'),
     requestNotifications: () => ipcRenderer.invoke('desktop:permissions:request-notifications'),
     openSettings: (target) => ipcRenderer.invoke('desktop:permissions:open-settings', target)
   },

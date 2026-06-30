@@ -12,7 +12,6 @@ const {
   shell,
   session,
   systemPreferences,
-  desktopCapturer,
 } = require('electron');
 
 const permissions = require('./permissions.cjs');
@@ -20,6 +19,10 @@ const AudioRecordingService = require('./audio-recording-service.cjs');
 
 const APP_NAME = 'AI Meeting Copilot';
 const DESKTOP_PROTOCOL = process.env.DESKTOP_PROTOCOL || 'ai-meeting-copilot';
+
+// Electron 39+ on macOS 14.2+ uses CoreAudio Tap API by default.
+// This requires NSAudioCaptureUsageDescription in Info.plist (handled by patch-electron-plist.mjs).
+// CoreAudio Tap gives us "System Audio Recording Only" permission instead of "Screen & System Audio Recording".
 
 const isTestMode = process.env.ELECTRON_TEST_MODE === '1';
 
@@ -233,30 +236,33 @@ function clearRecordingTimers() {
 
 async function startRecording() {
   try {
+    // Note: AudioRecordingService is deprecated and will throw an error
+    // Real recording should be implemented in the renderer process using
+    // getDisplayMedia(), MediaRecorder, and AudioContext
+    
+    console.warn(
+      '[Recording] Audio recording service is non-functional. ' +
+      'Recording must be implemented in the renderer process. ' +
+      'See use-system-audio-test.ts for the correct approach.'
+    );
+    
+    // For now, just track recording state without actual audio capture
     const meetingId = `meeting-${Date.now()}`;
     
-    // Start audio recording with Deepgram
-    await audioService.startRecording(meetingId, {
-      onTranscript: (transcriptLine) => {
-        // Emit transcript to renderer
-        emit('recording:transcript', transcriptLine);
-      },
-      onError: (error) => {
-        console.error('[Recording] Error:', error);
-      },
-    });
-
     recordingState.isRecording = true;
     recordingState.isPaused = false;
     startRecordingTimers();
     emitRecordingStateAndSyncWidget();
     
-    return { ...recordingState };
+    return {
+      ...recordingState,
+      warning: 'Audio recording is not yet implemented. Use Device Check → System Audio Test for testing.'
+    };
   } catch (error) {
     console.error('[Recording] Failed to start:', error);
     return {
       ...recordingState,
-      error: error.message,
+      error: error.message || 'Failed to start recording'
     };
   }
 }
@@ -266,11 +272,8 @@ function pauseResumeRecording() {
   
   recordingState.isPaused = !recordingState.isPaused;
   
-  if (recordingState.isPaused) {
-    audioService.pauseRecording();
-  } else {
-    audioService.resumeRecording();
-  }
+  // AudioService is deprecated - no-op
+  // Real recording should be in renderer process
   
   emitRecordingState();
   return { ...recordingState };
@@ -278,8 +281,7 @@ function pauseResumeRecording() {
 
 async function stopRecording() {
   try {
-    // Stop audio service
-    const result = await audioService.stopRecording();
+    // AudioService is deprecated - just update state
     
     recordingState.isRecording = false;
     recordingState.isPaused = false;
@@ -289,7 +291,7 @@ async function stopRecording() {
     
     return {
       ...recordingState,
-      recordingPath: result.recordingPath,
+      recordingPath: null,
     };
   } catch (error) {
     console.error('[Recording] Failed to stop:', error);
@@ -608,14 +610,25 @@ function configureMediaSessionPermissions() {
     }
 
     if (process.platform === 'darwin' || process.platform === 'win32') {
-      const status = systemPreferences.getMediaAccessStatus?.('microphone');
-      if (status === 'granted') return true;
-      if (status === 'not-determined') return true;
+      const micStatus = systemPreferences.getMediaAccessStatus?.('microphone');
+      if (micStatus === 'granted') return true;
+      if (micStatus === 'not-determined') return true;
+
       return false;
     }
 
     return true;
   });
+
+  ses.setDisplayMediaRequestHandler(
+    (_request, callback) => {
+      // System Audio Recording Only via CoreAudio Tap: audio loopback, no video/screen.
+      // This avoids desktopCapturer.getSources() (which fails on macOS 26) and triggers
+      // the "System Audio Recording Only" permission prompt instead of screen capture.
+      callback({ audio: 'loopback' });
+    },
+    { useSystemPicker: false }
+  );
 }
 
 function registerIpcHandlers() {
@@ -639,10 +652,20 @@ function registerIpcHandlers() {
     };
   });
 
-  ipcMain.handle('desktop:permissions:get-all', () => permissions.getAllPermissions());
+  ipcMain.handle('desktop:permissions:get-all', async () =>
+    permissions.getAllPermissions()
+  );
+
+  ipcMain.handle('desktop:permissions:get-settings', async () =>
+    permissions.getSettingsPermissions()
+  );
 
   ipcMain.handle('desktop:permissions:request-microphone', async () =>
     permissions.requestMicrophonePermission()
+  );
+
+  ipcMain.handle('desktop:permissions:request-accessibility', () =>
+    permissions.requestAccessibilityPermission()
   );
 
   ipcMain.handle('desktop:permissions:request-notifications', async () =>
@@ -654,16 +677,12 @@ function registerIpcHandlers() {
   );
 
   ipcMain.handle('desktop:device-check:list-capture-sources', async () => {
-    const sources = await desktopCapturer.getSources({
-      types: ['screen', 'window'],
-      fetchWindowIcons: false,
-    });
-
-    return sources.map((source) => ({
-      id: source.id,
-      name: source.name,
-      displayId: source.display_id,
-    }));
+    // System Audio Recording Only does not need a screen/window source list.
+    // We capture system audio via getDisplayMedia loopback in the renderer.
+    return {
+      sources: [],
+      screenPermission: 'granted',
+    };
   });
 
   ipcMain.handle('desktop:recording:start', async () => {

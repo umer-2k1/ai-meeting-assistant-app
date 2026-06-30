@@ -12,7 +12,7 @@ import tseslint from 'typescript-eslint';
 
 export default defineConfig(
   {
-    ignores: ['dist']
+    ignores: ['dist', 'electron/**', 'scripts/**']
   },
   sonarjs.recommended,
   unicorn.configs.recommended,

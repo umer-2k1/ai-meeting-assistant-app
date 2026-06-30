@@ -1,10 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import {
-  fetchSystemAudioPermissionStatus,
-  openDesktopPermissionSettings,
-  type PermissionSnapshot,
-} from './permissions';
+import type { PermissionSnapshot } from './permissions';
+
+import { fetchSystemAudioPermissionStatus, openDesktopPermissionSettings } from './permissions';
 
 const LEVEL_POLL_MS = 50;
 const SOUND_LEVEL_THRESHOLD = 0.04;
@@ -35,7 +33,7 @@ export type CaptureSource = {
 function getMediaErrorMessage(error: unknown): string {
   if (error instanceof DOMException) {
     if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
-      return 'System audio capture was denied. Enable Screen Recording in System Settings for this app.';
+      return 'System audio capture was denied. Enable System Audio Recording in System Settings for this app.';
     }
     if (error.name === 'NotFoundError') {
       return 'No capture source was found. Try another screen or window.';
@@ -64,44 +62,11 @@ function pickRecorderMimeType(): string {
 function computeRmsLevel(analyser: AnalyserNode, buffer: Uint8Array<ArrayBuffer>): number {
   analyser.getByteTimeDomainData(buffer);
   let sum = 0;
-  for (let i = 0; i < buffer.length; i += 1) {
-    const normalized = (buffer[i]! - 128) / 128;
+  for (const element of buffer) {
+    const normalized = (element - 128) / 128;
     sum += normalized * normalized;
   }
   return Math.sqrt(sum / buffer.length);
-}
-
-function audioOnlyStream(stream: MediaStream): MediaStream {
-  const audioTracks = stream.getAudioTracks();
-  for (const track of stream.getVideoTracks()) {
-    track.stop();
-  }
-  if (audioTracks.length === 0) {
-    throw new Error(
-      'No system audio track was captured. On macOS, enable Screen Recording for this app, then share a screen or window that includes audio.'
-    );
-  }
-  return new MediaStream(audioTracks);
-}
-
-async function acquireViaDesktopSource(sourceId: string): Promise<MediaStream> {
-  const constraints = {
-    audio: {
-      mandatory: {
-        chromeMediaSource: 'desktop',
-        chromeMediaSourceId: sourceId,
-      },
-    },
-    video: {
-      mandatory: {
-        chromeMediaSource: 'desktop',
-        chromeMediaSourceId: sourceId,
-      },
-    },
-  } as MediaStreamConstraints;
-
-  const raw = await navigator.mediaDevices.getUserMedia(constraints);
-  return audioOnlyStream(raw);
 }
 
 async function acquireViaDisplayMedia(): Promise<MediaStream> {
@@ -109,11 +74,30 @@ async function acquireViaDisplayMedia(): Promise<MediaStream> {
     throw new Error('System audio capture is not supported in this browser.');
   }
 
+  // System Audio Recording Only (CoreAudio Tap): request audio without video.
+  // The main-process handler returns { audio: 'loopback' }, so no screen capture occurs.
   const raw = await navigator.mediaDevices.getDisplayMedia({
-    video: true,
-    audio: true,
+    video: false,
+    audio: true
   });
-  return audioOnlyStream(raw);
+
+  const audioTracks = raw.getAudioTracks();
+  const videoTracks = raw.getVideoTracks();
+  for (const track of videoTracks) {
+    track.stop();
+  }
+
+  const audioTrack = audioTracks[0];
+  if (!audioTrack || audioTrack.readyState === 'ended') {
+    for (const track of audioTracks) {
+      track.stop();
+    }
+    throw new Error(
+      'System Audio Recording Only is not enabled for this app. Enable it in System Settings → Privacy & Security → Screen & System Audio Recording → System Audio Recording Only, then quit (Cmd+Q) and restart the app.'
+    );
+  }
+
+  return new MediaStream(audioTracks);
 }
 
 export function useSystemAudioTest(isDesktop: boolean) {
@@ -122,7 +106,7 @@ export function useSystemAudioTest(isDesktop: boolean) {
   const [error, setError] = useState<string | null>(null);
   const [permission, setPermission] = useState<PermissionSnapshot>({
     status: 'unknown',
-    granted: false,
+    granted: false
   });
   const [level, setLevel] = useState(0);
   const [peakLevel, setPeakLevel] = useState(0);
@@ -131,16 +115,15 @@ export function useSystemAudioTest(isDesktop: boolean) {
   const [captureLabel, setCaptureLabel] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewDurationSec, setPreviewDurationSec] = useState<number | null>(null);
-  const [monitorStream, setMonitorStream] = useState<MediaStream | null>(null);
 
-  const streamRef = useRef<MediaStream | null>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const levelBufferRef = useRef<Uint8Array<ArrayBuffer> | null>(null);
-  const levelTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const sessionRecorderRef = useRef<MediaRecorder | null>(null);
-  const sessionChunksRef = useRef<Blob[]>([]);
-  const previewUrlRef = useRef<string | null>(null);
+  const streamReference = useRef<MediaStream | null>(null);
+  const audioContextReference = useRef<AudioContext | null>(null);
+  const analyserReference = useRef<AnalyserNode | null>(null);
+  const levelBufferReference = useRef<Uint8Array<ArrayBuffer> | null>(null);
+  const levelTimerReference = useRef<ReturnType<typeof setInterval> | null>(null);
+  const sessionRecorderReference = useRef<MediaRecorder | null>(null);
+  const sessionChunksReference = useRef<Blob[]>([]);
+  const previewUrlReference = useRef<string | null>(null);
 
   const refreshPermission = useCallback(async () => {
     const snapshot = await fetchSystemAudioPermissionStatus(isDesktop);
@@ -149,34 +132,21 @@ export function useSystemAudioTest(isDesktop: boolean) {
   }, [isDesktop]);
 
   const loadSources = useCallback(async () => {
-    if (!isDesktop || !globalThis.window.desktop?.deviceCheck?.listCaptureSources) {
-      setSources([]);
-      return;
-    }
-
-    try {
-      const listed = await globalThis.window.desktop.deviceCheck.listCaptureSources();
-      setSources(listed);
-      if (listed.length > 0 && !listed.some((s) => s.id === selectedSourceId)) {
-        const screen = listed.find((s) => s.name.toLowerCase().includes('screen')) ?? listed[0]!;
-        setSelectedSourceId(screen.id);
-      }
-    } catch {
-      setSources([]);
-    }
-  }, [isDesktop, selectedSourceId]);
+    // System Audio Recording Only does not use a screen/window source list.
+    setSources([]);
+  }, []);
 
   const stopLevelPolling = useCallback(() => {
-    if (levelTimerRef.current !== null) {
-      clearInterval(levelTimerRef.current);
-      levelTimerRef.current = null;
+    if (levelTimerReference.current !== null) {
+      clearInterval(levelTimerReference.current);
+      levelTimerReference.current = null;
     }
   }, []);
 
   const clearPreview = useCallback(() => {
-    if (previewUrlRef.current) {
-      URL.revokeObjectURL(previewUrlRef.current);
-      previewUrlRef.current = null;
+    if (previewUrlReference.current) {
+      URL.revokeObjectURL(previewUrlReference.current);
+      previewUrlReference.current = null;
     }
     setPreviewUrl(null);
     setPreviewDurationSec(null);
@@ -185,41 +155,39 @@ export function useSystemAudioTest(isDesktop: boolean) {
   const releaseCapture = useCallback(() => {
     stopLevelPolling();
 
-    if (sessionRecorderRef.current?.state !== 'inactive') {
+    if (sessionRecorderReference.current?.state !== 'inactive') {
       try {
-        sessionRecorderRef.current?.stop();
+        sessionRecorderReference.current?.stop();
       } catch {
         // ignore
       }
     }
-    sessionRecorderRef.current = null;
-    sessionChunksRef.current = [];
+    sessionRecorderReference.current = null;
+    sessionChunksReference.current = [];
 
-    if (streamRef.current) {
-      for (const track of streamRef.current.getTracks()) {
+    if (streamReference.current) {
+      for (const track of streamReference.current.getTracks()) {
         track.stop();
       }
-      streamRef.current = null;
+      streamReference.current = null;
     }
 
-    setMonitorStream(null);
-
-    if (audioContextRef.current) {
-      void audioContextRef.current.close();
-      audioContextRef.current = null;
+    if (audioContextReference.current) {
+      void audioContextReference.current.close();
+      audioContextReference.current = null;
     }
 
-    analyserRef.current = null;
-    levelBufferRef.current = null;
+    analyserReference.current = null;
+    levelBufferReference.current = null;
     setLevel(0);
   }, [stopLevelPolling]);
 
   const startLevelPolling = useCallback(() => {
     stopLevelPolling();
 
-    levelTimerRef.current = setInterval(() => {
-      const analyser = analyserRef.current;
-      const buffer = levelBufferRef.current;
+    levelTimerReference.current = setInterval(() => {
+      const analyser = analyserReference.current;
+      const buffer = levelBufferReference.current;
       if (!analyser || !buffer) {
         return;
       }
@@ -237,39 +205,37 @@ export function useSystemAudioTest(isDesktop: boolean) {
   }, [stopLevelPolling]);
 
   const startSessionRecorder = useCallback((stream: MediaStream) => {
-    sessionChunksRef.current = [];
+    sessionChunksReference.current = [];
     const mimeType = pickRecorderMimeType();
-    const recorder = mimeType
-      ? new MediaRecorder(stream, { mimeType })
-      : new MediaRecorder(stream);
+    const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
 
     recorder.ondataavailable = (event) => {
       if (event.data.size > 0) {
-        sessionChunksRef.current.push(event.data);
+        sessionChunksReference.current.push(event.data);
       }
     };
 
-    sessionRecorderRef.current = recorder;
+    sessionRecorderReference.current = recorder;
     recorder.start(RECORDER_TIMESLICE_MS);
   }, []);
 
   const finalizeSessionRecording = useCallback((): Promise<Blob | null> => {
     return new Promise((resolve) => {
-      const recorder = sessionRecorderRef.current;
+      const recorder = sessionRecorderReference.current;
       if (!recorder || recorder.state === 'inactive') {
         resolve(
-          sessionChunksRef.current.length > 0
-            ? new Blob(sessionChunksRef.current, { type: 'audio/webm' })
+          sessionChunksReference.current.length > 0
+            ? new Blob(sessionChunksReference.current, { type: 'audio/webm' })
             : null
         );
         return;
       }
 
       recorder.onstop = () => {
-        const blob = new Blob(sessionChunksRef.current, {
-          type: recorder.mimeType || 'audio/webm',
+        const blob = new Blob(sessionChunksReference.current, {
+          type: recorder.mimeType || 'audio/webm'
         });
-        sessionRecorderRef.current = null;
+        sessionRecorderReference.current = null;
         resolve(blob.size > 0 ? blob : null);
       };
 
@@ -285,7 +251,7 @@ export function useSystemAudioTest(isDesktop: boolean) {
     (blob: Blob) => {
       clearPreview();
       const url = URL.createObjectURL(blob);
-      previewUrlRef.current = url;
+      previewUrlReference.current = url;
       setPreviewUrl(url);
       setVerdict('recorded');
       setPhase('preview');
@@ -304,34 +270,35 @@ export function useSystemAudioTest(isDesktop: boolean) {
     [clearPreview]
   );
 
-  const setupAnalyser = useCallback(async (stream: MediaStream) => {
-    streamRef.current = stream;
-    setMonitorStream(stream);
+  const setupAnalyser = useCallback(
+    async (stream: MediaStream) => {
+      streamReference.current = stream;
 
-    const label = stream.getAudioTracks()[0]?.label;
-    setCaptureLabel(label || null);
+      const label = stream.getAudioTracks()[0]?.label;
+      setCaptureLabel(label || null);
 
-    const audioContext = new AudioContext();
-    await audioContext.resume();
-    audioContextRef.current = audioContext;
+      const audioContext = new AudioContext();
+      await audioContext.resume();
+      audioContextReference.current = audioContext;
 
-    const source = audioContext.createMediaStreamSource(stream);
-    const analyser = audioContext.createAnalyser();
-    analyser.fftSize = 2048;
-    analyser.smoothingTimeConstant = 0.65;
-    source.connect(analyser);
-    analyserRef.current = analyser;
-    levelBufferRef.current = new Uint8Array(analyser.fftSize);
+      const source = audioContext.createMediaStreamSource(stream);
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = 2048;
+      analyser.smoothingTimeConstant = 0.65;
+      source.connect(analyser);
+      analyserReference.current = analyser;
+      levelBufferReference.current = new Uint8Array(analyser.fftSize);
 
-    startSessionRecorder(stream);
-  }, [startSessionRecorder]);
+      startSessionRecorder(stream);
+    },
+    [startSessionRecorder]
+  );
 
   const acquireSystemAudio = useCallback(async () => {
-    if (isDesktop && selectedSourceId && globalThis.window.desktop?.deviceCheck) {
-      return acquireViaDesktopSource(selectedSourceId);
-    }
+    // System Audio Recording Only uses getDisplayMedia loopback on all platforms.
+    // Legacy chromeMediaSource getUserMedia does not provide macOS system-audio loopback.
     return acquireViaDisplayMedia();
-  }, [isDesktop, selectedSourceId]);
+  }, []);
 
   const startMonitoring = useCallback(async () => {
     setError(null);
@@ -342,12 +309,11 @@ export function useSystemAudioTest(isDesktop: boolean) {
     setPhase('requesting');
 
     try {
-      await refreshPermission();
-
-      await loadSources();
       releaseCapture();
 
       const stream = await acquireSystemAudio();
+      // A successful loopback capture means System Audio Recording Only is granted.
+      setPermission({ status: 'granted', granted: true, canRequest: false });
       await setupAnalyser(stream);
       startLevelPolling();
       setVerdict('waiting-for-sound');
@@ -358,16 +324,7 @@ export function useSystemAudioTest(isDesktop: boolean) {
       setPhase('error');
       releaseCapture();
     }
-  }, [
-    acquireSystemAudio,
-    clearPreview,
-    isDesktop,
-    loadSources,
-    refreshPermission,
-    releaseCapture,
-    setupAnalyser,
-    startLevelPolling,
-  ]);
+  }, [acquireSystemAudio, clearPreview, releaseCapture, setupAnalyser, startLevelPolling]);
 
   const endTestAndPreview = useCallback(async () => {
     if (phase !== 'monitoring') {
@@ -377,7 +334,6 @@ export function useSystemAudioTest(isDesktop: boolean) {
     setPhase('finalizing');
     setError(null);
     stopLevelPolling();
-    setMonitorStream(null);
 
     const blob = await finalizeSessionRecording();
     releaseCapture();
@@ -392,13 +348,7 @@ export function useSystemAudioTest(isDesktop: boolean) {
     }
 
     setPreviewFromBlob(blob);
-  }, [
-    finalizeSessionRecording,
-    phase,
-    releaseCapture,
-    setPreviewFromBlob,
-    stopLevelPolling,
-  ]);
+  }, [finalizeSessionRecording, phase, releaseCapture, setPreviewFromBlob, stopLevelPolling]);
 
   const discardPreview = useCallback(() => {
     clearPreview();
@@ -413,7 +363,7 @@ export function useSystemAudioTest(isDesktop: boolean) {
     await refreshPermission();
   }, [refreshPermission]);
 
-  /** Triggers macOS TCC so the app appears under Screen Recording in System Settings. */
+  /** Triggers macOS TCC so the app appears under System Audio Recording in System Settings. */
   const registerScreenRecordingAccess = useCallback(async () => {
     setPhase('requesting');
     setError(null);
@@ -421,23 +371,15 @@ export function useSystemAudioTest(isDesktop: boolean) {
     try {
       await loadSources();
 
-      if (isDesktop && selectedSourceId && globalThis.window.desktop?.deviceCheck) {
-        try {
-          const stream = await acquireViaDesktopSource(selectedSourceId);
-          for (const track of stream.getTracks()) {
-            track.stop();
-          }
-        } catch {
-          // Denied or cancelled — app should still appear in Screen Recording list
-        }
-      } else if (typeof navigator.mediaDevices?.getDisplayMedia === 'function') {
+      // Always use getDisplayMedia on desktop so macOS loopback audio can be captured.
+      if (typeof navigator.mediaDevices?.getDisplayMedia === 'function') {
         try {
           const stream = await acquireViaDisplayMedia();
           for (const track of stream.getTracks()) {
             track.stop();
           }
         } catch {
-          // User cancelled picker or denied
+          // Denied or cancelled — app should still appear in System Audio Recording list
         }
       }
 
@@ -455,7 +397,7 @@ export function useSystemAudioTest(isDesktop: boolean) {
       setVerdict('error');
       setPhase('error');
     }
-  }, [isDesktop, loadSources, refreshPermission, selectedSourceId]);
+  }, [loadSources, refreshPermission]);
 
   useEffect(() => {
     void refreshPermission();
@@ -465,8 +407,8 @@ export function useSystemAudioTest(isDesktop: boolean) {
   useEffect(() => {
     return () => {
       releaseCapture();
-      if (previewUrlRef.current) {
-        URL.revokeObjectURL(previewUrlRef.current);
+      if (previewUrlReference.current) {
+        URL.revokeObjectURL(previewUrlReference.current);
       }
     };
   }, [releaseCapture]);
@@ -484,7 +426,6 @@ export function useSystemAudioTest(isDesktop: boolean) {
     captureLabel,
     previewUrl,
     previewDurationSec,
-    monitorStream,
     isDesktop,
     refreshPermission,
     startMonitoring,
@@ -492,6 +433,6 @@ export function useSystemAudioTest(isDesktop: boolean) {
     discardPreview,
     openSystemAudioSettings,
     registerScreenRecordingAccess,
-    soundThreshold: SOUND_LEVEL_THRESHOLD,
+    soundThreshold: SOUND_LEVEL_THRESHOLD
   };
 }

@@ -1,48 +1,59 @@
 import { useCallback, useEffect, useState } from 'react';
 
-import { IconBell, IconCircleCheck, IconDeviceDesktop, IconMicrophone } from '@tabler/icons-react';
+import type {
+  PermissionCatalog,
+  PermissionIconKey,
+  PermissionItem,
+  PermissionTarget
+} from './permissions';
+
+import {
+  IconAccessible,
+  IconCircleCheck,
+  IconDeviceDesktop,
+  IconMicrophone
+} from '@tabler/icons-react';
 
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
 import {
-  fetchPermissionCatalog,
+  fetchSettingsPermissionCatalog,
   getDefaultPermissionCatalog,
-  requestPermissionItem,
-  type PermissionCatalog,
-  type PermissionIconKey,
-  type PermissionItem,
-  type PermissionTarget,
+  openDesktopPermissionSettings,
+  requestPermissionItem
 } from './permissions';
 
 const PERMISSION_ICONS = {
+  accessibility: IconAccessible,
   microphone: IconMicrophone,
   systemAudio: IconDeviceDesktop,
-  notifications: IconBell,
+  notifications: IconAccessible
 } as const;
 
 const PERMISSION_ICON_STYLES: Record<PermissionIconKey, string> = {
+  accessibility: 'bg-emerald-700',
   microphone: 'bg-[#3B82F6]',
   systemAudio: 'bg-emerald-600',
-  notifications: 'bg-amber-500',
+  notifications: 'bg-amber-500'
 };
 
-function PermissionRow({
+function PermissionCard({
   item,
   isRequesting,
-  onAction,
+  onGrantAccess,
+  onOpenSettings
 }: {
   item: PermissionItem;
   isRequesting: boolean;
-  onAction: (id: PermissionTarget) => void;
+  onGrantAccess: (id: PermissionTarget) => void;
+  onOpenSettings: (id: PermissionTarget) => void;
 }) {
-  const Icon = PERMISSION_ICONS[item.icon];
-  const enabled = item.snapshot.granted;
-  const actionLabel =
-    item.action === 'openSettings' ? 'Open Settings' : item.action === 'enable' ? 'Enable' : null;
+  const Icon = PERMISSION_ICONS[item.icon] ?? IconAccessible;
+  const granted = item.snapshot.granted;
 
   return (
-    <div className='border-b border-border/60 py-4 last:border-b-0'>
+    <div className='border-border/70 bg-card/80 rounded-2xl border px-5 py-4'>
       <div className='flex items-center gap-4'>
         <div
           className={cn(
@@ -53,29 +64,46 @@ function PermissionRow({
           <Icon className='size-5' stroke={1.75} />
         </div>
         <div className='min-w-0 flex-1'>
-          <p className='text-sm font-semibold text-foreground'>{item.title}</p>
-          <p className='mt-0.5 text-sm text-muted-foreground'>{item.description}</p>
-        </div>
-        {enabled ? (
-          <div className='inline-flex shrink-0 items-center gap-1.5 text-sm font-medium text-emerald-600 dark:text-emerald-400'>
-            <IconCircleCheck className='size-4' />
-            Enabled
+          <div className='flex flex-wrap items-center gap-2'>
+            <p className='text-foreground text-sm font-semibold'>{item.title}</p>
+            {granted ? (
+              <span className='inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-600 dark:text-emerald-400'>
+                <IconCircleCheck className='size-3.5' />
+                Granted
+              </span>
+            ) : null}
           </div>
-        ) : actionLabel ? (
-          <Button
-            size='sm'
-            className='shrink-0 rounded-full px-4'
-            disabled={isRequesting}
-            onClick={() => {
-              onAction(item.id);
-            }}
-          >
-            {actionLabel}
-          </Button>
-        ) : null}
+          <p className='text-muted-foreground mt-0.5 text-sm'>{item.description}</p>
+        </div>
+        <div className='flex shrink-0 items-center gap-2'>
+          {granted ? (
+            <Button
+              size='sm'
+              variant='outline'
+              className='rounded-full px-4'
+              disabled={isRequesting}
+              onClick={() => {
+                onOpenSettings(item.id);
+              }}
+            >
+              Open Settings
+            </Button>
+          ) : (
+            <Button
+              size='sm'
+              className='rounded-full bg-amber-400 px-4 text-amber-950 hover:bg-amber-300'
+              disabled={isRequesting}
+              onClick={() => {
+                onGrantAccess(item.id);
+              }}
+            >
+              Grant Access
+            </Button>
+          )}
+        </div>
       </div>
-      {!enabled && item.helpText ? (
-        <p className='mt-3 pl-14 text-xs leading-relaxed text-muted-foreground'>{item.helpText}</p>
+      {!granted && item.helpText ? (
+        <p className='text-muted-foreground mt-3 pl-14 text-xs leading-relaxed'>{item.helpText}</p>
       ) : null}
     </div>
   );
@@ -90,7 +118,7 @@ export default function SettingsPermissionsPanel({ isDesktop }: { isDesktop: boo
 
   const refresh = useCallback(async () => {
     try {
-      const next = await fetchPermissionCatalog(isDesktopRuntime);
+      const next = await fetchSettingsPermissionCatalog(isDesktopRuntime);
       setCatalog(
         next.items.length > 0
           ? next
@@ -107,21 +135,27 @@ export default function SettingsPermissionsPanel({ isDesktop }: { isDesktop: boo
   }, [refresh]);
 
   useEffect(() => {
-    if (!isDesktopRuntime) return;
+    if (!isDesktopRuntime) {
+      return;
+    }
 
     const onFocus = () => {
       void refresh();
     };
 
     window.addEventListener('focus', onFocus);
-    return () => window.removeEventListener('focus', onFocus);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+    };
   }, [isDesktopRuntime, refresh]);
 
-  const handleAction = async (id: PermissionTarget) => {
+  const runAction = async (id: PermissionTarget, action: 'grant' | 'settings') => {
     setRequestingId(id);
 
     try {
-      await requestPermissionItem(id, catalog);
+      await (action === 'settings'
+        ? openDesktopPermissionSettings(id)
+        : requestPermissionItem(id, catalog));
       await refresh();
     } finally {
       setRequestingId(null);
@@ -129,18 +163,25 @@ export default function SettingsPermissionsPanel({ isDesktop }: { isDesktop: boo
   };
 
   return (
-    <div className='rounded-2xl border border-border/70 bg-card/80 px-5 py-2'>
-      <p className='mb-1 text-xs font-semibold tracking-[0.14em] text-muted-foreground uppercase'>
-        Permissions
-      </p>
-      {catalog.items.map((item) => (
-        <PermissionRow
-          key={item.id}
-          item={item}
-          isRequesting={requestingId === item.id}
-          onAction={handleAction}
-        />
-      ))}
+    <div className='space-y-4'>
+      <div>
+        <h3 className='text-foreground text-lg font-semibold'>System Permissions</h3>
+        <p className='text-muted-foreground mt-1 text-sm'>
+          The app needs these permissions to work properly. Grant access when prompted, or open
+          System Settings to manage access later.
+        </p>
+      </div>
+      <div className='space-y-3'>
+        {catalog.items.map((item) => (
+          <PermissionCard
+            key={item.id}
+            item={item}
+            isRequesting={requestingId === item.id}
+            onGrantAccess={(id) => void runAction(id, 'grant')}
+            onOpenSettings={(id) => void runAction(id, 'settings')}
+          />
+        ))}
+      </div>
     </div>
   );
 }

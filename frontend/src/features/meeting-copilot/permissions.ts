@@ -1,37 +1,17 @@
-export type PermissionStatus =
-  | 'granted'
-  | 'denied'
-  | 'not-determined'
-  | 'restricted'
-  | 'unknown'
-  | 'unsupported';
+import type {
+  PermissionAction,
+  PermissionCatalog,
+  PermissionIconKey,
+  PermissionItem,
+  PermissionRequestKind,
+  PermissionSnapshot,
+  PermissionStatus,
+  PermissionTarget
+} from './permissions.types';
 
-export type PermissionSnapshot = {
-  status: PermissionStatus;
-  granted: boolean;
-  canRequest?: boolean;
-};
+import { deriveAction } from './permission-actions';
 
-export type PermissionRequestKind = 'systemPrompt' | 'settingsOnly';
-export type PermissionAction = 'enable' | 'openSettings' | 'none';
-export type PermissionTarget = 'microphone' | 'systemAudio' | 'notifications';
-export type PermissionIconKey = 'microphone' | 'systemAudio' | 'notifications';
 
-export type PermissionItem = {
-  id: PermissionTarget;
-  title: string;
-  description: string;
-  requestKind: PermissionRequestKind;
-  icon: PermissionIconKey;
-  snapshot: PermissionSnapshot;
-  action: PermissionAction;
-  helpText: string | null;
-};
-
-export type PermissionCatalog = {
-  platform: string;
-  items: PermissionItem[];
-};
 
 function toPermissionStatus(status: string): PermissionStatus {
   const allowed: PermissionStatus[] = [
@@ -40,7 +20,7 @@ function toPermissionStatus(status: string): PermissionStatus {
     'not-determined',
     'restricted',
     'unknown',
-    'unsupported',
+    'unsupported'
   ];
   return allowed.includes(status as PermissionStatus) ? (status as PermissionStatus) : 'unknown';
 }
@@ -53,24 +33,8 @@ function toPermissionSnapshot(snapshot: {
   return {
     status: toPermissionStatus(snapshot.status),
     granted: snapshot.granted,
-    ...(snapshot.canRequest !== undefined ? { canRequest: snapshot.canRequest } : {}),
+    ...(snapshot.canRequest === undefined ? {} : { canRequest: snapshot.canRequest })
   };
-}
-
-function deriveAction(requestKind: PermissionRequestKind, snapshot: PermissionSnapshot): PermissionAction {
-  if (snapshot.granted) {
-    return 'none';
-  }
-
-  if (requestKind === 'settingsOnly') {
-    return 'openSettings';
-  }
-
-  if (snapshot.status === 'denied' || snapshot.status === 'restricted') {
-    return 'openSettings';
-  }
-
-  return 'enable';
 }
 
 function buildSystemAudioItem(
@@ -78,101 +42,104 @@ function buildSystemAudioItem(
   snapshot: PermissionSnapshot = {
     status: platform === 'darwin' ? 'not-determined' : 'unsupported',
     granted: platform === 'win32',
-    canRequest: platform === 'darwin',
+    canRequest: platform === 'darwin'
   }
 ): PermissionItem {
   const visibleOnDesktop = platform === 'darwin' || platform === 'win32';
 
   return {
     id: 'systemAudio',
-    title: 'System audio recording',
+    title: 'System Audio Recording',
     description:
       platform === 'darwin'
-        ? 'Capture audio from meeting apps and other participants.'
+        ? 'Allows the app to capture system audio from meeting apps and other participants.'
         : platform === 'win32'
-          ? 'Capture audio from other meeting apps and participants.'
-          : 'Capture audio from meeting apps and other participants.',
+          ? 'Allows the app to capture audio from other meeting apps and participants.'
+          : 'Allows the app to capture audio from meeting apps and other participants.',
     requestKind: 'settingsOnly',
     icon: 'systemAudio',
     snapshot: visibleOnDesktop
       ? snapshot
       : { status: 'unsupported', granted: false, canRequest: false },
-    action: visibleOnDesktop ? deriveAction('settingsOnly', snapshot) : 'none',
+    action: visibleOnDesktop ? deriveAction(snapshot) : 'openSettings',
     helpText: visibleOnDesktop
       ? null
-      : 'System audio recording is available in the desktop app only.',
+      : 'System audio recording is available in the desktop app only.'
   };
+}
+
+function buildSettingsPermissionItems(platform: string): PermissionItem[] {
+  const microphone: PermissionSnapshot = {
+    status: 'not-determined',
+    granted: false,
+    canRequest: true
+  };
+  const systemAudio: PermissionSnapshot = {
+    status: platform === 'darwin' ? 'not-determined' : 'unsupported',
+    granted: platform === 'win32',
+    canRequest: platform === 'darwin'
+  };
+
+  const items: PermissionItem[] = [];
+
+  if (platform === 'darwin') {
+    const accessibility: PermissionSnapshot = {
+      status: 'denied',
+      granted: false,
+      canRequest: true
+    };
+
+    items.push({
+      id: 'accessibility',
+      title: 'Accessibility',
+      description: 'Allows the app to insert text and interact with other applications.',
+      requestKind: 'settingsOnly',
+      icon: 'accessibility',
+      snapshot: accessibility,
+      action: deriveAction(accessibility),
+      helpText: null
+    });
+  }
+
+  items.push({
+    id: 'microphone',
+    title: 'Microphone',
+    description: 'Allows the app to record your voice during meetings for live transcription.',
+    requestKind: 'systemPrompt',
+    icon: 'microphone',
+    snapshot: microphone,
+    action: deriveAction(microphone),
+    helpText: null
+  });
+
+  if (platform === 'darwin' || platform === 'win32') {
+    items.push(buildSystemAudioItem(platform, systemAudio));
+  }
+
+  return items;
 }
 
 function buildWebPermissionItems(): PermissionItem[] {
   return [
     {
       id: 'microphone',
-      title: 'Microphone access',
-      description: 'Capture your voice during meetings for live transcription.',
+      title: 'Microphone',
+      description: 'Allows the app to record your voice during meetings for live transcription.',
       requestKind: 'systemPrompt',
       icon: 'microphone',
       snapshot: { status: 'not-determined', granted: false, canRequest: true },
-      action: 'enable',
-      helpText: null,
+      action: 'grantAccess',
+      helpText: null
     },
-    buildSystemAudioItem('web'),
-    {
-      id: 'notifications',
-      title: 'Meeting reminders',
-      description: 'Get notified before meetings start and when summaries are ready.',
-      requestKind: 'systemPrompt',
-      icon: 'notifications',
-      snapshot: { status: 'not-determined', granted: false, canRequest: true },
-      action: 'enable',
-      helpText: null,
-    },
+    buildSystemAudioItem('web')
   ];
 }
 
 export function getDefaultPermissionCatalog(platform = 'web'): PermissionCatalog {
   if (platform === 'darwin' || platform === 'win32') {
-    const microphone: PermissionSnapshot = {
-      status: 'not-determined',
-      granted: false,
-      canRequest: true,
-    };
-    const notifications: PermissionSnapshot = {
-      status: 'not-determined',
-      granted: false,
-      canRequest: true,
-    };
-    const systemAudio: PermissionSnapshot = {
-      status: platform === 'darwin' ? 'not-determined' : 'unsupported',
-      granted: platform === 'win32',
-      canRequest: platform === 'darwin',
-    };
-
     return {
       platform,
-      items: [
-        {
-          id: 'microphone',
-          title: 'Microphone access',
-          description: 'Capture your voice during meetings for live transcription.',
-          requestKind: 'systemPrompt',
-          icon: 'microphone',
-          snapshot: microphone,
-          action: 'enable',
-          helpText: null,
-        },
-        buildSystemAudioItem(platform, systemAudio),
-        {
-          id: 'notifications',
-          title: 'Meeting reminders',
-          description: 'Get notified before meetings start and when summaries are ready.',
-          requestKind: 'systemPrompt',
-          icon: 'notifications',
-          snapshot: notifications,
-          action: 'enable',
-          helpText: null,
-        },
-      ],
+      items: buildSettingsPermissionItems(platform)
     };
   }
 
@@ -189,7 +156,6 @@ type LegacyDesktopPermissionResponse = {
 
 function buildLegacyDesktopCatalog(raw: LegacyDesktopPermissionResponse): PermissionCatalog {
   const microphone = toPermissionSnapshot(raw.microphone);
-  const notifications = toPermissionSnapshot(raw.notifications);
   const systemAudio = toPermissionSnapshot(
     raw.systemAudio ??
       raw.screenCapture ??
@@ -198,66 +164,29 @@ function buildLegacyDesktopCatalog(raw: LegacyDesktopPermissionResponse): Permis
         : { status: 'unsupported', granted: true, canRequest: false })
   );
 
-  const items: PermissionItem[] = [
-    {
-      id: 'microphone',
-      title: 'Microphone access',
-      description: 'Capture your voice during meetings for live transcription.',
-      requestKind: 'systemPrompt',
-      icon: 'microphone',
-      snapshot: microphone,
-      action: deriveAction('systemPrompt', microphone),
-      helpText: null,
-    },
-  ];
-
-  if (raw.platform === 'darwin' || raw.platform === 'win32') {
-    items.push({
-      ...buildSystemAudioItem(raw.platform, systemAudio),
-      action: deriveAction('settingsOnly', systemAudio),
-    });
-  }
-
-  items.push({
-    id: 'notifications',
-    title: 'Meeting reminders',
-    description: 'Get notified before meetings start and when summaries are ready.',
-    requestKind: 'systemPrompt',
-    icon: 'notifications',
-    snapshot: notifications,
-    action: deriveAction('systemPrompt', notifications),
-    helpText: null,
-  });
-
-  return { platform: raw.platform, items };
-}
-
-function normalizeDesktopPermissionResponse(raw: {
-  platform?: string;
-  items?: Array<{
-    id: string;
-    title: string;
-    description: string;
-    requestKind: PermissionRequestKind;
-    icon: PermissionIconKey;
-    snapshot: { status: string; granted: boolean; canRequest?: boolean };
-    action: PermissionAction;
-    helpText: string | null;
-  }>;
-  microphone?: { status: string; granted: boolean; canRequest?: boolean };
-}): PermissionCatalog {
-  if (Array.isArray(raw.items) && raw.items.length > 0) {
-    return {
-      platform: raw.platform ?? 'unknown',
-      items: raw.items.map((item) => toPermissionItem(item)),
-    };
-  }
-
-  if (raw.microphone) {
-    return buildLegacyDesktopCatalog(raw as LegacyDesktopPermissionResponse);
-  }
-
-  return getDefaultPermissionCatalog(raw.platform ?? 'darwin');
+  return {
+    platform: raw.platform,
+    items: [
+      {
+        id: 'microphone',
+        title: 'Microphone',
+        description: 'Allows the app to record your voice during meetings for live transcription.',
+        requestKind: 'systemPrompt',
+        icon: 'microphone',
+        snapshot: microphone,
+        action: deriveAction(microphone),
+        helpText: null
+      },
+      ...(raw.platform === 'darwin' || raw.platform === 'win32'
+        ? [
+            {
+              ...buildSystemAudioItem(raw.platform, systemAudio),
+              action: deriveAction(systemAudio)
+            }
+          ]
+        : [])
+    ]
+  };
 }
 
 function toPermissionItem(raw: {
@@ -278,9 +207,48 @@ function toPermissionItem(raw: {
     requestKind: raw.requestKind,
     icon: raw.icon,
     snapshot,
-    action: raw.action ?? deriveAction(raw.requestKind, snapshot),
-    helpText: raw.helpText,
+    action: raw.action ?? deriveAction(snapshot),
+    helpText: raw.helpText
   };
+}
+
+function normalizeDesktopPermissionResponse(raw: {
+  platform?: string;
+  items?: Array<{
+    id: string;
+    title: string;
+    description: string;
+    requestKind: PermissionRequestKind;
+    icon: PermissionIconKey;
+    snapshot: { status: string; granted: boolean; canRequest?: boolean };
+    action: PermissionAction;
+    helpText: string | null;
+  }>;
+  microphone?: { status: string; granted: boolean; canRequest?: boolean };
+}): PermissionCatalog {
+  if (Array.isArray(raw.items) && raw.items.length > 0) {
+    return {
+      platform: raw.platform ?? 'unknown',
+      items: raw.items.map((item) => toPermissionItem(item))
+    };
+  }
+
+  if (raw.microphone) {
+    return buildLegacyDesktopCatalog(raw as LegacyDesktopPermissionResponse);
+  }
+
+  return getDefaultPermissionCatalog(raw.platform ?? 'darwin');
+}
+
+async function loadDesktopPermissionCatalog(mode: 'all' | 'settings'): Promise<PermissionCatalog> {
+  const api = globalThis.window.desktop?.permissions;
+  if (!api) {
+    return getDefaultPermissionCatalog('darwin');
+  }
+
+  const raw = mode === 'settings' && api.getSettings ? await api.getSettings() : await api.getAll();
+
+  return normalizeDesktopPermissionResponse(raw);
 }
 
 export async function fetchPermissionCatalog(isDesktopHint: boolean): Promise<PermissionCatalog> {
@@ -289,8 +257,7 @@ export async function fetchPermissionCatalog(isDesktopHint: boolean): Promise<Pe
 
   if (isDesktop && hasDesktopApi) {
     try {
-      const raw = await globalThis.window.desktop!.permissions.getAll();
-      let catalog = normalizeDesktopPermissionResponse(raw);
+      let catalog = await loadDesktopPermissionCatalog('all');
 
       if (catalog.platform === 'win32' || catalog.platform === 'linux') {
         const notificationSnapshot = await getWebNotificationPermission();
@@ -301,13 +268,13 @@ export async function fetchPermissionCatalog(isDesktopHint: boolean): Promise<Pe
               ? {
                   ...item,
                   snapshot: notificationSnapshot,
-                  action: deriveAction(item.requestKind, notificationSnapshot),
+                  action: deriveAction(notificationSnapshot),
                   helpText: notificationSnapshot.granted
                     ? null
-                    : 'Allow notifications in your browser or system settings if reminders are blocked.',
+                    : 'Allow notifications in your browser or system settings if reminders are blocked.'
                 }
               : item
-          ),
+          )
         };
       }
 
@@ -320,10 +287,7 @@ export async function fetchPermissionCatalog(isDesktopHint: boolean): Promise<Pe
     }
   }
 
-  const [microphone, notifications] = await Promise.all([
-    queryWebMicrophone(),
-    getWebNotificationPermission(),
-  ]);
+  const [microphone] = await Promise.all([queryWebMicrophone()]);
 
   return {
     platform: 'web',
@@ -332,30 +296,58 @@ export async function fetchPermissionCatalog(isDesktopHint: boolean): Promise<Pe
         return {
           ...item,
           snapshot: microphone,
-          action: deriveAction(item.requestKind, microphone),
+          action: deriveAction(microphone),
           helpText: microphone.granted
             ? null
             : microphone.status === 'denied'
               ? 'Microphone access was denied. Enable it in your browser site settings.'
-              : null,
-        };
-      }
-
-      if (item.id === 'notifications') {
-        return {
-          ...item,
-          snapshot: notifications,
-          action: deriveAction(item.requestKind, notifications),
-          helpText: notifications.granted
-            ? null
-            : notifications.status === 'denied'
-              ? 'Notifications were blocked. Enable them in your browser site settings.'
-              : null,
+              : null
         };
       }
 
       return item;
-    }),
+    })
+  };
+}
+
+export async function fetchSettingsPermissionCatalog(
+  isDesktopHint: boolean
+): Promise<PermissionCatalog> {
+  const hasDesktopApi = Boolean(globalThis.window.desktop?.permissions);
+  const isDesktop = isDesktopHint || hasDesktopApi;
+
+  if (isDesktop && hasDesktopApi) {
+    try {
+      const catalog = await loadDesktopPermissionCatalog('settings');
+      return catalog.items.length > 0
+        ? catalog
+        : getDefaultPermissionCatalog(catalog.platform || 'darwin');
+    } catch (error) {
+      console.error('[permissions] failed to load settings permission catalog', error);
+      return getDefaultPermissionCatalog('darwin');
+    }
+  }
+
+  const microphone = await queryWebMicrophone();
+
+  return {
+    platform: 'web',
+    items: buildWebPermissionItems().map((item) => {
+      if (item.id === 'microphone') {
+        return {
+          ...item,
+          snapshot: microphone,
+          action: deriveAction(microphone),
+          helpText: microphone.granted
+            ? null
+            : microphone.status === 'denied'
+              ? 'Microphone access was denied. Enable it in your browser site settings.'
+              : null
+        };
+      }
+
+      return item;
+    })
   };
 }
 
@@ -364,39 +356,86 @@ export async function requestPermissionItem(
   catalog: PermissionCatalog
 ): Promise<void> {
   const item = catalog.items.find((entry) => entry.id === id);
-  if (!item || item.action === 'none') {
+  if (!item) {
     return;
   }
 
   const isDesktop = Boolean(globalThis.window.desktop?.permissions);
   const { platform } = catalog;
 
-  if (item.action === 'openSettings') {
+  if (item.action === 'openSettings' || item.snapshot.granted) {
     if (isDesktop) {
       await openDesktopPermissionSettings(id);
     }
     return;
   }
 
+  if (id === 'accessibility') {
+    if (isDesktop) {
+      await requestDesktopAccessibility();
+      const refreshed = await fetchSettingsPermissionCatalog(true);
+      const accessibility = refreshed.items.find((entry) => entry.id === 'accessibility');
+      if (accessibility && !accessibility.snapshot.granted) {
+        await openDesktopPermissionSettings('accessibility');
+      }
+    }
+    return;
+  }
+
   if (id === 'microphone') {
     if (isDesktop) {
-      if (platform === 'win32' && !item.snapshot.granted) {
+      if (platform === 'win32') {
         await requestWebMicrophone();
       }
-      await requestDesktopMicrophone();
+      const result = await requestDesktopMicrophone();
+      if (result && !result.granted) {
+        await openDesktopPermissionSettings('microphone');
+      }
       return;
     }
     await requestWebMicrophone();
     return;
   }
 
+  if (id === 'systemAudio') {
+    if (isDesktop) {
+      // Try to register the app with macOS System Audio Recording
+      // This makes the app appear in System Settings → System Audio Recording Only
+      try {
+        // First, try to trigger system audio capture to register the app
+        if (typeof navigator.mediaDevices?.getDisplayMedia === 'function') {
+          try {
+            const stream = await navigator.mediaDevices.getDisplayMedia({
+              video: true,
+              audio: true
+            });
+            // Stop the stream immediately - we just wanted to register
+            for (const track of stream.getTracks()) {
+              track.stop();
+            }
+            // Check if we now have permission
+            const refreshed = await fetchSettingsPermissionCatalog(true);
+            const systemAudio = refreshed.items.find((entry) => entry.id === 'systemAudio');
+            if (systemAudio?.snapshot.granted) {
+              return; // Successfully granted
+            }
+          } catch {
+            // User cancelled or denied - continue to open settings
+          }
+        }
+      } catch (error) {
+        console.error('[permissions] Failed to register system audio recording:', error);
+      }
+
+      // Open System Settings for manual permission grant
+      await openDesktopPermissionSettings('systemAudio');
+    }
+    return;
+  }
+
   if (id === 'notifications') {
     if (isDesktop) {
-      if (platform === 'darwin') {
-        await requestDesktopNotifications();
-      } else {
-        await requestWebNotificationPermission();
-      }
+      await (platform === 'darwin' ? requestDesktopNotifications() : requestWebNotificationPermission());
       return;
     }
     await requestWebNotificationPermission();
@@ -405,19 +444,25 @@ export async function requestPermissionItem(
 
 export async function requestDesktopMicrophone(): Promise<PermissionSnapshot | null> {
   const api = globalThis.window.desktop?.permissions;
-  if (!api) return null;
+  if (!api) {return null;}
   return toPermissionSnapshot(await api.requestMicrophone());
+}
+
+export async function requestDesktopAccessibility(): Promise<PermissionSnapshot | null> {
+  const api = globalThis.window.desktop?.permissions;
+  if (!api?.requestAccessibility) {return null;}
+  return toPermissionSnapshot(await api.requestAccessibility());
 }
 
 export async function requestDesktopNotifications(): Promise<PermissionSnapshot | null> {
   const api = globalThis.window.desktop?.permissions;
-  if (!api?.requestNotifications) return null;
+  if (!api?.requestNotifications) {return null;}
   return toPermissionSnapshot(await api.requestNotifications());
 }
 
 export async function openDesktopPermissionSettings(target: PermissionTarget) {
   const api = globalThis.window.desktop?.permissions;
-  if (!api) return { ok: false };
+  if (!api) {return { ok: false };}
   return api.openSettings(target);
 }
 
@@ -427,7 +472,7 @@ export async function queryWebMicrophone(): Promise<PermissionSnapshot> {
   }
 
   try {
-    const result = await navigator.permissions.query({ name: 'microphone' as PermissionName });
+    const result = await navigator.permissions.query({ name: 'microphone' });
     if (result.state === 'granted') {
       return { status: 'granted', granted: true };
     }
@@ -545,3 +590,12 @@ export async function requestMicrophoneAccess(): Promise<PermissionSnapshot> {
 
   return requestWebMicrophone();
 }
+
+export {
+  type PermissionAction,
+  type PermissionIconKey,
+  type PermissionCatalog,
+  type PermissionRequestKind,
+  type PermissionItem, type PermissionSnapshot, type PermissionTarget, type PermissionStatus
+} from './permissions.types';
+export { deriveAction } from './permission-actions';

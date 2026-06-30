@@ -5,7 +5,7 @@ const APP_DISPLAY_NAME = 'AI Meeting Copilot';
 /**
  * @typedef {'not-determined' | 'granted' | 'denied' | 'restricted' | 'unknown' | 'unsupported'} PermissionStatus
  * @typedef {'systemPrompt' | 'settingsOnly'} PermissionRequestKind
- * @typedef {'enable' | 'openSettings' | 'none'} PermissionAction
+ * @typedef {'grantAccess' | 'openSettings'} PermissionAction
  */
 
 function normalizeMediaStatus(status) {
@@ -19,7 +19,10 @@ function normalizeMediaStatus(status) {
 }
 
 function readMediaAccessStatus(type) {
-  if (typeof systemPreferences.getMediaAccessStatus !== 'function') {
+  if (
+    !systemPreferences ||
+    typeof systemPreferences.getMediaAccessStatus !== 'function'
+  ) {
     return 'unknown';
   }
 
@@ -38,24 +41,12 @@ function buildSnapshot(status, { canRequestWhenDenied = true } = {}) {
   };
 }
 
-function deriveAction(requestKind, snapshot) {
+function deriveAction(snapshot) {
   if (snapshot.granted) {
-    return 'none';
-  }
-
-  if (requestKind === 'settingsOnly') {
     return 'openSettings';
   }
 
-  if (snapshot.status === 'denied' || snapshot.status === 'restricted') {
-    return 'openSettings';
-  }
-
-  if (requestKind === 'systemPrompt') {
-    return 'enable';
-  }
-
-  return 'openSettings';
+  return 'grantAccess';
 }
 
 function getHelpText(id, platform, snapshot) {
@@ -64,6 +55,10 @@ function getHelpText(id, platform, snapshot) {
   }
 
   const guides = {
+    accessibility: {
+      darwin:
+        'Allow this app under System Settings → Privacy & Security → Accessibility so it can interact with other apps.',
+    },
     microphone: {
       darwin:
         'Allow this app under System Settings → Privacy & Security → Microphone. If you previously denied access, macOS will not show the in-app prompt again.',
@@ -71,7 +66,7 @@ function getHelpText(id, platform, snapshot) {
     },
     systemAudio: {
       darwin:
-        'In dev, enable the toggle for "Electron" under System Settings → Privacy & Security → Screen Recording (not "AI Meeting Copilot"). Run the system audio test once so the app appears in the list.',
+        'In dev, enable the toggle for "Electron" under System Settings → Privacy & Security → System Audio Recording Only (not "AI Meeting Copilot"). Run the system audio test once so the app appears in the list.',
       win32:
         'If system audio is blocked, allow desktop apps under Settings → Privacy & security. Windows may not show a separate in-app prompt.',
     },
@@ -142,9 +137,53 @@ async function requestMicrophonePermission() {
   return { status: 'unsupported', granted: false, canRequest: true };
 }
 
+function getAccessibilityPermission() {
+  if (process.platform !== 'darwin') {
+    return { status: 'unsupported', granted: false, canRequest: false };
+  }
+
+  if (
+    !systemPreferences ||
+    typeof systemPreferences.isTrustedAccessibilityClient !== 'function'
+  ) {
+    return { status: 'unknown', granted: false, canRequest: true };
+  }
+
+  try {
+    const trusted = systemPreferences.isTrustedAccessibilityClient(false);
+    return buildSnapshot(trusted ? 'granted' : 'denied', { canRequestWhenDenied: true });
+  } catch {
+    return { status: 'unknown', granted: false, canRequest: true };
+  }
+}
+
+function requestAccessibilityPermission() {
+  if (process.platform !== 'darwin') {
+    return getAccessibilityPermission();
+  }
+
+  if (
+    !systemPreferences ||
+    typeof systemPreferences.isTrustedAccessibilityClient !== 'function'
+  ) {
+    return { status: 'unknown', granted: false, canRequest: true };
+  }
+
+  try {
+    const trusted = systemPreferences.isTrustedAccessibilityClient(true);
+    return buildSnapshot(trusted ? 'granted' : 'denied', { canRequestWhenDenied: true });
+  } catch (error) {
+    console.error('[permissions] requestAccessibilityPermission failed', error);
+    return getAccessibilityPermission();
+  }
+}
+
 function getSystemAudioPermission() {
   if (process.platform === 'darwin') {
-    return buildSnapshot(readMediaAccessStatus('screen'));
+    // CoreAudio Tap API doesn't have a reliable TCC status check before first use.
+    // We return 'not-determined' until the user runs the system audio test.
+    // Once they grant access via getDisplayMedia, the OS remembers it.
+    return buildSnapshot('not-determined');
   }
 
   if (process.platform === 'win32') {
@@ -159,7 +198,11 @@ function requestSystemAudioPermission() {
 }
 
 function getNotificationPermission() {
-  if (process.platform === 'darwin' && systemPreferences.getNotificationSettings) {
+  if (
+    process.platform === 'darwin' &&
+    systemPreferences &&
+    systemPreferences.getNotificationSettings
+  ) {
     const settings = systemPreferences.getNotificationSettings();
     const status =
       settings.status === 'authorized'
@@ -199,40 +242,60 @@ async function requestNotificationPermission() {
   return getNotificationPermission();
 }
 
-function buildPermissionItems(platform) {
+function buildSettingsPermissionItems(platform) {
+  const accessibility = getAccessibilityPermission();
   const microphone = getMicrophonePermission();
   const systemAudio = getSystemAudioPermission();
-  const notifications = getNotificationPermission();
 
   /** @type {Array<{ id: string; title: string; description: string; requestKind: PermissionRequestKind; icon: string; snapshot: ReturnType<typeof buildSnapshot>; action: PermissionAction; helpText: string | null }>} */
-  const items = [
-    {
-      id: 'microphone',
-      title: 'Microphone access',
-      description: 'Capture your voice during meetings for live transcription.',
-      requestKind: 'systemPrompt',
-      icon: 'microphone',
-      snapshot: microphone,
-      action: deriveAction('systemPrompt', microphone),
-      helpText: getHelpText('microphone', platform, microphone),
-    },
-  ];
+  const items = [];
+
+  if (platform === 'darwin') {
+    items.push({
+      id: 'accessibility',
+      title: 'Accessibility',
+      description: 'Allows the app to insert text and interact with other applications.',
+      requestKind: 'settingsOnly',
+      icon: 'accessibility',
+      snapshot: accessibility,
+      action: deriveAction(accessibility),
+      helpText: getHelpText('accessibility', platform, accessibility),
+    });
+  }
+
+  items.push({
+    id: 'microphone',
+    title: 'Microphone',
+    description: 'Allows the app to record your voice during meetings for live transcription.',
+    requestKind: 'systemPrompt',
+    icon: 'microphone',
+    snapshot: microphone,
+    action: deriveAction(microphone),
+    helpText: getHelpText('microphone', platform, microphone),
+  });
 
   if (platform === 'darwin' || platform === 'win32') {
     items.push({
       id: 'systemAudio',
-      title: 'System audio recording',
+      title: 'System Audio Recording',
       description:
         platform === 'darwin'
-          ? 'Capture audio from meeting apps and other participants.'
-          : 'Capture audio from other meeting apps and participants.',
+          ? 'Allows the app to capture system audio from meeting apps and other participants.'
+          : 'Allows the app to capture audio from other meeting apps and participants.',
       requestKind: 'settingsOnly',
       icon: 'systemAudio',
       snapshot: systemAudio,
-      action: deriveAction('settingsOnly', systemAudio),
+      action: deriveAction(systemAudio),
       helpText: getHelpText('systemAudio', platform, systemAudio),
     });
   }
+
+  return items;
+}
+
+function buildPermissionItems(platform) {
+  const items = buildSettingsPermissionItems(platform);
+  const notifications = getNotificationPermission();
 
   items.push({
     id: 'notifications',
@@ -241,7 +304,7 @@ function buildPermissionItems(platform) {
     requestKind: 'systemPrompt',
     icon: 'notifications',
     snapshot: notifications,
-    action: deriveAction('systemPrompt', notifications),
+    action: deriveAction(notifications),
     helpText: getHelpText('notifications', platform, notifications),
   });
 
@@ -256,8 +319,18 @@ function getAllPermissions() {
   };
 }
 
+function getSettingsPermissions() {
+  const platform = process.platform;
+  return {
+    platform,
+    items: buildSettingsPermissionItems(platform),
+  };
+}
+
 function resolveSettingsTarget(target) {
   if (target === 'systemAudio') {
+    // Note: macOS 26 may have a separate System Audio Recording pane.
+    // For now, Privacy_ScreenCapture still works as it includes system audio.
     return 'screenCapture';
   }
   return target;
@@ -268,6 +341,8 @@ function openPermissionSettings(target) {
 
   if (process.platform === 'darwin') {
     const urls = {
+      accessibility:
+        'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility',
       microphone:
         'x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone',
       screenCapture:
@@ -284,6 +359,7 @@ function openPermissionSettings(target) {
 
   if (process.platform === 'win32') {
     const urls = {
+      accessibility: 'ms-settings:easeofaccess',
       microphone: 'ms-settings:privacy-microphone',
       screenCapture: 'ms-settings:privacy',
       notifications: 'ms-settings:notifications',
@@ -326,7 +402,11 @@ async function ensureRecordingPermissions() {
 }
 
 module.exports = {
+  deriveAction,
   getAllPermissions,
+  getSettingsPermissions,
+  getAccessibilityPermission,
+  requestAccessibilityPermission,
   getMicrophonePermission,
   requestMicrophonePermission,
   checkAndRequestMediaAccess,

@@ -20,7 +20,7 @@ export type DesktopAppInfo = {
   name?: string;
   execPath?: string;
   isPackaged?: boolean;
-  /** Name shown in System Settings → Screen Recording (often "Electron" during dev). */
+  /** Name shown in System Settings → System Audio Recording (often "Electron" during dev). */
   settingsAppName?: string;
 };
 
@@ -44,14 +44,16 @@ type DesktopCaptureSource = {
   displayId?: string;
 };
 
+type DesktopPermissionTarget = 'accessibility' | 'microphone' | 'systemAudio' | 'notifications';
+
 type DesktopPermissionItem = {
-  id: 'microphone' | 'systemAudio' | 'notifications';
+  id: DesktopPermissionTarget;
   title: string;
   description: string;
   requestKind: 'systemPrompt' | 'settingsOnly';
-  icon: 'microphone' | 'systemAudio' | 'notifications';
+  icon: 'accessibility' | 'microphone' | 'systemAudio' | 'notifications';
   snapshot: { status: string; granted: boolean; canRequest?: boolean };
-  action: 'enable' | 'openSettings' | 'none';
+  action: 'grantAccess' | 'openSettings';
   helpText: string | null;
 };
 
@@ -72,12 +74,21 @@ type DesktopApi = {
       platform: string;
       items: DesktopPermissionItem[];
     }>;
+    getSettings: () => Promise<{
+      platform: string;
+      items: DesktopPermissionItem[];
+    }>;
     requestMicrophone: () => Promise<{ status: string; granted: boolean }>;
+    requestAccessibility: () => Promise<{ status: string; granted: boolean }>;
     requestNotifications: () => Promise<{ status: string; granted: boolean }>;
-    openSettings: (target: 'microphone' | 'systemAudio' | 'notifications') => Promise<{ ok: boolean }>;
+    openSettings: (target: DesktopPermissionTarget) => Promise<{ ok: boolean }>;
   };
   deviceCheck: {
-    listCaptureSources: () => Promise<DesktopCaptureSource[]>;
+    listCaptureSources: () => Promise<{
+      sources: DesktopCaptureSource[];
+      screenPermission?: string;
+      error?: string;
+    }>;
   };
   recording: {
     start: () => Promise<DesktopRecordingState>;
@@ -97,7 +108,9 @@ type DesktopApi = {
     dragStart: () => Promise<{ ok: boolean }>;
     dragMove: () => Promise<{ ok: boolean }>;
     dragEnd: () => Promise<{ ok: boolean }>;
-    resizeStart: (edge: 'corner' | 'right' | 'bottom') => Promise<{ ok: boolean; limits?: WidgetSizeLimits }>;
+    resizeStart: (
+      edge: 'corner' | 'right' | 'bottom'
+    ) => Promise<{ ok: boolean; limits?: WidgetSizeLimits }>;
     resizeMove: () => Promise<{ ok: boolean; size?: WidgetSize; limits?: WidgetSizeLimits }>;
     resizeEnd: () => Promise<{ ok: boolean }>;
   };
@@ -108,5 +121,3 @@ declare global {
     desktop?: DesktopApi;
   }
 }
-
-export {};

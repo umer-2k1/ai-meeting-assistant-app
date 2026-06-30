@@ -8,6 +8,12 @@ import authRoutes from './routes/auth.js';
 import { requireAuth, optionalAuth } from './middleware/auth.js';
 import { getRouteParam } from './lib/params.js';
 import { sampleMeetings, sampleTranscript } from './data.js';
+import {
+  getAuthConfigIssues,
+  getJwtSecret,
+  isGoogleOAuthConfigured,
+} from './lib/auth-config.js';
+import prisma from './lib/prisma.js';
 
 // Load environment variables
 dotenv.config();
@@ -53,8 +59,28 @@ app.use(passport.session());
 // ========================================
 
 // Health check
-app.get('/api/health', (_request, response) => {
-  response.json({ ok: true, service: 'ai-meeting-copilot-backend' });
+app.get('/api/health', async (_request, response) => {
+  const authIssues = getAuthConfigIssues();
+  let databaseConnected = false;
+
+  if (process.env.DATABASE_URL) {
+    try {
+      await prisma.$queryRaw`SELECT 1`;
+      databaseConnected = true;
+    } catch (error) {
+      console.error('[health] Database connection failed:', error);
+    }
+  }
+
+  response.json({
+    ok: true,
+    service: 'ai-meeting-copilot-backend',
+    googleOAuthConfigured: isGoogleOAuthConfigured(),
+    jwtConfigured: Boolean(getJwtSecret()),
+    databaseConfigured: Boolean(process.env.DATABASE_URL),
+    databaseConnected,
+    authConfigIssues: authIssues,
+  });
 });
 
 // Auth routes (no /api prefix for auth)
@@ -224,9 +250,34 @@ app.use((err: Error, req: express.Request, res: express.Response, next: express.
 // Server Start
 // ========================================
 
-app.listen(port, () => {
-  console.log(`🚀 AI Meeting Copilot Backend running on http://localhost:${port}`);
-  console.log(`📊 Health check: http://localhost:${port}/api/health`);
-  console.log(`🔐 Auth endpoint: http://localhost:${port}/auth/google`);
-  console.log(`\n💡 To enable database features, set DATABASE_URL in .env`);
-});
+async function startServer() {
+  const authIssues = getAuthConfigIssues();
+
+  if (authIssues.length > 0) {
+    console.warn('[startup] Auth configuration issues detected:');
+    for (const issue of authIssues) {
+      console.warn(`  - ${issue}`);
+    }
+  }
+
+  if (process.env.DATABASE_URL) {
+    try {
+      await prisma.$connect();
+      console.log('[startup] Database connection established');
+    } catch (error) {
+      console.error('[startup] Failed to connect to database:', error);
+      console.error('[startup] Google sign-in and database features will fail until DATABASE_URL is fixed.');
+    }
+  } else {
+    console.warn('[startup] DATABASE_URL is not set. Google sign-in will fail.');
+  }
+
+  app.listen(port, () => {
+    console.log(`🚀 AI Meeting Copilot Backend running on http://localhost:${port}`);
+    console.log(`📊 Health check: http://localhost:${port}/api/health`);
+    console.log(`🔐 Auth endpoint: http://localhost:${port}/auth/google`);
+    console.log(`\n💡 To enable database features, set DATABASE_URL in .env`);
+  });
+}
+
+void startServer();

@@ -1,11 +1,35 @@
 import express from 'express';
 import passport from '../lib/passport.js';
 import { generateToken } from '../lib/jwt.js';
+import {
+  buildAuthErrorRedirect,
+  getFrontendUrl,
+  isGoogleOAuthConfigured,
+  mapAuthErrorToReason,
+} from '../lib/auth-config.js';
 import type { User } from '@prisma/client';
 
 const router = express.Router();
 const DESKTOP_OAUTH_STATE = 'desktop';
 const DESKTOP_PROTOCOL = process.env.DESKTOP_PROTOCOL || 'ai-meeting-copilot';
+
+function redirectWithAuthSuccess(req: express.Request, res: express.Response, user: User) {
+  const token = generateToken(user);
+
+  const userPayload = encodeURIComponent(
+    JSON.stringify({ id: user.id, email: user.email, name: user.name, avatarUrl: user.avatarUrl })
+  );
+
+  const state = Array.isArray(req.query.state) ? req.query.state[0] : req.query.state;
+  const isDesktop = state === DESKTOP_OAUTH_STATE;
+
+  if (isDesktop) {
+    const deepLink = `${DESKTOP_PROTOCOL}://auth/callback?token=${token}&user=${userPayload}`;
+    return res.redirect(deepLink);
+  }
+
+  return res.redirect(`${getFrontendUrl()}/auth/callback?token=${token}&user=${userPayload}`);
+}
 
 // ========================================
 // Google OAuth Routes
@@ -16,6 +40,10 @@ const DESKTOP_PROTOCOL = process.env.DESKTOP_PROTOCOL || 'ai-meeting-copilot';
  * Initiate Google OAuth flow
  */
 router.get('/google', (req, res, next) => {
+  if (!isGoogleOAuthConfigured()) {
+    return res.redirect(buildAuthErrorRedirect('oauth_misconfigured'));
+  }
+
   const source = Array.isArray(req.query.source) ? req.query.source[0] : req.query.source;
   const isDesktop = source === 'desktop';
 
@@ -31,44 +59,27 @@ router.get('/google', (req, res, next) => {
  * GET /auth/google/callback
  * Handle Google OAuth callback
  */
-router.get(
-  '/google/callback',
-  passport.authenticate('google', {
-    session: false,
-    failureRedirect: `${process.env.FRONTEND_URL}/auth/error`,
-  }),
-  (req, res) => {
+router.get('/google/callback', (req, res, next) => {
+  passport.authenticate('google', { session: false }, (err, user) => {
+    if (err) {
+      console.error('Google OAuth callback error:', err);
+      const reason = mapAuthErrorToReason(err);
+      return res.redirect(buildAuthErrorRedirect(reason));
+    }
+
+    if (!user) {
+      return res.redirect(buildAuthErrorRedirect('auth_failed'));
+    }
+
     try {
-      const user = req.user as User;
-
-      if (!user) {
-        return res.redirect(`${process.env.FRONTEND_URL}/auth/error`);
-      }
-
-      // Generate JWT token
-      const token = generateToken(user);
-
-      const userPayload = encodeURIComponent(
-        JSON.stringify({ id: user.id, email: user.email, name: user.name, avatarUrl: user.avatarUrl })
-      );
-
-      const state = Array.isArray(req.query.state) ? req.query.state[0] : req.query.state;
-      const isDesktop = state === DESKTOP_OAUTH_STATE;
-
-      // Desktop: return to the app via custom protocol (no custom HTML interstitial).
-      if (isDesktop) {
-        const deepLink = `${DESKTOP_PROTOCOL}://auth/callback?token=${token}&user=${userPayload}`;
-        return res.redirect(deepLink);
-      }
-
-      // Web: redirect to frontend route; frontend stores token from URL.
-      res.redirect(`${process.env.FRONTEND_URL}/auth/callback?token=${token}&user=${userPayload}`);
+      return redirectWithAuthSuccess(req, res, user as User);
     } catch (error) {
       console.error('Auth callback error:', error);
-      res.redirect(`${process.env.FRONTEND_URL}/auth/error`);
+      const reason = mapAuthErrorToReason(error);
+      return res.redirect(buildAuthErrorRedirect(reason));
     }
-  }
-);
+  })(req, res, next);
+});
 
 /**
  * GET /auth/me
@@ -116,8 +127,6 @@ router.get('/me', async (req, res) => {
  * Logout user (client-side token removal)
  */
 router.post('/logout', (req, res) => {
-  // With JWT, logout is handled client-side by removing the token
-  // This endpoint exists for consistency
   res.json({ message: 'Logged out successfully' });
 });
 

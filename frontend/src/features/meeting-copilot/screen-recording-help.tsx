@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 
+import type { DesktopAppInfo } from '@/types/desktop';
+
 import { IconCopy } from '@tabler/icons-react';
 
 import { Button } from '@/components/ui/button';
-import type { DesktopAppInfo } from '@/types/desktop';
 
-type ScreenRecordingHelpProps = {
+type ScreenRecordingHelpProperties = {
   isDesktop: boolean;
   onOpenSettings: () => void;
   onRequestAccess?: () => void;
@@ -28,8 +29,8 @@ export default function ScreenRecordingHelp({
   isDesktop,
   onOpenSettings,
   onRequestAccess,
-  isRequesting = false,
-}: ScreenRecordingHelpProps) {
+  isRequesting = false
+}: ScreenRecordingHelpProperties) {
   const [appInfo, setAppInfo] = useState<DesktopAppInfo | null>(null);
   const [copied, setCopied] = useState(false);
 
@@ -40,8 +41,9 @@ export default function ScreenRecordingHelp({
     void fetchDesktopAppInfo().then(setAppInfo);
   }, [isDesktop]);
 
-  const settingsAppName = appInfo?.settingsAppName ?? (appInfo?.isPackaged ? 'AI Meeting Copilot' : 'Electron');
-  const isDevElectron = isDesktop && appInfo && !appInfo.isPackaged;
+  const settingsAppName =
+    appInfo?.settingsAppName ?? (appInfo?.isPackaged ? 'AI Meeting Copilot' : 'Electron');
+  const isDevelopmentElectron = isDesktop && appInfo && !appInfo.isPackaged;
 
   const copyPath = useCallback(async () => {
     if (!appInfo?.execPath) {
@@ -50,7 +52,9 @@ export default function ScreenRecordingHelp({
     try {
       await navigator.clipboard.writeText(appInfo.execPath);
       setCopied(true);
-      window.setTimeout(() => setCopied(false), 2000);
+      globalThis.setTimeout(() => {
+        setCopied(false);
+      }, 2000);
     } catch {
       // ignore
     }
@@ -63,32 +67,38 @@ export default function ScreenRecordingHelp({
   return (
     <div className='space-y-4 rounded-xl border border-amber-500/35 bg-amber-500/5 p-4'>
       <div>
-        <p className='text-sm font-semibold text-foreground'>How to enable Screen Recording on macOS</p>
-        <p className='mt-1 text-sm text-muted-foreground'>
+        <p className='text-foreground text-sm font-semibold'>
+          How to enable System Audio Recording on macOS
+        </p>
+        <p className='text-muted-foreground mt-1 text-sm'>
           macOS does not let you browse for an app file here. You only toggle apps that already
           requested access. Follow these steps in order:
         </p>
       </div>
 
-      <ol className='list-decimal space-y-2 pl-5 text-sm text-muted-foreground'>
+      <ol className='text-muted-foreground list-decimal space-y-2 pl-5 text-sm'>
         <li>
-          Click <span className='font-medium text-foreground'>Register app in macOS</span> below (or
+          Click <span className='text-foreground font-medium'>Register app in macOS</span> below (or
           start the system audio test once). That makes the app appear in the list.
         </li>
         <li>
-          Click <span className='font-medium text-foreground'>Open Screen Recording settings</span>.
+          Click{' '}
+          <span className='text-foreground font-medium'>Open System Audio Recording settings</span>.
         </li>
         <li>
-          Go to <span className='font-medium text-foreground'>Privacy &amp; Security</span> →{' '}
-          <span className='font-medium text-foreground'>Screen Recording</span>.
+          Go to <span className='text-foreground font-medium'>Privacy &amp; Security</span> →{' '}
+          <span className='text-foreground font-medium'>Screen &amp; System Audio Recording</span>{' '}
+          and find the{' '}
+          <span className='text-foreground font-medium'>System Audio Recording Only</span> section.
         </li>
         <li>
           Find{' '}
-          <span className='rounded-md bg-muted px-1.5 py-0.5 font-medium text-foreground'>
+          <span className='bg-muted text-foreground rounded-md px-1.5 py-0.5 font-medium'>
             {settingsAppName}
           </span>{' '}
-          in the list and turn the switch <span className='font-medium text-foreground'>ON</span>.
-          {isDevElectron ? (
+          in that section and turn the switch{' '}
+          <span className='text-foreground font-medium'>ON</span>.
+          {isDevelopmentElectron ? (
             <span className='mt-1 block text-xs'>
               In development, the app is listed as <strong>Electron</strong>, not &quot;
               {appInfo?.name ?? 'AI Meeting Copilot'}&quot;.
@@ -96,21 +106,21 @@ export default function ScreenRecordingHelp({
           ) : null}
         </li>
         <li>
-          Quit this app completely (Cmd+Q), reopen it, then click <span className='font-medium text-foreground'>Refresh</span>{' '}
-          above.
+          Quit this app completely (Cmd+Q), reopen it, then click{' '}
+          <span className='text-foreground font-medium'>Refresh</span> above.
         </li>
       </ol>
 
       {appInfo?.execPath ? (
-        <div className='rounded-lg border border-border/70 bg-background/80 p-3'>
-          <p className='text-xs font-medium text-foreground'>App binary (for reference)</p>
-          <p className='mt-1 break-all font-mono text-[11px] text-muted-foreground'>
+        <div className='border-border/70 bg-background/80 rounded-lg border p-3'>
+          <p className='text-foreground text-xs font-medium'>App binary (for reference)</p>
+          <p className='text-muted-foreground mt-1 font-mono text-[11px] break-all'>
             {appInfo.execPath}
           </p>
-          {isDevElectron ? (
-            <p className='mt-2 text-xs text-muted-foreground'>
-              In Finder: open the folder above, go up to <strong>Electron.app</strong>, right‑click →
-              Show in Finder if you need to confirm which app macOS sees.
+          {isDevelopmentElectron ? (
+            <p className='text-muted-foreground mt-2 text-xs'>
+              In Finder: open the folder above, go up to <strong>Electron.app</strong>, right‑click
+              → Show in Finder if you need to confirm which app macOS sees.
             </p>
           ) : null}
           <Button
@@ -147,7 +157,7 @@ export default function ScreenRecordingHelp({
           className='rounded-full'
           onClick={onOpenSettings}
         >
-          Open Screen Recording settings
+          Open System Audio Recording settings
         </Button>
       </div>
     </div>
