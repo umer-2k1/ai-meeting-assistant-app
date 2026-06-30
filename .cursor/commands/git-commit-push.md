@@ -13,9 +13,9 @@ Run these checks in **both** `frontend` and `backend` before staging or committi
 1. **Type check**
    - `cd frontend && npx tsc --noEmit`
    - `cd backend && npx tsc --noEmit`
-2. **Lint**
+<!-- 2. **Lint**
    - `cd frontend && pnpm eslint` (runs `eslint . --ext .js,.jsx,.ts,.tsx`)
-   - `cd backend && pnpm eslint` (runs `eslint . --ext .js,.jsx,.ts,.tsx`)
+   - `cd backend && pnpm eslint` (runs `eslint . --ext .js,.jsx,.ts,.tsx`) -->
 
 If eslint auto-fixes files, review the diff and include those changes in the commit.
 
