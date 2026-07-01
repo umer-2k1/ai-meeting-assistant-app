@@ -446,28 +446,22 @@ export default function CalendarScreen({
   const handleConnectCalendar = useCallback(async () => {
     try {
       setConnecting(true);
-      const { connectGoogle } = await import('@/lib/integrations-api');
-      const { authUrl } = await connectGoogle('GOOGLE_CALENDAR');
+      const { connectGoogleIntegration } = await import('@/lib/integrations-api');
+      // Handles both web (popup) and desktop (system browser + deep link)
+      // flows, resolving once the OAuth attempt has finished.
+      await connectGoogleIntegration('GOOGLE_CALENDAR');
 
-      const popup = window.open(authUrl, '_blank', 'width=600,height=700');
-      if (!popup) {
-        setConnecting(false);
-        alert('Please allow popups for this site to connect Google Calendar.');
-        return;
-      }
-
-      const pollInterval = window.setInterval(() => {
-        if (popup.closed) {
-          window.clearInterval(pollInterval);
-          setConnecting(false);
-          void refetchConnectionStatus();
-          void fetchCalendarEvents();
-        }
-      }, 500);
+      void refetchConnectionStatus();
+      void fetchCalendarEvents();
     } catch (err) {
       console.error('Failed to initiate Google Calendar OAuth:', err);
+      if (err instanceof Error && err.message === 'popup-blocked') {
+        alert('Please allow popups for this site to connect Google Calendar.');
+      } else {
+        alert('Failed to connect Google Calendar. Please try again.');
+      }
+    } finally {
       setConnecting(false);
-      alert('Failed to connect Google Calendar. Please try again.');
     }
   }, [fetchCalendarEvents, refetchConnectionStatus]);
   

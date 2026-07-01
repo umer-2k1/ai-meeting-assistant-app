@@ -6,16 +6,32 @@
 
 import express from 'express';
 import { requireAuth } from '../middleware/auth.js';
-import { googleOAuthService } from '../connectors/google/oauth.js';
+import { googleOAuthService, getIntegrationsOAuthConfigIssues, GOOGLE_INTEGRATIONS_REDIRECT_URI } from '../connectors/google/oauth.js';
 import { ConnectorManager } from '../connectors/connector-manager.js';
 import prisma from '../lib/prisma.js';
 import {
   buildIntegrationConnectedPage,
   buildIntegrationErrorPage,
+  buildDesktopIntegrationRedirectPage,
 } from '../lib/integration-callback-page.js';
 import type { IntegrationProvider } from '@prisma/client';
 
 const router = express.Router();
+const DESKTOP_PROTOCOL = process.env.DESKTOP_PROTOCOL || 'ai-meeting-copilot';
+
+const GOOGLE_INTEGRATIONS_SETUP = {
+  redirectUri: GOOGLE_INTEGRATIONS_REDIRECT_URI,
+  loginRedirectUri: process.env.GOOGLE_REDIRECT_URI || 'http://localhost:3001/auth/google/callback',
+  googleCloudConsoleSteps: [
+    'Open Google Cloud Console → APIs & Services → Library → enable "Google Calendar API" (and "Gmail API" for Gmail).',
+    'OAuth consent screen → Scopes → add ".../auth/calendar.readonly" (and Gmail scopes if needed).',
+    'OAuth consent screen → Test users → add the Google account you sign in with.',
+    'Credentials → OAuth 2.0 Client → Authorized redirect URIs must include BOTH:',
+    '  • http://localhost:3001/auth/google/callback (login)',
+    '  • http://localhost:3001/api/integrations/google/callback (integrations)',
+    'Use exact URLs — no trailing slash. Changes can take 1–2 minutes to apply.',
+  ],
+};
 
 /**
  * GET /api/integrations/status
@@ -26,6 +42,10 @@ router.get('/status', requireAuth, async (req, res) => {
     const userId = req.user!.id;
     
     const integrations = await ConnectorManager.getUserIntegrations(userId);
+    console.log('[integrations:status] active integrations for user', {
+      userId,
+      providers: integrations.map((i) => i.provider),
+    });
     
     const status: Record<string, any> = {
       calendar: { connected: false },
@@ -38,29 +58,32 @@ router.get('/status', requireAuth, async (req, res) => {
         try {
           const connector = await ConnectorManager.getConnector(userId, 'GOOGLE_CALENDAR');
           const connectorStatus = await connector.getStatus();
+          console.log('[integrations:status] calendar connector status', connectorStatus);
           status.calendar = {
             connected: connectorStatus.connected,
             email: connectorStatus.email,
             lastSync: integration.lastSyncAt,
           };
         } catch (error) {
-          console.error('Error getting calendar status:', error);
+          console.error('[integrations:status] Error getting calendar status:', error);
         }
       } else if (integration.provider === 'GMAIL') {
         try {
           const connector = await ConnectorManager.getConnector(userId, 'GMAIL');
           const connectorStatus = await connector.getStatus();
+          console.log('[integrations:status] gmail connector status', connectorStatus);
           status.gmail = {
             connected: connectorStatus.connected,
             email: connectorStatus.email,
             lastSync: integration.lastSyncAt,
           };
         } catch (error) {
-          console.error('Error getting gmail status:', error);
+          console.error('[integrations:status] Error getting gmail status:', error);
         }
       }
     }
     
+    console.log('[integrations:status] responding', status);
     res.json(status);
   } catch (error) {
     console.error('Error getting integration status:', error);
@@ -83,6 +106,17 @@ function parseRequestedProviders(input: unknown): IntegrationProvider[] {
 }
 
 /**
+ * GET /api/integrations/google/setup
+ * Returns OAuth redirect URI + Google Cloud Console checklist for debugging connect issues.
+ */
+router.get('/google/setup', requireAuth, (_req, res) => {
+  res.json({
+    ...GOOGLE_INTEGRATIONS_SETUP,
+    configIssues: getIntegrationsOAuthConfigIssues(),
+  });
+});
+
+/**
  * POST /api/integrations/google/connect
  * Initiate Google OAuth flow for a specific provider (Calendar or Gmail).
  * Body: { provider: 'GOOGLE_CALENDAR' | 'GMAIL' } or { providers: [...] }
@@ -94,49 +128,138 @@ router.post('/google/connect', requireAuth, async (req, res) => {
     const userId = req.user!.id;
     const requested = parseRequestedProviders(req.body?.providers ?? req.body?.provider);
     const providers: IntegrationProvider[] = requested.length > 0 ? requested : ['GOOGLE_CALENDAR'];
+    const isDesktop = req.body?.source === 'desktop';
 
-    const authUrl = googleOAuthService.generateAuthUrl(userId, providers);
+    console.log('[integrations:connect] request', {
+      userId,
+      body: req.body,
+      resolvedProviders: providers,
+      isDesktop,
+    });
 
-    res.json({ authUrl });
+    const authUrl = googleOAuthService.generateAuthUrl(userId, providers, {
+      isDesktop,
+      loginHint: req.user!.email,
+    });
+
+    console.log('[integrations:connect] generated authUrl', authUrl);
+
+    res.json({
+      authUrl,
+      redirectUri: GOOGLE_INTEGRATIONS_REDIRECT_URI,
+      configIssues: getIntegrationsOAuthConfigIssues(),
+      setup: GOOGLE_INTEGRATIONS_SETUP.googleCloudConsoleSteps,
+    });
   } catch (error) {
-    console.error('Error generating auth URL:', error);
+    console.error('[integrations:connect] Error generating auth URL:', error);
     res.status(500).json({ error: 'Failed to initiate OAuth flow' });
   }
 });
+
+/**
+ * Renders the right callback page depending on where the OAuth flow started:
+ * - Web: this route runs inside a popup window (see settings-screen.tsx /
+ *   calendar-screen.tsx). The opener polls `popup.closed` and refreshes its
+ *   own state, so we just give feedback here and close the popup.
+ * - Desktop: Electron forces Google OAuth to open in the system browser
+ *   (embedded webviews are blocked by Google), so there is no popup handle
+ *   for the app to poll. Instead we redirect the browser tab to a custom
+ *   protocol deep link that the Electron app catches, and the renderer
+ *   refreshes its integration status when it receives that deep link.
+ */
+function sendIntegrationCallbackResult(
+  res: express.Response,
+  isDesktop: boolean,
+  result: { success: true; providers: IntegrationProvider[] } | { success: false; reason?: string }
+) {
+  if (isDesktop) {
+    const params = new URLSearchParams();
+    if (result.success) {
+      params.set('status', 'connected');
+      params.set('providers', result.providers.join(','));
+    } else {
+      params.set('status', 'error');
+      if (result.reason) params.set('reason', result.reason);
+    }
+    const deepLink = `${DESKTOP_PROTOCOL}://integrations/callback?${params.toString()}`;
+    res.type('html').send(buildDesktopIntegrationRedirectPage(deepLink, result.success));
+    return;
+  }
+
+  if (result.success) {
+    res.type('html').send(buildIntegrationConnectedPage(result.providers));
+  } else {
+    res.type('html').send(buildIntegrationErrorPage(result.reason));
+  }
+}
 
 /**
  * GET /api/integrations/google/callback
  * OAuth callback handler
  */
 router.get('/google/callback', async (req, res) => {
+  const rawState = req.query.state as string | undefined;
+  let isDesktop = false;
+  try {
+    if (rawState) {
+      isDesktop = Boolean(JSON.parse(rawState)?.isDesktop);
+    }
+  } catch {
+    // Malformed state - fall through to the generic error handling below.
+  }
+
+  console.log('[integrations:callback] hit', {
+    hasCode: Boolean(req.query.code),
+    hasState: Boolean(rawState),
+    oauthError: req.query.error ?? null,
+    isDesktop,
+  });
+
   try {
     const code = req.query.code as string | undefined;
-    const state = req.query.state as string | undefined;
     const oauthError = req.query.error as string | undefined;
 
     if (oauthError) {
       // User denied the consent screen (e.g. clicked "Cancel")
-      res.type('html').send(buildIntegrationErrorPage('You did not grant access, so nothing was connected.'));
+      console.warn('[integrations:callback] OAuth returned error param:', oauthError);
+      sendIntegrationCallbackResult(res, isDesktop, {
+        success: false,
+        reason: 'You did not grant access, so nothing was connected.',
+      });
       return;
     }
 
-    if (!code || !state) {
-      res.status(400).type('html').send(buildIntegrationErrorPage('Missing authorization code or state.'));
+    if (!code || !rawState) {
+      console.warn('[integrations:callback] missing code or state');
+      res.status(400);
+      sendIntegrationCallbackResult(res, isDesktop, {
+        success: false,
+        reason: 'Missing authorization code or state.',
+      });
       return;
     }
-    
+
     // Parse state to get userId and providers
-    const { userId, providers } = JSON.parse(state);
-    
+    const parsedState = JSON.parse(rawState);
+    const { userId } = parsedState;
+    console.log('[integrations:callback] parsed state', parsedState);
+
     // Exchange code for tokens
     const tokens = await googleOAuthService.exchangeCodeForTokens(code);
-    
+    console.log('[integrations:callback] exchanged tokens', {
+      hasAccessToken: Boolean(tokens.accessToken),
+      hasRefreshToken: Boolean(tokens.refreshToken),
+      grantedScopes: tokens.scope,
+      expiresAt: tokens.expiresAt,
+    });
+
     // Determine which providers were authorized based on granted scopes
     const authorizedProviders = googleOAuthService.getAuthorizedProviders(tokens.scope);
-    
+    console.log('[integrations:callback] authorized providers', authorizedProviders);
+
     // Save integrations to database
     for (const provider of authorizedProviders) {
-      await googleOAuthService.saveIntegration(
+      const saved = await googleOAuthService.saveIntegration(
         userId,
         provider,
         tokens.accessToken,
@@ -144,16 +267,22 @@ router.get('/google/callback', async (req, res) => {
         tokens.expiresAt,
         tokens.scope?.split(' ') || []
       );
+      console.log('[integrations:callback] saved integration', {
+        userId,
+        provider,
+        integrationId: saved.id,
+        isActive: saved.isActive,
+      });
     }
 
-    // This route runs inside a popup window (see settings-screen.tsx / calendar-screen.tsx).
-    // The opener polls `popup.closed` and refreshes its own state, so we just need to give
-    // the user clear feedback here and close the popup ourselves. Redirecting to a frontend
-    // route (e.g. /settings) doesn't work because the SPA has no such router path.
-    res.type('html').send(buildIntegrationConnectedPage(authorizedProviders));
+    if (authorizedProviders.length === 0) {
+      console.warn('[integrations:callback] no providers authorized from granted scopes; nothing saved');
+    }
+
+    sendIntegrationCallbackResult(res, isDesktop, { success: true, providers: authorizedProviders });
   } catch (error) {
-    console.error('OAuth callback error:', error);
-    res.type('html').send(buildIntegrationErrorPage());
+    console.error('[integrations:callback] OAuth callback error:', error);
+    sendIntegrationCallbackResult(res, isDesktop, { success: false });
   }
 });
 

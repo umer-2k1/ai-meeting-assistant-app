@@ -11,20 +11,49 @@ import prisma from '../../lib/prisma.js';
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID!;
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET!;
-const GOOGLE_REDIRECT_URI = process.env.GOOGLE_INTEGRATIONS_REDIRECT_URI || 
+const LOGIN_REDIRECT_URI =
+  process.env.GOOGLE_REDIRECT_URI || 'http://localhost:3001/auth/google/callback';
+export const GOOGLE_INTEGRATIONS_REDIRECT_URI =
+  process.env.GOOGLE_INTEGRATIONS_REDIRECT_URI ||
   'http://localhost:3001/api/integrations/google/callback';
 
-// Define scopes for each integration type
-const SCOPES_MAP: Record<string, string[]> = {
+/** Scopes requested during the Connect flow (keep minimal to reduce consent-screen friction). */
+const CONNECT_SCOPES_MAP: Record<string, string[]> = {
+  GOOGLE_CALENDAR: ['https://www.googleapis.com/auth/calendar.readonly'],
+  GMAIL: ['https://www.googleapis.com/auth/gmail.send'],
+};
+
+/** Any of these scopes counts as that provider being authorized after callback. */
+const AUTHORIZED_SCOPES_MAP: Record<string, string[]> = {
   GOOGLE_CALENDAR: [
     'https://www.googleapis.com/auth/calendar.readonly',
     'https://www.googleapis.com/auth/calendar.events',
+    'https://www.googleapis.com/auth/calendar',
   ],
   GMAIL: [
     'https://www.googleapis.com/auth/gmail.send',
     'https://www.googleapis.com/auth/gmail.readonly',
+    'https://www.googleapis.com/auth/gmail.compose',
   ],
 };
+
+export function getIntegrationsOAuthConfigIssues(): string[] {
+  const issues: string[] = [];
+  if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
+    issues.push('Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in backend/.env');
+  }
+  if (GOOGLE_INTEGRATIONS_REDIRECT_URI === LOGIN_REDIRECT_URI) {
+    issues.push(
+      'GOOGLE_INTEGRATIONS_REDIRECT_URI must differ from GOOGLE_REDIRECT_URI (login callback)'
+    );
+  }
+  if (!GOOGLE_INTEGRATIONS_REDIRECT_URI.includes('/api/integrations/google/callback')) {
+    issues.push(
+      'GOOGLE_INTEGRATIONS_REDIRECT_URI should be http://localhost:3001/api/integrations/google/callback'
+    );
+  }
+  return issues;
+}
 
 export class GoogleOAuthService {
   private oauth2Client: OAuth2Client;
@@ -33,36 +62,56 @@ export class GoogleOAuthService {
     this.oauth2Client = new OAuth2Client(
       GOOGLE_CLIENT_ID,
       GOOGLE_CLIENT_SECRET,
-      GOOGLE_REDIRECT_URI
+      GOOGLE_INTEGRATIONS_REDIRECT_URI
     );
+
+    const configIssues = getIntegrationsOAuthConfigIssues();
+    console.log('[integrations:oauth] redirect URI:', GOOGLE_INTEGRATIONS_REDIRECT_URI);
+    if (configIssues.length > 0) {
+      console.warn('[integrations:oauth] configuration issues:', configIssues);
+    }
   }
   
   /**
    * Generate authorization URL for Google OAuth flow
    * Includes scopes for both Calendar and Gmail
    */
-  generateAuthUrl(userId: string, providers: IntegrationProvider[]): string {
-    // Collect all required scopes
+  generateAuthUrl(
+    userId: string,
+    providers: IntegrationProvider[],
+    options: { isDesktop?: boolean; loginHint?: string } = {}
+  ): string {
     const scopes = new Set<string>();
-    
+
     for (const provider of providers) {
-      const providerScopes = SCOPES_MAP[provider];
+      const providerScopes = CONNECT_SCOPES_MAP[provider];
       if (providerScopes) {
-        providerScopes.forEach(scope => scopes.add(scope));
+        providerScopes.forEach((scope) => scopes.add(scope));
       }
     }
-    
-    // Add email and profile for user info
+
     scopes.add('https://www.googleapis.com/auth/userinfo.email');
     scopes.add('https://www.googleapis.com/auth/userinfo.profile');
-    
+
+    const scopeList = Array.from(scopes);
+    console.log('[integrations:oauth] generateAuthUrl', {
+      userId,
+      providers,
+      isDesktop: Boolean(options.isDesktop),
+      loginHint: options.loginHint,
+      redirectUri: GOOGLE_INTEGRATIONS_REDIRECT_URI,
+      scopes: scopeList,
+    });
+
     const authUrl = this.oauth2Client.generateAuthUrl({
       access_type: 'offline',
-      scope: Array.from(scopes),
-      state: JSON.stringify({ userId, providers }),
-      prompt: 'consent', // Force consent screen to get refresh token
+      include_granted_scopes: true,
+      scope: scopeList,
+      state: JSON.stringify({ userId, providers, isDesktop: Boolean(options.isDesktop) }),
+      prompt: 'consent',
+      ...(options.loginHint ? { login_hint: options.loginHint } : {}),
     });
-    
+
     return authUrl;
   }
   
@@ -196,15 +245,13 @@ export class GoogleOAuthService {
     const scopeSet = new Set(grantedScopes.split(' '));
     const authorized: IntegrationProvider[] = [];
     
-    // Check if Calendar scopes are present
-    const calendarScopes = SCOPES_MAP.GOOGLE_CALENDAR;
-    if (calendarScopes.some(scope => scopeSet.has(scope))) {
+    const calendarScopes = AUTHORIZED_SCOPES_MAP.GOOGLE_CALENDAR;
+    if (calendarScopes.some((scope) => scopeSet.has(scope))) {
       authorized.push('GOOGLE_CALENDAR');
     }
-    
-    // Check if Gmail scopes are present
-    const gmailScopes = SCOPES_MAP.GMAIL;
-    if (gmailScopes.some(scope => scopeSet.has(scope))) {
+
+    const gmailScopes = AUTHORIZED_SCOPES_MAP.GMAIL;
+    if (gmailScopes.some((scope) => scopeSet.has(scope))) {
       authorized.push('GMAIL');
     }
     

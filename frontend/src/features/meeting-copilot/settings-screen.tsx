@@ -328,6 +328,7 @@ function AiPreferencesTab() {
 function IntegrationCard({
   config,
   connected,
+  connecting,
   connectedEmail,
   featureToggles,
   onConnectToggle,
@@ -335,6 +336,7 @@ function IntegrationCard({
 }: {
   config: IntegrationConfig;
   connected: boolean;
+  connecting?: boolean;
   connectedEmail?: string;
   featureToggles: Record<string, boolean>;
   onConnectToggle: () => void;
@@ -365,7 +367,7 @@ function IntegrationCard({
                   : 'bg-muted text-muted-foreground'
               )}
             >
-              {connected ? 'Connected' : 'Not connected'}
+              {connecting ? 'Connecting…' : connected ? 'Connected' : 'Not connected'}
             </Badge>
           </div>
           <p className='mt-1 text-sm text-muted-foreground'>
@@ -382,8 +384,9 @@ function IntegrationCard({
           variant={connected ? 'outline' : 'default'}
           className='shrink-0 rounded-full px-4'
           onClick={onConnectToggle}
+          disabled={connecting}
         >
-          {connected ? 'Disconnect' : 'Connect'}
+          {connecting ? 'Connecting…' : connected ? 'Disconnect' : 'Connect'}
         </Button>
       </header>
       <div className={cn('px-5 py-1', !connected && 'pointer-events-none opacity-50')}>
@@ -416,6 +419,11 @@ function IntegrationsTab() {
     calendar: undefined
   });
   const [loading, setLoading] = useState(true);
+  const [connecting, setConnecting] = useState<Record<IntegrationId, boolean>>({
+    gmail: false,
+    slack: false,
+    calendar: false
+  });
   const [features, setFeatures] = useState<Record<IntegrationId, Record<string, boolean>>>({
     gmail: { autoFollowUp: true, attachTranscript: false, smartRecipients: true },
     slack: { defaultChannel: true, eodDigest: true, threadSummaries: true },
@@ -462,27 +470,22 @@ function IntegrationsTab() {
 
     if (provider) {
       try {
-        const { connectGoogle } = await import('@/lib/integrations-api');
-        const { authUrl } = await connectGoogle(provider);
-
-        // Open OAuth flow in a popup. The popup shows its own success/error page
-        // (served by the backend callback) and closes itself, so we just poll for
-        // that close event here to know when to refresh this integration's status.
-        const popup = window.open(authUrl, '_blank', 'width=600,height=700');
-        if (!popup) {
-          alert('Please allow popups for this site to connect Google integrations.');
-          return;
-        }
-
-        const pollInterval = window.setInterval(() => {
-          if (popup.closed) {
-            window.clearInterval(pollInterval);
-            void refetchStatus({ showLoading: false });
-          }
-        }, 500);
+        setConnecting((prev) => ({ ...prev, [integrationId]: true }));
+        const { connectGoogleIntegration } = await import('@/lib/integrations-api');
+        // Handles both web (popup) and desktop (system browser + deep link)
+        // flows, resolving once the OAuth attempt has finished so we can
+        // refresh this integration's status.
+        await connectGoogleIntegration(provider);
+        await refetchStatus({ showLoading: false });
       } catch (error) {
         console.error('Failed to initiate OAuth:', error);
-        alert('Failed to connect. Please try again.');
+        if (error instanceof Error && error.message === 'popup-blocked') {
+          alert('Please allow popups for this site to connect Google integrations.');
+        } else {
+          alert('Failed to connect. Please try again.');
+        }
+      } finally {
+        setConnecting((prev) => ({ ...prev, [integrationId]: false }));
       }
     } else {
       // Slack not yet implemented
@@ -527,6 +530,7 @@ function IntegrationsTab() {
           key={integration.id}
           config={integration}
           connected={connected[integration.id]}
+          connecting={connecting[integration.id]}
           connectedEmail={emails[integration.id]}
           featureToggles={features[integration.id]}
           onConnectToggle={() => {

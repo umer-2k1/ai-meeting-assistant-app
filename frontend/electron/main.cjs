@@ -66,10 +66,12 @@ let pendingAuthDeepLink = null;
 let pendingAuthCallback = null;
 
 function isAuthDeepLink(url) {
-  return typeof url === 'string' && url.startsWith(`${DESKTOP_PROTOCOL}://`) && url.includes('auth/callback');
+  if (typeof url !== 'string' || !url.startsWith(`${DESKTOP_PROTOCOL}://`)) return false;
+  return url.includes('auth/callback') || url.includes('integrations/callback');
 }
 
 function handleAuthDeepLink(url) {
+  console.log('[desktop][deeplink] handleAuthDeepLink', url, 'recognized:', isAuthDeepLink(url));
   if (!isAuthDeepLink(url)) return;
 
   pendingAuthDeepLink = null;
@@ -819,6 +821,7 @@ function registerIpcHandlers() {
 
   ipcMain.handle('desktop:open-external', async (_event, url) => {
     try {
+      console.log('[desktop] openExternal', String(url));
       await shell.openExternal(String(url));
       return { ok: true };
     } catch (error) {
@@ -843,6 +846,7 @@ if (process.platform === 'win32') {
 // Must register before app.ready — macOS can emit open-url during startup.
 app.on('open-url', (event, url) => {
   event.preventDefault();
+  console.log('[desktop][deeplink] open-url event', url);
   if (!isAuthDeepLink(url)) return;
 
   if (app.isReady() && mainWindow) {
