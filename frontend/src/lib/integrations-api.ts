@@ -76,13 +76,19 @@ export async function getIntegrationStatus(): Promise<IntegrationStatus> {
   return (await response.json()) as IntegrationStatus;
 }
 
+export type GoogleIntegrationProvider = 'GOOGLE_CALENDAR' | 'GMAIL';
+
 /**
- * Initiate Google OAuth flow
- * Returns the authorization URL to redirect the user to
+ * Initiate Google OAuth flow for a specific provider (Calendar or Gmail).
+ * Returns the authorization URL to redirect the user to. Only the scopes
+ * for the requested provider(s) are asked for on the Google consent screen.
  */
-export async function connectGoogle(): Promise<{ authUrl: string }> {
+export async function connectGoogle(
+  provider: GoogleIntegrationProvider
+): Promise<{ authUrl: string }> {
   const response = await apiFetch('/api/integrations/google/connect', {
     method: 'POST',
+    body: JSON.stringify({ provider }),
   });
   
   if (!response.ok) {
@@ -93,15 +99,18 @@ export async function connectGoogle(): Promise<{ authUrl: string }> {
 }
 
 /**
- * Disconnect Google integrations (Calendar & Gmail)
+ * Disconnect a specific Google integration (Calendar or Gmail).
  */
-export async function disconnectGoogle(): Promise<{ success: boolean }> {
+export async function disconnectGoogle(
+  provider: GoogleIntegrationProvider
+): Promise<{ success: boolean }> {
   const response = await apiFetch('/api/integrations/google/disconnect', {
     method: 'DELETE',
+    body: JSON.stringify({ provider }),
   });
   
   if (!response.ok) {
-    throw new Error('Failed to disconnect Google integrations');
+    throw new Error('Failed to disconnect Google integration');
   }
   
   return (await response.json()) as { success: boolean };

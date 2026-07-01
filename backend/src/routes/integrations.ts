@@ -9,6 +9,10 @@ import { requireAuth } from '../middleware/auth.js';
 import { googleOAuthService } from '../connectors/google/oauth.js';
 import { ConnectorManager } from '../connectors/connector-manager.js';
 import prisma from '../lib/prisma.js';
+import {
+  buildIntegrationConnectedPage,
+  buildIntegrationErrorPage,
+} from '../lib/integration-callback-page.js';
 import type { IntegrationProvider } from '@prisma/client';
 
 const router = express.Router();
@@ -64,16 +68,35 @@ router.get('/status', requireAuth, async (req, res) => {
   }
 });
 
+const VALID_PROVIDERS: IntegrationProvider[] = ['GOOGLE_CALENDAR', 'GMAIL'];
+
+function parseRequestedProviders(input: unknown): IntegrationProvider[] {
+  const raw = Array.isArray(input) ? input : input ? [input] : [];
+  const providers = raw
+    .map((value) => String(value).toUpperCase())
+    .filter((value): value is IntegrationProvider =>
+      VALID_PROVIDERS.includes(value as IntegrationProvider)
+    );
+
+  // De-duplicate while preserving order
+  return Array.from(new Set(providers));
+}
+
 /**
  * POST /api/integrations/google/connect
- * Initiate Google OAuth flow for Calendar and Gmail
+ * Initiate Google OAuth flow for a specific provider (Calendar or Gmail).
+ * Body: { provider: 'GOOGLE_CALENDAR' | 'GMAIL' } or { providers: [...] }
+ * Defaults to Calendar only if nothing valid is provided, so each
+ * integration's "Connect" button only ever requests its own scopes.
  */
 router.post('/google/connect', requireAuth, async (req, res) => {
   try {
     const userId = req.user!.id;
-    const providers: IntegrationProvider[] = ['GOOGLE_CALENDAR', 'GMAIL'];
+    const requested = parseRequestedProviders(req.body?.providers ?? req.body?.provider);
+    const providers: IntegrationProvider[] = requested.length > 0 ? requested : ['GOOGLE_CALENDAR'];
+
     const authUrl = googleOAuthService.generateAuthUrl(userId, providers);
-    
+
     res.json({ authUrl });
   } catch (error) {
     console.error('Error generating auth URL:', error);
@@ -87,11 +110,19 @@ router.post('/google/connect', requireAuth, async (req, res) => {
  */
 router.get('/google/callback', async (req, res) => {
   try {
-    const code = req.query.code as string;
-    const state = req.query.state as string;
-    
+    const code = req.query.code as string | undefined;
+    const state = req.query.state as string | undefined;
+    const oauthError = req.query.error as string | undefined;
+
+    if (oauthError) {
+      // User denied the consent screen (e.g. clicked "Cancel")
+      res.type('html').send(buildIntegrationErrorPage('You did not grant access, so nothing was connected.'));
+      return;
+    }
+
     if (!code || !state) {
-      return res.status(400).send('Missing code or state parameter');
+      res.status(400).type('html').send(buildIntegrationErrorPage('Missing authorization code or state.'));
+      return;
     }
     
     // Parse state to get userId and providers
@@ -114,28 +145,33 @@ router.get('/google/callback', async (req, res) => {
         tokens.scope?.split(' ') || []
       );
     }
-    
-    // Redirect to frontend settings page with success
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-    res.redirect(`${frontendUrl}/settings?tab=integrations&status=connected`);
+
+    // This route runs inside a popup window (see settings-screen.tsx / calendar-screen.tsx).
+    // The opener polls `popup.closed` and refreshes its own state, so we just need to give
+    // the user clear feedback here and close the popup ourselves. Redirecting to a frontend
+    // route (e.g. /settings) doesn't work because the SPA has no such router path.
+    res.type('html').send(buildIntegrationConnectedPage(authorizedProviders));
   } catch (error) {
     console.error('OAuth callback error:', error);
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-    res.redirect(`${frontendUrl}/settings?tab=integrations&status=error`);
+    res.type('html').send(buildIntegrationErrorPage());
   }
 });
 
 /**
  * DELETE /api/integrations/google/disconnect
- * Disconnect Google integrations (Calendar & Gmail)
+ * Disconnect a specific Google integration (Calendar or Gmail).
+ * Query/body: { provider: 'GOOGLE_CALENDAR' | 'GMAIL' } or { providers: [...] }
+ * Falls back to disconnecting both if none is specified, for backward compatibility.
  */
 router.delete('/google/disconnect', requireAuth, async (req, res) => {
   try {
     const userId = req.user!.id;
-    
-    // Disconnect both Calendar and Gmail
-    const providers: IntegrationProvider[] = ['GOOGLE_CALENDAR', 'GMAIL'];
-    
+
+    const requested = parseRequestedProviders(
+      req.body?.providers ?? req.body?.provider ?? req.query?.providers ?? req.query?.provider
+    );
+    const providers: IntegrationProvider[] = requested.length > 0 ? requested : VALID_PROVIDERS;
+
     for (const provider of providers) {
       try {
         const connector = await ConnectorManager.getConnector(userId, provider);

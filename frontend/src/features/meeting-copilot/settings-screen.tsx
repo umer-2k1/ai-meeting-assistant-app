@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 
 import {
   IconBrandGoogle,
@@ -24,6 +24,7 @@ import {
   SelectValue
 } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import type { GoogleIntegrationProvider } from '@/lib/integrations-api';
 import { cn } from '@/lib/utils';
 
 import SettingsPermissionsPanel from './settings-permissions-panel';
@@ -421,54 +422,64 @@ function IntegrationsTab() {
     calendar: { showUpcoming: true, preMeetingReminder: true, syncFrequent: true }
   });
 
-  // Fetch integration status on mount
-  useEffect(() => {
-    async function fetchStatus() {
-      try {
-        setLoading(true);
-        const { getIntegrationStatus } = await import('@/lib/integrations-api');
-        const status = await getIntegrationStatus();
+  const refetchStatus = useCallback(async (options: { showLoading?: boolean } = {}) => {
+    try {
+      if (options.showLoading) setLoading(true);
+      const { getIntegrationStatus } = await import('@/lib/integrations-api');
+      const status = await getIntegrationStatus();
 
-        setConnected({
-          gmail: status.gmail.connected,
-          slack: status.slack.connected,
-          calendar: status.calendar.connected
-        });
+      setConnected({
+        gmail: status.gmail.connected,
+        slack: status.slack.connected,
+        calendar: status.calendar.connected
+      });
 
-        setEmails({
-          gmail: status.gmail.email,
-          slack: status.slack.email,
-          calendar: status.calendar.email
-        });
-      } catch (error) {
-        console.error('Failed to fetch integration status:', error);
-      } finally {
-        setLoading(false);
-      }
-    }
-
-    void fetchStatus();
-
-    // Check URL params for OAuth callback status
-    const params = new URLSearchParams(window.location.search);
-    const status = params.get('status');
-    if (status === 'connected') {
-      setTimeout(() => {
-        void fetchStatus();
-      }, 500);
-
-      window.history.replaceState({}, '', window.location.pathname);
+      setEmails({
+        gmail: status.gmail.email,
+        slack: status.slack.email,
+        calendar: status.calendar.email
+      });
+    } catch (error) {
+      console.error('Failed to fetch integration status:', error);
+    } finally {
+      if (options.showLoading) setLoading(false);
     }
   }, []);
 
+  // Fetch integration status on mount
+  useEffect(() => {
+    void refetchStatus({ showLoading: true });
+  }, [refetchStatus]);
+
+  const googleProviderFor = (integrationId: IntegrationId): GoogleIntegrationProvider | null => {
+    if (integrationId === 'gmail') return 'GMAIL';
+    if (integrationId === 'calendar') return 'GOOGLE_CALENDAR';
+    return null;
+  };
+
   const handleConnect = async (integrationId: IntegrationId) => {
-    if (integrationId === 'gmail' || integrationId === 'calendar') {
+    const provider = googleProviderFor(integrationId);
+
+    if (provider) {
       try {
         const { connectGoogle } = await import('@/lib/integrations-api');
-        const { authUrl } = await connectGoogle();
+        const { authUrl } = await connectGoogle(provider);
 
-        // Open OAuth flow in new window
-        window.open(authUrl, '_blank', 'width=600,height=700');
+        // Open OAuth flow in a popup. The popup shows its own success/error page
+        // (served by the backend callback) and closes itself, so we just poll for
+        // that close event here to know when to refresh this integration's status.
+        const popup = window.open(authUrl, '_blank', 'width=600,height=700');
+        if (!popup) {
+          alert('Please allow popups for this site to connect Google integrations.');
+          return;
+        }
+
+        const pollInterval = window.setInterval(() => {
+          if (popup.closed) {
+            window.clearInterval(pollInterval);
+            void refetchStatus({ showLoading: false });
+          }
+        }, 500);
       } catch (error) {
         console.error('Failed to initiate OAuth:', error);
         alert('Failed to connect. Please try again.');
@@ -480,27 +491,20 @@ function IntegrationsTab() {
   };
 
   const handleDisconnect = async (integrationId: IntegrationId) => {
-    if (integrationId === 'gmail' || integrationId === 'calendar') {
-      if (!confirm('Are you sure you want to disconnect? This will remove access to Calendar and Gmail features.')) {
+    const provider = googleProviderFor(integrationId);
+
+    if (provider) {
+      const label = integrationId === 'gmail' ? 'Gmail' : 'Google Calendar';
+      if (!confirm(`Are you sure you want to disconnect ${label}?`)) {
         return;
       }
-      
+
       try {
         const { disconnectGoogle } = await import('@/lib/integrations-api');
-        await disconnectGoogle();
-        
-        // Update state
-        setConnected(prev => ({
-          ...prev,
-          gmail: false,
-          calendar: false
-        }));
-        
-        setEmails(prev => ({
-          ...prev,
-          gmail: undefined,
-          calendar: undefined
-        }));
+        await disconnectGoogle(provider);
+
+        setConnected((prev) => ({ ...prev, [integrationId]: false }));
+        setEmails((prev) => ({ ...prev, [integrationId]: undefined }));
       } catch (error) {
         console.error('Failed to disconnect:', error);
         alert('Failed to disconnect. Please try again.');

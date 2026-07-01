@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState, useEffect, useCallback } from 'react';
 
 import {
   IconBell,
@@ -22,7 +22,6 @@ import { cn } from '@/lib/utils';
 import { COPILOT_BTN_OUTLINE, COPILOT_HIGHLIGHT_PANEL, COPILOT_SURFACE } from './copilot-styles';
 import { SettingsSwitch } from './settings-ui';
 import type { CalendarEvent } from './types';
-import { useAuth } from '@/contexts/auth-context';
 
 function parseDayLabel(event: CalendarEvent): string {
   if (event.dayLabel) return event.dayLabel;
@@ -38,7 +37,21 @@ function formatTodayHeading() {
   }).format(new Date());
 }
 
-function CalendarConnectionCard({ email }: { email?: string }) {
+function CalendarConnectionCard({
+  connected,
+  email,
+  connecting,
+  onConnect,
+  onSync,
+  onManage
+}: {
+  connected: boolean;
+  email?: string;
+  connecting: boolean;
+  onConnect: () => void;
+  onSync: () => void;
+  onManage: () => void;
+}) {
   return (
     <div
       className={cn(
@@ -52,25 +65,49 @@ function CalendarConnectionCard({ email }: { email?: string }) {
       <div className='min-w-0 flex-1'>
         <div className='flex flex-wrap items-center gap-2'>
           <p className='text-sm font-semibold text-foreground'>Google Calendar</p>
-          <Badge
-            variant='outline'
-            className='rounded-full border-amber-500/40 bg-amber-500/10 px-2 py-0 text-[11px] font-medium text-amber-800 dark:text-amber-200'
-          >
-            Not connected (MCP)
-          </Badge>
+          {connected ? (
+            <Badge
+              variant='outline'
+              className='rounded-full border-emerald-500/40 bg-emerald-500/10 px-2 py-0 text-[11px] font-medium text-emerald-700 dark:text-emerald-300'
+            >
+              Connected
+            </Badge>
+          ) : (
+            <Badge
+              variant='outline'
+              className='rounded-full border-amber-500/40 bg-amber-500/10 px-2 py-0 text-[11px] font-medium text-amber-800 dark:text-amber-200'
+            >
+              Not connected
+            </Badge>
+          )}
         </div>
         <p className='mt-0.5 text-sm text-muted-foreground'>
-          {email ?? '—'} · Calendar sync will be enabled via MCP server.
+          {connected
+            ? (email ?? 'Synced with your Google account')
+            : 'Connect Google Calendar in Settings to see your meetings here.'}
         </p>
       </div>
       <div className='flex shrink-0 flex-wrap gap-2'>
-        <Button size='sm' variant='outline' className={cn('rounded-full', COPILOT_BTN_OUTLINE)} disabled>
-          <IconRefresh className='mr-1.5 size-3.5' />
-          Sync now
-        </Button>
-        <Button size='sm' variant='ghost' className='rounded-full text-muted-foreground' disabled>
-          Manage
-        </Button>
+        {connected ? (
+          <>
+            <Button size='sm' variant='outline' className={cn('rounded-full', COPILOT_BTN_OUTLINE)} onClick={onSync}>
+              <IconRefresh className='mr-1.5 size-3.5' />
+              Sync now
+            </Button>
+            <Button size='sm' variant='ghost' className='rounded-full text-muted-foreground' onClick={onManage}>
+              Manage
+            </Button>
+          </>
+        ) : (
+          <Button
+            size='sm'
+            className='rounded-full bg-primary/90 text-primary-foreground hover:bg-primary'
+            onClick={onConnect}
+            disabled={connecting}
+          >
+            {connecting ? 'Connecting…' : 'Connect'}
+          </Button>
+        )}
       </div>
     </div>
   );
@@ -325,64 +362,114 @@ function DayGroup({
   );
 }
 
-export default function CalendarScreen({ onStartRecording }: { onStartRecording: () => void }) {
-  const { user } = useAuth();
+export default function CalendarScreen({
+  onStartRecording,
+  onManageIntegrations
+}: {
+  onStartRecording: () => void;
+  onManageIntegrations?: () => void;
+}) {
   const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  
-  // Fetch calendar events from Google Calendar API
-  useEffect(() => {
-    async function fetchCalendarEvents() {
-      try {
-        setLoading(true);
-        setError(null);
-        
-        const { getCalendarEvents } = await import('@/lib/integrations-api');
-        
-        // Fetch events for the next 30 days
-        const startDate = new Date();
-        const endDate = new Date();
-        endDate.setDate(endDate.getDate() + 30);
-        
-        const { events } = await getCalendarEvents(startDate, endDate, 50);
-        
-        // Transform API events to CalendarEvent format
-        const transformedEvents: CalendarEvent[] = events.map(event => ({
-          id: event.id,
-          title: event.title,
-          time: `${new Date(event.startTime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })} – ${new Date(event.endTime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`,
-          startTime: new Date(event.startTime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }),
-          endTime: new Date(event.endTime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }),
-          location: event.meetLink || event.location || 'No location',
-          note: event.description || '',
-          dayLabel: getDayLabel(new Date(event.startTime)),
-          attendees: event.attendees?.length,
-          recurring: event.recurring,
-          startsSoon: isStartingSoon(new Date(event.startTime))
-        }));
-        
-        setCalendarEvents(transformedEvents);
-      } catch (err) {
-        console.error('Failed to fetch calendar events:', err);
-        if (err instanceof Error && err.message.includes('not connected')) {
-          setError('calendar-not-connected');
-        } else {
-          setError('failed-to-fetch');
-        }
-        setCalendarEvents([]);
-      } finally {
-        setLoading(false);
+  const [calendarConnected, setCalendarConnected] = useState(false);
+  const [calendarEmail, setCalendarEmail] = useState<string | undefined>(undefined);
+  const [connecting, setConnecting] = useState(false);
+
+  const fetchCalendarEvents = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      const { getCalendarEvents } = await import('@/lib/integrations-api');
+
+      // Fetch events for the next 30 days
+      const startDate = new Date();
+      const endDate = new Date();
+      endDate.setDate(endDate.getDate() + 30);
+
+      const { events } = await getCalendarEvents(startDate, endDate, 50);
+
+      // Transform API events to CalendarEvent format
+      const transformedEvents: CalendarEvent[] = events.map(event => ({
+        id: event.id,
+        title: event.title,
+        time: `${new Date(event.startTime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })} – ${new Date(event.endTime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`,
+        startTime: new Date(event.startTime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }),
+        endTime: new Date(event.endTime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }),
+        location: event.meetLink || event.location || 'No location',
+        note: event.description || '',
+        dayLabel: getDayLabel(new Date(event.startTime)),
+        attendees: event.attendees?.length,
+        recurring: event.recurring,
+        startsSoon: isStartingSoon(new Date(event.startTime))
+      }));
+
+      setCalendarEvents(transformedEvents);
+    } catch (err) {
+      console.error('Failed to fetch calendar events:', err);
+      if (err instanceof Error && err.message.includes('not connected')) {
+        setError('calendar-not-connected');
+      } else {
+        setError('failed-to-fetch');
       }
+      setCalendarEvents([]);
+    } finally {
+      setLoading(false);
     }
-    
-    fetchCalendarEvents();
-    
-    // Poll for updates every 15 minutes
-    const interval = setInterval(fetchCalendarEvents, 15 * 60 * 1000);
-    
-    return () => clearInterval(interval);
   }, []);
+
+  const refetchConnectionStatus = useCallback(async () => {
+    try {
+      const { getIntegrationStatus } = await import('@/lib/integrations-api');
+      const status = await getIntegrationStatus();
+      setCalendarConnected(status.calendar.connected);
+      setCalendarEmail(status.calendar.email);
+    } catch (err) {
+      console.error('Failed to fetch calendar connection status:', err);
+    }
+  }, []);
+
+  // Fetch calendar events + connection status from the backend
+  useEffect(() => {
+    void fetchCalendarEvents();
+    void refetchConnectionStatus();
+
+    // Poll for updates every 15 minutes
+    const interval = setInterval(() => {
+      void fetchCalendarEvents();
+    }, 15 * 60 * 1000);
+
+    return () => clearInterval(interval);
+  }, [fetchCalendarEvents, refetchConnectionStatus]);
+
+  const handleConnectCalendar = useCallback(async () => {
+    try {
+      setConnecting(true);
+      const { connectGoogle } = await import('@/lib/integrations-api');
+      const { authUrl } = await connectGoogle('GOOGLE_CALENDAR');
+
+      const popup = window.open(authUrl, '_blank', 'width=600,height=700');
+      if (!popup) {
+        setConnecting(false);
+        alert('Please allow popups for this site to connect Google Calendar.');
+        return;
+      }
+
+      const pollInterval = window.setInterval(() => {
+        if (popup.closed) {
+          window.clearInterval(pollInterval);
+          setConnecting(false);
+          void refetchConnectionStatus();
+          void fetchCalendarEvents();
+        }
+      }, 500);
+    } catch (err) {
+      console.error('Failed to initiate Google Calendar OAuth:', err);
+      setConnecting(false);
+      alert('Failed to connect Google Calendar. Please try again.');
+    }
+  }, [fetchCalendarEvents, refetchConnectionStatus]);
   
   // Helper function to determine day label
   function getDayLabel(date: Date): string {
@@ -436,7 +523,14 @@ export default function CalendarScreen({ onStartRecording }: { onStartRecording:
   if (loading) {
     return (
       <section className='space-y-5'>
-        <CalendarConnectionCard email={user?.email} />
+        <CalendarConnectionCard
+          connected={calendarConnected}
+          email={calendarEmail}
+          connecting={connecting}
+          onConnect={handleConnectCalendar}
+          onSync={() => void fetchCalendarEvents()}
+          onManage={() => onManageIntegrations?.()}
+        />
         <div className='flex items-center justify-center py-12'>
           <div className='size-8 animate-spin rounded-full border-4 border-primary border-t-transparent' />
         </div>
@@ -447,7 +541,14 @@ export default function CalendarScreen({ onStartRecording }: { onStartRecording:
   if (error === 'calendar-not-connected') {
     return (
       <section className='space-y-5'>
-        <CalendarConnectionCard email={user?.email} />
+        <CalendarConnectionCard
+          connected={calendarConnected}
+          email={calendarEmail}
+          connecting={connecting}
+          onConnect={handleConnectCalendar}
+          onSync={() => void fetchCalendarEvents()}
+          onManage={() => onManageIntegrations?.()}
+        />
         <div className='py-12 text-center'>
           <IconCalendarEvent className='mx-auto size-10 text-muted-foreground/50' />
           <p className='mt-3 text-sm font-medium text-foreground'>Calendar not connected</p>
@@ -461,7 +562,14 @@ export default function CalendarScreen({ onStartRecording }: { onStartRecording:
 
   return (
     <section className='space-y-5'>
-      <CalendarConnectionCard email={user?.email} />
+      <CalendarConnectionCard
+        connected={calendarConnected}
+        email={calendarEmail}
+        connecting={connecting}
+        onConnect={handleConnectCalendar}
+        onSync={() => void fetchCalendarEvents()}
+        onManage={() => onManageIntegrations?.()}
+      />
 
       <div className='grid gap-3 sm:grid-cols-3'>
         <CalendarStat

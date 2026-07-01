@@ -956,7 +956,12 @@ export default function MeetingCopilotApp() {
                 askError={askError}
               />
             )}
-            {view === 'calendar' && <CalendarScreen onStartRecording={startRecording} />}
+            {view === 'calendar' && (
+              <CalendarScreen
+                onStartRecording={startRecording}
+                onManageIntegrations={() => setView('settings')}
+              />
+            )}
             {view === 'device-check' && (
               <DeviceCheckScreen
                 isDesktop={runtimeMode === 'desktop'}

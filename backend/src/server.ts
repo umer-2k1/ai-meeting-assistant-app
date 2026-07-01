@@ -14,6 +14,7 @@ import {
   isGoogleOAuthConfigured,
 } from './lib/auth-config.js';
 import prisma from './lib/prisma.js';
+import { answerWithTools } from './services/ai-agent.js';
 
 const app = express();
 const port = Number(process.env.PORT ?? 3001);
@@ -176,13 +177,46 @@ app.post('/api/ask-meeting', optionalAuth, async (request, response) => {
   const question = String(request.body?.question ?? '');
   const transcript = Array.isArray(request.body?.transcript) ? request.body.transcript : [];
   const actionItems = Array.isArray(request.body?.actionItems) ? request.body.actionItems : [];
+  const summary = typeof request.body?.summary === 'string' ? request.body.summary : undefined;
 
   if (!question.trim()) {
     response.status(400).json({ error: 'Question is required.' });
     return;
   }
 
-  // TODO: Replace with real AI chat using LangChain + Groq
+  // Real AI path: authenticated user + Groq configured. This lets the model call
+  // the Calendar/Gmail MCP tools (see backend/src/services/ai-agent.ts) in addition
+  // to answering from the transcript/summary/action items passed in the request.
+  if (request.user && process.env.GROQ_API_KEY) {
+    try {
+      const transcriptText = transcript
+        .map((line: { speaker?: string; text?: string; timestamp?: string }) =>
+          `[${line.timestamp ?? '??:??:??'}] ${line.speaker ?? 'Speaker'}: ${line.text ?? ''}`
+        )
+        .join('\n');
+
+      const actionItemsText = actionItems
+        .map((item: { assignee?: string; task?: string; timestamp?: string }) =>
+          `- ${item.task ?? 'Task'} (assignee: ${item.assignee ?? 'unassigned'}${item.timestamp ? `, ${item.timestamp}` : ''})`
+        )
+        .join('\n');
+
+      const { answer, toolCalls } = await answerWithTools(request.user.id, question, {
+        transcript: transcriptText || undefined,
+        summary,
+        actionItems: actionItemsText || undefined,
+      });
+
+      response.json({ answer, toolCalls });
+      return;
+    } catch (error) {
+      console.error('AI agent error, falling back to keyword matching:', error);
+      // Fall through to the deterministic mock below so the endpoint still responds.
+    }
+  }
+
+  // Fallback for dev/demo environments without GROQ_API_KEY or without an
+  // authenticated user (e.g. web preview without sign-in).
   const normalized = question.toLowerCase();
 
   if (normalized.includes('who') && normalized.includes('pricing')) {

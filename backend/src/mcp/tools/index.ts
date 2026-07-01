@@ -4,6 +4,9 @@
  * Registers and manages all MCP tools available to the AI
  */
 
+import { z } from 'zod';
+import { tool } from '@langchain/core/tools';
+import type { StructuredToolInterface } from '@langchain/core/tools';
 import { calendarTools } from './calendar-tools.js';
 import { gmailTools } from './gmail-tools.js';
 import type { McpTool } from './calendar-tools.js';
@@ -88,6 +91,62 @@ class McpToolRegistry {
       parameters: tool.parameters,
     }));
   }
+
+  /**
+   * Get all tools as LangChain StructuredTools, bound to a specific user.
+   *
+   * Binding `userId` in a closure (rather than exposing it as a tool parameter)
+   * means the LLM never sees or controls whose calendar/inbox it's touching —
+   * that's decided server-side by whoever is authenticated for this request.
+   */
+  getLangChainTools(userId: string): StructuredToolInterface[] {
+    return this.getAllTools().map((mcpTool) =>
+      tool(
+        async (input: Record<string, unknown>) => {
+          const result = await this.executeTool(mcpTool.name, userId, input);
+          return JSON.stringify(result);
+        },
+        {
+          name: mcpTool.name,
+          description: mcpTool.description,
+          schema: buildZodSchemaFromParameters(mcpTool.parameters),
+        }
+      )
+    );
+  }
+}
+
+/**
+ * Convert an McpTool's plain parameter map into a zod object schema so it can
+ * be used as a LangChain / Groq function-calling tool schema, or (via its
+ * `.shape`) as a raw-shape input schema for the standalone MCP server in
+ * mcp/server.ts.
+ */
+export function buildZodSchemaFromParameters(parameters: McpTool['parameters']): z.ZodObject<Record<string, z.ZodTypeAny>> {
+  const shape: Record<string, z.ZodTypeAny> = {};
+
+  for (const [name, param] of Object.entries(parameters)) {
+    let fieldSchema: z.ZodTypeAny;
+
+    switch (param.type) {
+      case 'number':
+        fieldSchema = z.number();
+        break;
+      case 'boolean':
+        fieldSchema = z.boolean();
+        break;
+      case 'array':
+        fieldSchema = z.array(z.string());
+        break;
+      default:
+        fieldSchema = z.string();
+    }
+
+    fieldSchema = fieldSchema.describe(param.description);
+    shape[name] = param.required ? fieldSchema : fieldSchema.optional();
+  }
+
+  return z.object(shape);
 }
 
 // Export singleton instance
