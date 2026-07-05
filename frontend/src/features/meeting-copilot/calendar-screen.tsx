@@ -18,6 +18,8 @@ import {
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Calendar, type DateRange } from '@/components/ui/calendar';
+import { addDays, format } from 'date-fns';
 import { cn } from '@/lib/utils';
 
 import { COPILOT_BTN_OUTLINE, COPILOT_HIGHLIGHT_PANEL, COPILOT_SURFACE } from './copilot-styles';
@@ -410,6 +412,10 @@ export default function CalendarScreen({
   const [calendarConnected, setCalendarConnected] = useState(false);
   const [calendarEmail, setCalendarEmail] = useState<string | undefined>(undefined);
   const [connecting, setConnecting] = useState(false);
+  const [dateRange, setDateRange] = useState<DateRange | undefined>(() => ({
+    from: new Date(),
+    to: addDays(new Date(), 30),
+  }));
 
   const fetchCalendarEvents = useCallback(async () => {
     try {
@@ -418,12 +424,11 @@ export default function CalendarScreen({
 
       const { getCalendarEvents } = await import('@/lib/integrations-api');
 
-      // Fetch events for the next 30 days
-      const startDate = new Date();
-      const endDate = new Date();
-      endDate.setDate(endDate.getDate() + 30);
+      // Fetch events for the selected date range (defaults to the next 30 days).
+      const startDate = dateRange?.from ?? new Date();
+      const endDate = dateRange?.to ?? addDays(startDate, 30);
 
-      const { events } = await getCalendarEvents(startDate, endDate, 50);
+      const { events } = await getCalendarEvents(startDate, endDate, 100);
 
       // Transform API events to CalendarEvent format
       const transformedEvents: CalendarEvent[] = events.map(event => ({
@@ -460,7 +465,7 @@ export default function CalendarScreen({
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [dateRange]);
 
   const refetchConnectionStatus = useCallback(async () => {
     try {
@@ -631,21 +636,69 @@ export default function CalendarScreen({
 
       <div className='flex flex-wrap items-center justify-between gap-3'>
         <div>
-          <p className='text-sm font-semibold text-foreground'>{formatTodayHeading()}</p>
+          <p className='text-sm font-semibold text-foreground'>
+            {dateRange?.from
+              ? `${format(dateRange.from, 'MMM d')} – ${format(dateRange.to ?? dateRange.from, 'MMM d, yyyy')}`
+              : formatTodayHeading()}
+          </p>
           <p className='text-xs text-muted-foreground'>
-            {calendarEvents.length === 0 ? 'No upcoming meetings' : `${calendarEvents.length} events loaded`}
+            {calendarEvents.length === 0 ? 'No meetings in range' : `${calendarEvents.length} events loaded`}
           </p>
         </div>
         <div className='inline-flex items-center gap-1 rounded-xl border border-border/70 bg-muted/50 p-1'>
-          <Button size='icon-sm' variant='ghost' className='size-8 rounded-lg' aria-label='Previous week'>
+          <Button
+            size='icon-sm'
+            variant='ghost'
+            className='size-8 rounded-lg'
+            aria-label='Previous week'
+            onClick={() =>
+              setDateRange((r) => ({
+                from: addDays(r?.from ?? new Date(), -7),
+                to: addDays(r?.to ?? addDays(new Date(), 30), -7),
+              }))
+            }
+          >
             <IconChevronLeft className='size-4' />
           </Button>
-          <Button size='sm' variant='secondary' className='rounded-lg px-3 text-xs'>
+          <Button
+            size='sm'
+            variant='secondary'
+            className='rounded-lg px-3 text-xs'
+            onClick={() => setDateRange({ from: new Date(), to: addDays(new Date(), 30) })}
+          >
             Today
           </Button>
-          <Button size='icon-sm' variant='ghost' className='size-8 rounded-lg' aria-label='Next week'>
+          <Button
+            size='icon-sm'
+            variant='ghost'
+            className='size-8 rounded-lg'
+            aria-label='Next week'
+            onClick={() =>
+              setDateRange((r) => ({
+                from: addDays(r?.from ?? new Date(), 7),
+                to: addDays(r?.to ?? addDays(new Date(), 30), 7),
+              }))
+            }
+          >
             <IconChevronRight className='size-4' />
           </Button>
+        </div>
+      </div>
+
+      <div className={cn(COPILOT_SURFACE, 'flex flex-wrap items-start gap-4 p-4')}>
+        <Calendar
+          mode='range'
+          numberOfMonths={1}
+          selected={dateRange}
+          onSelect={setDateRange}
+          defaultMonth={dateRange?.from}
+        />
+        <div className='min-w-[180px] flex-1 space-y-2 text-sm text-muted-foreground'>
+          <p className='font-medium text-foreground'>Pick a date range</p>
+          <p>
+            Select a start and end date to load meetings from your connected Google
+            Calendar for that window. Use the arrows to jump a week at a time.
+          </p>
         </div>
       </div>
 

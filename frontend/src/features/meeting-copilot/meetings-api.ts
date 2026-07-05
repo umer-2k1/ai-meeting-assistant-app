@@ -6,6 +6,7 @@
  * the frontend `Meeting` type so the existing polished UI stays unchanged.
  */
 import { apiRequest } from '@/lib/api-client';
+import { hour12 } from '@/lib/time-format';
 import { BACKEND_URL, TOKEN_KEY } from '@/lib/config';
 import type {
   ActionItem,
@@ -73,6 +74,8 @@ export interface ApiMeeting {
   notes?: ApiNote[];
   tags?: { id: string; name: string }[];
   _count?: { transcript?: number; actionItems?: number };
+  /** Distinct diarized speakers — participant fallback when no attendees exist. */
+  speakerCount?: number;
 }
 
 // ----- Formatting helpers -----
@@ -95,6 +98,7 @@ function formatDateTime(iso: string): string {
     year: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
+    hour12: hour12(),
   });
 }
 
@@ -155,7 +159,9 @@ export function mapApiMeeting(api: ApiMeeting): Meeting {
   const decisions = api.keyDecisions ?? [];
   const summary = api.aiSummary ?? '';
   const notes = mapNotes(api.notes);
-  const attendeeCount = api.attendees?.length ?? 0;
+  // Manual/live recordings never populate attendees — fall back to how many
+  // distinct speakers Deepgram diarized so the count isn't misleadingly 0.
+  const attendeeCount = api.attendees?.length || api.speakerCount || 0;
 
   return {
     id: api.id,
@@ -250,6 +256,35 @@ export async function completeMeetingApi(id: string): Promise<void> {
     method: 'POST',
     body: JSON.stringify({}),
   });
+}
+
+/** Upload a recorded audio blob for a meeting (best-effort; playback stays demo on failure). */
+export async function uploadMeetingAudioApi(id: string, blob: Blob): Promise<void> {
+  const token = localStorage.getItem(TOKEN_KEY);
+  const form = new FormData();
+  const ext = blob.type.includes('ogg') ? 'ogg' : 'webm';
+  form.append('audio', blob, `recording.${ext}`);
+  const response = await fetch(`${BACKEND_URL}/api/meetings/${id}/audio`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: form,
+  });
+  if (!response.ok) throw new Error(`Audio upload failed (HTTP ${response.status})`);
+}
+
+/** Import an audio file as a new meeting (upload + transcribe + process). Returns the meeting id. */
+export async function importAudioApi(file: File): Promise<string> {
+  const token = localStorage.getItem(TOKEN_KEY);
+  const form = new FormData();
+  form.append('audio', file, file.name);
+  const response = await fetch(`${BACKEND_URL}/api/meetings/import`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: form,
+  });
+  if (!response.ok) throw new Error(`Import failed (HTTP ${response.status})`);
+  const data = (await response.json()) as { meeting: ApiMeeting };
+  return data.meeting.id;
 }
 
 // ----- Pre-meeting intelligence -----

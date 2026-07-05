@@ -37,6 +37,9 @@ model User {
   // Preferences
   timezone      String    @default("UTC")
   language      String    @default("en")
+  // JSON blob of UI/AI preferences (see lib/preferences.ts). Stored as a string
+  // like the app's other SQLite JSON fields.
+  preferences   String?
 
   // Timestamps
   createdAt     DateTime  @default(now())

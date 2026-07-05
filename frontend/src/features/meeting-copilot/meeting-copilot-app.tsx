@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
+import { toast } from 'sonner';
 
 import {
   IconArrowUp,
@@ -21,6 +22,7 @@ import {
   IconSearch,
   IconSettings,
   IconSparkles,
+  IconUpload,
   IconUsers
 } from '@tabler/icons-react';
 
@@ -56,6 +58,8 @@ import { useLiveTranscription } from './use-live-transcription';
 import {
   completeMeetingApi,
   createLiveMeetingApi,
+  uploadMeetingAudioApi,
+  importAudioApi,
   searchMeetingsApi,
   streamMeetingAnswer,
 } from './meetings-api';
@@ -128,6 +132,7 @@ function AppSidebar({
   onStartRecording,
   recentMeetings,
   selectedMeeting,
+  isRecording,
   onOpenMeeting
 }: {
   activeView: View;
@@ -135,9 +140,12 @@ function AppSidebar({
   onStartRecording: () => void;
   recentMeetings: Meeting[];
   selectedMeeting: Meeting | null;
+  isRecording: boolean;
   onOpenMeeting: (meetingId: string) => void;
 }) {
   const { user, logout } = useAuth();
+  const [showAllRecent, setShowAllRecent] = useState(false);
+  const visibleRecent = showAllRecent ? recentMeetings : recentMeetings.slice(0, 5);
   return (
     <aside className='sticky top-0 hidden h-dvh w-64 shrink-0 flex-col overflow-y-auto overscroll-contain border-r border-border bg-sidebar p-4 text-sidebar-foreground lg:flex'>
       <div className='mb-3 inline-flex items-center rounded-xl border border-primary/30 bg-card px-3 py-2'>
@@ -176,15 +184,21 @@ function AppSidebar({
         <p className='mb-2 px-2 text-[11px] font-semibold tracking-[0.15em] text-muted-foreground uppercase'>
           Recent
         </p>
-        <div className='space-y-1'>
+        <div
+          className={cn(
+            'space-y-1',
+            showAllRecent && 'max-h-64 overflow-y-auto overscroll-contain pr-1'
+          )}
+        >
           {recentMeetings.length === 0 ? (
             <p className='px-2 py-1.5 text-xs text-muted-foreground'>No meetings yet</p>
           ) : (
-            recentMeetings.slice(0, 3).map((meeting) => (
+            visibleRecent.map((meeting) => (
               <button
                 key={meeting.id}
                 type='button'
                 onClick={() => onOpenMeeting(meeting.id)}
+                title={meeting.title}
                 className='block w-full truncate rounded-lg border border-transparent px-2 py-1.5 text-left text-xs text-muted-foreground hover:border-primary/40 hover:bg-muted/60'
               >
                 {meeting.title}
@@ -192,12 +206,25 @@ function AppSidebar({
             ))
           )}
         </div>
+        {recentMeetings.length > 5 && (
+          <button
+            type='button'
+            onClick={() => setShowAllRecent((v) => !v)}
+            className='mt-1 w-full rounded-lg px-2 py-1 text-left text-[11px] font-medium text-primary hover:underline'
+          >
+            {showAllRecent ? 'Show less' : `View more (${recentMeetings.length - 5})`}
+          </button>
+        )}
       </div>
 
-      {selectedMeeting && (
-        <div className='mt-4 rounded-xl border border-border bg-muted/40 p-3'>
-          <p className='text-[11px] text-muted-foreground'>Active meeting</p>
-          <p className='text-sm font-medium text-foreground'>{selectedMeeting.title}</p>
+      {isRecording && selectedMeeting && (
+        <div className='mt-4 rounded-xl border border-primary/40 bg-primary/5 p-3'>
+          <p className='inline-flex items-center gap-1.5 text-[11px] font-medium text-primary'>
+            <IconCircleFilled className='size-2.5 animate-pulse' /> Recording now
+          </p>
+          <p className='mt-1 truncate text-sm font-medium text-foreground' title={selectedMeeting.title}>
+            {selectedMeeting.title}
+          </p>
           <p className='mt-1 text-xs text-muted-foreground'>{selectedMeeting.duration}</p>
         </div>
       )}
@@ -242,6 +269,7 @@ function DashboardScreen({
   setSearchText,
   onOpenMeeting,
   onStartRecording,
+  onImportAudio,
   isLoading,
   isSearching,
   error,
@@ -253,11 +281,13 @@ function DashboardScreen({
   setSearchText: (value: string) => void;
   onOpenMeeting: (meetingId: string) => void;
   onStartRecording: () => void;
+  onImportAudio: (file: File) => void;
   isLoading: boolean;
   isSearching: boolean;
   error: string | null;
   onRetry: () => void;
 }) {
+  const importInputRef = useRef<HTMLInputElement | null>(null);
   const completedCount = allMeetings.filter((m) => m.status === 'completed').length;
   const actionItemTotal = allMeetings.reduce((sum, m) => sum + (m.actionItemCount ?? 0), 0);
   const liveOrProcessing = allMeetings.filter(
@@ -313,7 +343,23 @@ function DashboardScreen({
           <IconMicrophone className='mr-1.5 size-4' />
           Start New Recording
         </Button>
-        <Button variant='outline' className={COPILOT_BTN_OUTLINE}>
+        <input
+          ref={importInputRef}
+          type='file'
+          accept='audio/*,.mp3,.wav,.m4a,.webm,.ogg'
+          className='hidden'
+          onChange={(e) => {
+            const file = e.currentTarget.files?.[0];
+            e.currentTarget.value = '';
+            if (file) onImportAudio(file);
+          }}
+        />
+        <Button
+          variant='outline'
+          className={COPILOT_BTN_OUTLINE}
+          onClick={() => importInputRef.current?.click()}
+        >
+          <IconUpload className='mr-1.5 size-4' />
           Import Audio
         </Button>
       </div>
@@ -380,7 +426,22 @@ function DashboardScreen({
           filteredMeetings.map((meeting) => {
             const badge = STATUS_BADGE[meeting.status];
             return (
-              <Card key={meeting.id} className={cn(SURFACE, 'transition-all hover:-translate-y-0.5 hover:border-[#3B82F6]/60')}>
+              <Card
+                key={meeting.id}
+                role='button'
+                tabIndex={0}
+                onClick={() => onOpenMeeting(meeting.id)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    onOpenMeeting(meeting.id);
+                  }
+                }}
+                className={cn(
+                  SURFACE,
+                  'cursor-pointer transition-all hover:-translate-y-0.5 hover:border-[#3B82F6]/60'
+                )}
+              >
                 <CardHeader className='space-y-3'>
                   <div className='flex items-center justify-between gap-3'>
                     <CardTitle className='text-foreground'>{meeting.title}</CardTitle>
@@ -434,7 +495,8 @@ function DashboardScreen({
                     <Button
                       size='sm'
                       className='bg-primary text-primary-foreground hover:bg-primary/90'
-                      onClick={() => {
+                      onClick={(e) => {
+                        e.stopPropagation();
                         onOpenMeeting(meeting.id);
                       }}
                     >
@@ -465,7 +527,8 @@ function LiveScreen({
   isAsking,
   askError,
   onPauseResume,
-  onStop
+  onStop,
+  onStart
 }: {
   elapsedSeconds: number;
   isRecording: boolean;
@@ -480,11 +543,37 @@ function LiveScreen({
   askError: string | null;
   onPauseResume: () => void;
   onStop: () => void;
+  onStart: () => void;
 }) {
   const mm = Math.floor(elapsedSeconds / 60)
     .toString()
     .padStart(2, '0');
   const ss = (elapsedSeconds % 60).toString().padStart(2, '0');
+
+  // Idle state: nothing is recording. Show a clear CTA instead of a stale
+  // recording card / last session's transcript.
+  if (!isRecording && !isPaused) {
+    return (
+      <Card className={cn(SURFACE, 'mx-auto max-w-xl')}>
+        <CardContent className='flex flex-col items-center gap-4 py-14 text-center'>
+          <div className='inline-flex size-14 items-center justify-center rounded-full bg-primary/10'>
+            <IconMicrophone className='size-7 text-primary' />
+          </div>
+          <div className='space-y-1'>
+            <p className='text-base font-semibold text-foreground'>No active recording</p>
+            <p className='text-sm text-muted-foreground'>
+              Start a new recording to capture live transcript, or open a past meeting
+              from the dashboard.
+            </p>
+          </div>
+          <Button className='bg-primary text-white hover:bg-primary/90' onClick={onStart}>
+            <IconMicrophone className='mr-1.5 size-4' />
+            Start New Recording
+          </Button>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <section className='grid gap-4 xl:grid-cols-[1fr_320px]'>
@@ -615,38 +704,41 @@ function LiveScreen({
         </CardContent>
       </Card>
 
+      {/* Ask-AI conversation lives in its own panel — separate from the live
+          transcript scroll so asking never disturbs (or gets buried under) the
+          transcript. Each turn shows your question + the streaming answer. */}
       <Card className={SURFACE}>
         <CardHeader>
-          <CardTitle className='text-foreground'>Live Intelligence</CardTitle>
+          <CardTitle className='inline-flex items-center gap-2 text-foreground'>
+            <IconSparkles className='size-4 text-primary' />
+            Ask AI
+          </CardTitle>
         </CardHeader>
-        <CardContent className='space-y-4'>
-          <div>
-            <p className='text-xs font-semibold tracking-[0.15em] text-muted-foreground uppercase'>Summary</p>
-            <p className='mt-1 text-sm text-foreground/80'>
-              Team is discussing Q3 priorities with focus on Dark Mode, API latency, and mobile
-              performance.
+        <CardContent>
+          {aiAnswers.length === 0 ? (
+            <p className='text-sm text-muted-foreground'>
+              Ask a question about the meeting so far — your questions and answers appear
+              here, kept separate from the live transcript.
             </p>
-          </div>
-          <div>
-            <p className='text-xs font-semibold tracking-[0.15em] text-muted-foreground uppercase'>Key Decisions</p>
-            <p className='mt-1 text-sm text-foreground/80'>
-              API latency is now P0 priority for the sprint.
-            </p>
-          </div>
-          <div>
-            <p className='text-xs font-semibold tracking-[0.15em] text-muted-foreground uppercase'>Action Items</p>
-            <p className='mt-1 text-sm text-foreground/80'>None detected yet during this live segment.</p>
-          </div>
-          <div className='space-y-2 border-t border-border/70 pt-3'>
-            <p className='text-xs font-semibold tracking-[0.15em] text-muted-foreground uppercase'>Ask Responses</p>
-            {aiAnswers.slice(0, 2).map((answer) => (
-              <div key={answer.id} className='rounded-md border border-border/70 bg-muted/70 p-2'>
-                <p className='text-xs text-muted-foreground'>{answer.question}</p>
-                <p className='text-sm text-foreground/85'>{answer.answer}</p>
-                <p className='text-xs text-[#06B6D4]'>Timestamp: {answer.timestamp}</p>
-              </div>
-            ))}
-          </div>
+          ) : (
+            <div className='max-h-[460px] space-y-3 overflow-y-auto overscroll-contain pr-1'>
+              {aiAnswers.map((answer) => (
+                <div key={answer.id} className='space-y-1.5'>
+                  <div className='ml-auto w-fit max-w-[90%] rounded-2xl rounded-br-sm bg-primary px-3 py-1.5 text-sm text-primary-foreground'>
+                    {answer.question}
+                  </div>
+                  <div className='w-fit max-w-[95%] rounded-2xl rounded-bl-sm border border-border/70 bg-muted/70 px-3 py-1.5 text-sm text-foreground/90'>
+                    {answer.answer || (
+                      <span className='inline-flex items-center gap-1 text-muted-foreground'>
+                        <span className='inline-block size-2 animate-pulse rounded-full bg-[#06B6D4]' />
+                        Thinking…
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </CardContent>
       </Card>
     </section>
@@ -734,8 +826,22 @@ export default function MeetingCopilotApp() {
     interimLine,
     start: startLive,
     stop: stopLive,
+    takeRecording,
     error: liveError
   } = useLiveTranscription();
+
+  // Auto-refresh while the open meeting is still processing so the AI summary,
+  // title, and tags appear on their own (and the title types out) — no manual
+  // "Refresh to see results" needed.
+  useEffect(() => {
+    const status = selectedMeetingDetail?.status;
+    if (status !== 'processing' && status !== 'live') return;
+    const id = globalThis.setInterval(() => {
+      void refetchDetail();
+      void refetchMeetings();
+    }, 3000);
+    return () => globalThis.clearInterval(id);
+  }, [selectedMeetingDetail?.status, refetchDetail, refetchMeetings]);
 
   useEffect(() => {
     const desktopApi = globalThis.window.desktop;
@@ -989,6 +1095,18 @@ export default function MeetingCopilotApp() {
       setIsRecording(false);
       setIsRecordingPaused(false);
       if (meetingId) {
+        // Upload the recorded audio (best-effort) shortly after stop so the
+        // final chunk lands; playback stays on the demo player if it fails.
+        globalThis.setTimeout(() => {
+          const blob = takeRecording();
+          if (blob && blob.size > 0) {
+            void uploadMeetingAudioApi(meetingId, blob)
+              .then(() => void refetchDetail())
+              .catch(() => {
+                /* audio storage unavailable — playback stays demo */
+              });
+          }
+        }, 600);
         // Trigger post-meeting processing (summary/action items) and refresh.
         void completeMeetingApi(meetingId)
           .then(() => {
@@ -1020,6 +1138,21 @@ export default function MeetingCopilotApp() {
     }
 
     finalize();
+  };
+
+  const handleImportAudio = (file: File) => {
+    toast.info(`Importing "${file.name}"…`);
+    void importAudioApi(file)
+      .then((meetingId) => {
+        setSelectedMeetingId(meetingId);
+        setView('detail');
+        void refetchMeetings();
+        void refetchDetail();
+        toast.success('Audio imported — transcribing…');
+      })
+      .catch(() => {
+        toast.error('Could not import audio. Check the file and try again.');
+      });
   };
 
   const pauseResumeRecording = () => {
@@ -1055,6 +1188,7 @@ export default function MeetingCopilotApp() {
           onStartRecording={startRecording}
           recentMeetings={meetingList}
           selectedMeeting={selectedMeeting}
+          isRecording={isRecording}
           onOpenMeeting={(meetingId) => {
             setSelectedMeetingId(meetingId);
             setView('detail');
@@ -1100,6 +1234,7 @@ export default function MeetingCopilotApp() {
                   setView('detail');
                 }}
                 onStartRecording={startRecording}
+                onImportAudio={handleImportAudio}
                 isLoading={meetingsLoading}
                 isSearching={isSearching}
                 error={meetingsError}
@@ -1121,6 +1256,7 @@ export default function MeetingCopilotApp() {
                 askError={askError ?? liveError}
                 onPauseResume={pauseResumeRecording}
                 onStop={stopRecording}
+                onStart={startRecording}
               />
             )}
             {view === 'detail' &&

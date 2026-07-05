@@ -39,15 +39,23 @@ const summarySchema = z.object({
   risks: z.array(z.string()).default([]),
 });
 
-export async function generateMeetingSummary(transcript: string): Promise<
-  z.infer<typeof summarySchema>
-> {
+export async function generateMeetingSummary(
+  transcript: string,
+  options?: { length?: 'brief' | 'balanced' | 'detailed' }
+): Promise<z.infer<typeof summarySchema>> {
   const llm = createGroqLLM({ temperature: 0.5, json: true });
+
+  const lengthHint =
+    options?.length === 'brief'
+      ? 'a very short 1-2 sentence executive summary'
+      : options?.length === 'detailed'
+        ? 'a thorough executive summary of one short paragraph'
+        : 'a concise 2-3 sentence executive summary';
 
   const prompt = ChatPromptTemplate.fromTemplate(`
 You are an AI meeting assistant. Analyze the following meeting transcript and provide:
 
-1. A concise executive summary (2-3 sentences)
+1. {lengthHint}
 2. Key discussion points (3-5 bullet points)
 3. Decisions made (list all explicit decisions)
 4. Risks or blockers identified (if any)
@@ -65,7 +73,11 @@ Respond ONLY with a JSON object of this exact shape:
 `);
 
   const chain = prompt.pipe(llm).pipe(new StringOutputParser());
-  return invokeJson(() => chain.invoke({ transcript }), summarySchema, 'meeting summary');
+  return invokeJson(
+    () => chain.invoke({ transcript, lengthHint }),
+    summarySchema,
+    'meeting summary'
+  );
 }
 
 /**
@@ -87,7 +99,10 @@ const actionItemsSchema = z.object({
     .default([]),
 });
 
-export async function extractActionItems(transcript: string): Promise<
+export async function extractActionItems(
+  transcript: string,
+  options?: { sensitivity?: 'conservative' | 'balanced' | 'aggressive' }
+): Promise<
   Array<{
     task: string;
     assignee?: string;
@@ -97,8 +112,16 @@ export async function extractActionItems(transcript: string): Promise<
 > {
   const llm = createGroqLLM({ temperature: 0.3, json: true });
 
+  const sensitivityHint =
+    options?.sensitivity === 'conservative'
+      ? 'Only include clear, explicitly-stated action items.'
+      : options?.sensitivity === 'aggressive'
+        ? 'Include implied or potential action items in addition to explicit ones.'
+        : 'Include reasonably clear action items.';
+
   const prompt = ChatPromptTemplate.fromTemplate(`
-You are an AI meeting assistant. Extract all action items from the following transcript.
+You are an AI meeting assistant. Extract action items from the following transcript.
+{sensitivityHint}
 
 For each action item, identify:
 - Task description
@@ -120,7 +143,7 @@ action items):
 
   const chain = prompt.pipe(llm).pipe(new StringOutputParser());
   const { items } = await invokeJson(
-    () => chain.invoke({ transcript }),
+    () => chain.invoke({ transcript, sensitivityHint }),
     actionItemsSchema,
     'action items'
   );
@@ -130,6 +153,55 @@ action items):
     dueDate: i.dueDate ?? undefined,
     priority: i.priority,
   }));
+}
+
+/**
+ * Generate a short human title + topic tags for a processed meeting.
+ * Runs off the already-generated summary (cheap, no full re-read of transcript).
+ */
+const titleTagsSchema = z.object({
+  title: z.string(),
+  tags: z.array(z.string()).default([]),
+});
+
+export async function generateMeetingTitleAndTags(input: {
+  summary: string;
+  keyPoints: string[];
+  decisions: string[];
+}): Promise<{ title: string; tags: string[] }> {
+  const llm = createGroqLLM({ temperature: 0.4, json: true });
+
+  const prompt = ChatPromptTemplate.fromTemplate(`
+You name meetings. Given a meeting summary, produce:
+1. "title": a concise 3-5 word title in Title Case (no quotes, no trailing punctuation).
+2. "tags": 2-4 short topic tags, each lowercase, one or two words.
+
+Summary: {summary}
+Key points: {keyPoints}
+Decisions: {decisions}
+
+Respond ONLY with a JSON object of this exact shape:
+{{ "title": "...", "tags": ["...", "..."] }}
+`);
+
+  const chain = prompt.pipe(llm).pipe(new StringOutputParser());
+  const result = await invokeJson(
+    () =>
+      chain.invoke({
+        summary: input.summary,
+        keyPoints: input.keyPoints.join('; ') || 'none',
+        decisions: input.decisions.join('; ') || 'none',
+      }),
+    titleTagsSchema,
+    'meeting title and tags'
+  );
+
+  return {
+    title: result.title.trim().replace(/^["']|["']$/g, '').slice(0, 80),
+    tags: Array.from(
+      new Set(result.tags.map((t) => t.trim().toLowerCase()).filter(Boolean))
+    ).slice(0, 4),
+  };
 }
 
 /**

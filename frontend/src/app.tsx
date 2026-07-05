@@ -1,6 +1,7 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import RootProvider from './components/providers/root';
 import { AuthProvider } from './contexts/auth-context';
+import { PreferencesProvider } from './contexts/preferences-context';
 import { ProtectedRoute } from './components/protected-route';
 import MeetingCopilotApp from './features/meeting-copilot/meeting-copilot-app';
 import LoginScreen from './features/auth/login-screen';
@@ -11,6 +12,7 @@ function App() {
   return (
     <RootProvider>
       <AuthProvider>
+        <PreferencesProvider>
         <Router>
           <Routes>
             {/* Public Routes */}
@@ -40,6 +42,7 @@ function App() {
             <Route path='/' element={<Navigate to='/dashboard' replace />} />
           </Routes>
         </Router>
+        </PreferencesProvider>
       </AuthProvider>
     </RootProvider>
   );

@@ -1,8 +1,10 @@
 import prisma from '../lib/prisma.js';
 import { serializeStringList } from '../lib/json-list.js';
+import { parsePreferences } from '../lib/preferences.js';
 import {
   generateMeetingSummary,
   extractActionItems,
+  generateMeetingTitleAndTags,
 } from './ai.js';
 import {
   EMBEDDING_MODEL,
@@ -69,13 +71,24 @@ export async function processMeeting(meetingId: string) {
       return { success: true, meetingId, summary: '', actionItemsCount: 0 };
     }
 
+    // Load the owner's AI preferences (summary length / action sensitivity).
+    const owner = await prisma.user.findUnique({
+      where: { id: meeting.userId },
+      select: { preferences: true },
+    });
+    const prefs = parsePreferences(owner?.preferences);
+
     // 3. Generate AI summary and extract decisions/risks
     console.log('[Processing] Generating AI summary...');
-    summaryResult = await generateMeetingSummary(transcriptText);
+    summaryResult = await generateMeetingSummary(transcriptText, {
+      length: prefs.summaryLength,
+    });
 
     // 4. Extract action items
     console.log('[Processing] Extracting action items...');
-    const actionItems = await extractActionItems(transcriptText);
+    const actionItems = await extractActionItems(transcriptText, {
+      sensitivity: prefs.actionSensitivity,
+    });
 
     // 5. Update meeting with AI-generated content — mark COMPLETED here so the
     //    user sees the summary regardless of whether vector indexing succeeds.
@@ -104,6 +117,39 @@ export async function processMeeting(meetingId: string) {
           dueDate: item.dueDate ? new Date(item.dueDate) : null,
         })),
       });
+    }
+
+    // 6b. AI title + topic tags (best-effort — never fail the meeting on these).
+    try {
+      const { title, tags } = await generateMeetingTitleAndTags({
+        summary: summaryResult.summary,
+        keyPoints: summaryResult.keyPoints,
+        decisions: summaryResult.decisions,
+      });
+      // Only rename the auto-generated "Live session · …" titles; preserve any
+      // title that came from a calendar event or the user.
+      if (title && /^live session\b/i.test(meeting.title)) {
+        await prisma.meeting
+          .update({ where: { id: meetingId }, data: { title } })
+          .catch(() => {});
+      }
+      if (tags.length > 0) {
+        const palette = ['#6366f1', '#0ea5e9', '#10b981', '#f59e0b', '#ec4899'];
+        await prisma.meetingTag
+          .createMany({
+            data: tags.map((name, i) => ({
+              meetingId,
+              name,
+              color: palette[i % palette.length] ?? '#6366f1',
+            })),
+          })
+          .catch(() => {});
+      }
+    } catch (error) {
+      console.warn(
+        '[Processing] Title/tags generation skipped:',
+        error instanceof Error ? error.message : error
+      );
     }
 
     console.log(`[Processing] Successfully completed processing for ${meetingId}`);

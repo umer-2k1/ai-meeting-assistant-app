@@ -1,5 +1,5 @@
 import prisma from '../lib/prisma.js';
-import { uploadAndCleanup } from './cloudinary.js';
+import { uploadAndCleanup, uploadAudioBuffer } from './cloudinary.js';
 import { parseStringList } from '../lib/json-list.js';
 import type { Meeting, TranscriptLine } from '@prisma/client';
 
@@ -186,6 +186,26 @@ export async function updateMeetingAudio(
 }
 
 /**
+ * Store a recorded/imported audio blob (from multer memoryStorage) on a meeting.
+ * Uploads to Cloudinary and sets audioUrl/audioDuration so the detail player
+ * plays real audio instead of the demo fallback.
+ */
+export async function updateMeetingAudioBuffer(meetingId: string, buffer: Buffer) {
+  const uploadResult = await uploadAudioBuffer(buffer, {
+    publicId: `meeting-${meetingId}`,
+    folder: 'meeting-recordings',
+  });
+
+  return prisma.meeting.update({
+    where: { id: meetingId },
+    data: {
+      audioUrl: uploadResult.secureUrl,
+      audioDuration: uploadResult.duration,
+    },
+  });
+}
+
+/**
  * Complete a meeting (mark as PROCESSING)
  */
 export async function completeMeeting(meetingId: string) {
@@ -219,7 +239,7 @@ export async function completeMeeting(meetingId: string) {
  * Get meeting with all related data
  */
 export async function getMeetingWithDetails(meetingId: string, userId: string) {
-  return prisma.meeting.findFirst({
+  const meeting = await prisma.meeting.findFirst({
     where: {
       id: meetingId,
       userId,
@@ -239,6 +259,11 @@ export async function getMeetingWithDetails(meetingId: string, userId: string) {
       },
     },
   });
+
+  if (!meeting) return null;
+  // Distinct diarized speakers → participant fallback when no attendees exist.
+  const speakerCount = new Set(meeting.transcript.map((l) => l.speaker)).size;
+  return { ...meeting, speakerCount };
 }
 
 /**
@@ -388,7 +413,10 @@ export async function searchMeetings(userId: string, query: string, limit = 20) 
     },
   });
   const byId = new Map(meetings.map((m) => [m.id, m]));
-  return orderedIds.map((id) => byId.get(id)).filter((m): m is NonNullable<typeof m> => Boolean(m));
+  const ordered = orderedIds
+    .map((id) => byId.get(id))
+    .filter((m): m is NonNullable<typeof m> => Boolean(m));
+  return attachSpeakerCounts(ordered);
 }
 
 // ========================================

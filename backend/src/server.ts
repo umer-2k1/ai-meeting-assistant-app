@@ -13,6 +13,7 @@ import meetingsRoutes from './routes/meetings.js';
 import liveRoutes from './routes/live.js';
 import integrationsRoutes from './routes/integrations.js';
 import intelligenceRoutes from './routes/intelligence.js';
+import userRoutes from './routes/user.js';
 import { requireAuth } from './middleware/auth.js';
 import {
   getAuthConfigIssues,
@@ -22,7 +23,7 @@ import {
 import { validateEnvOrExit } from './lib/validate-env.js';
 import prisma from './lib/prisma.js';
 import { answerWithTools } from './services/ai-agent.js';
-import { sweepOrphanedLiveMeetings } from './services/meeting.js';
+import { sweepOrphanedLiveMeetings, finalizeAbandonedMeeting } from './services/meeting.js';
 import { processMeeting } from './services/processing.js';
 import { authorizeStreamUpgrade, WS_SUBPROTOCOL } from './lib/ws-auth.js';
 import {
@@ -118,6 +119,7 @@ app.use('/api/meetings', meetingsRoutes);
 app.use('/api/live', liveRoutes);
 app.use('/api/integrations', integrationsRoutes);
 app.use('/api/intelligence', intelligenceRoutes);
+app.use('/api/user', userRoutes);
 
 /**
  * POST /api/ask-meeting
@@ -218,8 +220,29 @@ function attachLiveTranscriptionWs(server: http.Server) {
       }
     });
 
-    ws.on('close', () => session.close());
-    ws.on('error', () => session.close());
+    const finalizeIfAbandoned = () => {
+      session.close();
+      // If the socket closed without an explicit /complete (app closed, crashed,
+      // navigated away), finalize the meeting so it doesn't get stuck LIVE. The
+      // delay lets the normal stop flow (/complete) win; finalizeAbandonedMeeting
+      // is atomic + status-guarded so processing runs at most once. The delay also
+      // gives any in-flight final transcript lines time to persist first.
+      const { meetingId } = auth;
+      setTimeout(() => {
+        void finalizeAbandonedMeeting(meetingId)
+          .then(({ process }) => {
+            if (process) {
+              void processMeeting(meetingId).catch((error) =>
+                console.error(`[ws-close] processing failed for ${meetingId}:`, error)
+              );
+            }
+          })
+          .catch((error) => console.error(`[ws-close] finalize failed for ${meetingId}:`, error));
+      }, 4000);
+    };
+
+    ws.on('close', finalizeIfAbandoned);
+    ws.on('error', finalizeIfAbandoned);
   });
 }
 

@@ -34,6 +34,8 @@ export interface UseLiveTranscription {
   start: (meetingId: string, opts?: { captureSystemAudio?: boolean }) => Promise<void>;
   /** Stop capture + close the stream. */
   stop: () => void;
+  /** Take the accumulated recording as a Blob (and clear it). Null if none. */
+  takeRecording: () => Blob | null;
 }
 
 export function useLiveTranscription(): UseLiveTranscription {
@@ -46,6 +48,9 @@ export function useLiveTranscription(): UseLiveTranscription {
   const recorderRef = useRef<MediaRecorder | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const streamsRef = useRef<MediaStream[]>([]);
+  // Full recording accumulated for upload/playback (separate from the WS stream).
+  const chunksRef = useRef<Blob[]>([]);
+  const mimeTypeRef = useRef<string>('audio/webm');
 
   const cleanup = useCallback(() => {
     recorderRef.current?.state !== 'inactive' && recorderRef.current?.stop();
@@ -71,12 +76,20 @@ export function useLiveTranscription(): UseLiveTranscription {
     setStatus('idle');
   }, [cleanup]);
 
+  const takeRecording = useCallback((): Blob | null => {
+    if (chunksRef.current.length === 0) return null;
+    const blob = new Blob(chunksRef.current, { type: mimeTypeRef.current });
+    chunksRef.current = [];
+    return blob;
+  }, []);
+
   const start = useCallback(
     async (meetingId: string, opts?: { captureSystemAudio?: boolean }) => {
       setTranscript([]);
       setInterimLine(null);
       setError(null);
       setStatus('connecting');
+      chunksRef.current = [];
 
       try {
         // 1. Acquire audio inputs.
@@ -170,16 +183,22 @@ export function useLiveTranscription(): UseLiveTranscription {
 
         // 4. Record + stream Opus chunks once the socket is open.
         const mimeType = pickMimeType();
+        mimeTypeRef.current = mimeType ?? 'audio/webm';
         const recorder = new MediaRecorder(
           destination.stream,
           mimeType ? { mimeType } : undefined
         );
         recorderRef.current = recorder;
         recorder.ondataavailable = (e) => {
-          if (e.data.size > 0 && ws.readyState === WebSocket.OPEN) {
-            void e.data.arrayBuffer().then((buf) => {
-              if (ws.readyState === WebSocket.OPEN) ws.send(buf);
-            });
+          if (e.data.size > 0) {
+            // Keep every chunk for the full recording (playback), and forward
+            // live to the WS for transcription when the socket is open.
+            chunksRef.current.push(e.data);
+            if (ws.readyState === WebSocket.OPEN) {
+              void e.data.arrayBuffer().then((buf) => {
+                if (ws.readyState === WebSocket.OPEN) ws.send(buf);
+              });
+            }
           }
         };
 
@@ -198,5 +217,5 @@ export function useLiveTranscription(): UseLiveTranscription {
     [cleanup]
   );
 
-  return { transcript, interimLine, status, error, start, stop };
+  return { transcript, interimLine, status, error, start, stop, takeRecording };
 }

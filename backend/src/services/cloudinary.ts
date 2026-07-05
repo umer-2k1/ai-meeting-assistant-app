@@ -23,6 +23,52 @@ export interface UploadResult {
   bytes: number;
 }
 
+/** Whether Cloudinary credentials are present (gate audio features gracefully). */
+export function isCloudinaryConfigured(): boolean {
+  return Boolean(CLOUDINARY_CLOUD_NAME && CLOUDINARY_API_KEY && CLOUDINARY_API_SECRET);
+}
+
+/**
+ * Upload audio from an in-memory buffer (multer memoryStorage) via upload_stream —
+ * avoids writing a temp file to disk.
+ */
+export async function uploadAudioBuffer(
+  buffer: Buffer,
+  options: { publicId?: string; folder?: string } = {}
+): Promise<UploadResult> {
+  if (!isCloudinaryConfigured()) {
+    throw new Error('Cloudinary not configured');
+  }
+
+  return new Promise<UploadResult>((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      {
+        resource_type: 'video', // audio uploads as 'video' in Cloudinary
+        public_id: options.publicId,
+        folder: options.folder || 'meeting-recordings',
+        format: 'mp3',
+        audio_codec: 'mp3',
+      },
+      (error, result) => {
+        if (error || !result) {
+          console.error('Cloudinary upload error:', error);
+          reject(error ?? new Error('Failed to upload audio to Cloudinary'));
+          return;
+        }
+        resolve({
+          url: result.url,
+          secureUrl: result.secure_url,
+          publicId: result.public_id,
+          format: result.format,
+          duration: result.duration,
+          bytes: result.bytes,
+        });
+      }
+    );
+    stream.end(buffer);
+  });
+}
+
 /**
  * Upload audio file to Cloudinary
  */

@@ -69,6 +69,13 @@ export function createLiveTranscriptionSession(
     interim_results: true,
     punctuate: true,
     smart_format: true,
+    // Pace lines at natural pauses instead of flooding one every ~2s.
+    // `endpointing` = ms of silence before Deepgram marks `speech_final`;
+    // `utterance_end_ms` emits an UtteranceEnd event as a backstop for long
+    // monologues. We buffer finalized segments and commit a single line per
+    // utterance (Otter/Meet-style) — see the Transcript handler below.
+    endpointing: 800,
+    utterance_end_ms: 1000,
   });
 
   let ready = false;
@@ -76,51 +83,34 @@ export function createLiveTranscriptionSession(
   let keepAlive: ReturnType<typeof setInterval> | null = null;
   let closed = false;
 
-  connection.on(LiveTranscriptionEvents.Open, () => {
-    ready = true;
-    // Flush any audio buffered before the socket opened.
-    for (const chunk of pending) connection.send(toArrayBuffer(chunk));
-    pending.length = 0;
-    emit({ type: 'ready' });
+  // Accumulate finalized segments for the current utterance; commit as ONE line
+  // at a natural pause (speech_final / UtteranceEnd). This is what makes lines
+  // land at sentence boundaries instead of every ~2s.
+  let utterance: { text: string; startSeconds: number; speaker: string } | null = null;
 
-    keepAlive = setInterval(() => {
-      try {
-        connection.keepAlive();
-      } catch {
-        /* ignore */
-      }
-    }, KEEPALIVE_MS);
-  });
+  const emitInterim = () => {
+    if (!utterance) return;
+    emit({
+      type: 'transcript',
+      line: {
+        speaker: utterance.speaker,
+        text: utterance.text,
+        timestamp: formatTimestamp(utterance.startSeconds),
+        timestampSeconds: Math.floor(utterance.startSeconds),
+      },
+      isFinal: false,
+    });
+  };
 
-  connection.on(LiveTranscriptionEvents.Transcript, (data: DeepgramTranscript) => {
-    const alt = data.channel?.alternatives?.[0];
-    const text = alt?.transcript?.trim();
-    if (!text) return;
-
-    const words = alt?.words ?? [];
-    const startSeconds = words[0]?.start ?? 0;
-    const speakerIdx = words[0]?.speaker;
-    const speaker = typeof speakerIdx === 'number' ? `Speaker ${speakerIdx + 1}` : 'Speaker 1';
+  const commitUtterance = () => {
+    if (!utterance) return;
+    const { text, startSeconds, speaker } = utterance;
+    utterance = null;
+    if (!text.trim()) return;
     const timestamp = formatTimestamp(startSeconds);
     const timestampSeconds = Math.floor(startSeconds);
 
-    if (!data.is_final) {
-      // Interim: show a replaceable pending line, don't persist.
-      emit({
-        type: 'transcript',
-        line: { speaker, text, timestamp, timestampSeconds },
-        isFinal: false,
-      });
-      return;
-    }
-
-    // Final: persist + embed + broadcast the saved line.
-    void addTranscriptLine(meetingId, {
-      speaker,
-      text,
-      timestamp,
-      timestampSeconds,
-    })
+    void addTranscriptLine(meetingId, { speaker, text, timestamp, timestampSeconds })
       .then((saved) => {
         embedTranscriptLineInBackground({
           id: saved.id,
@@ -144,6 +134,77 @@ export function createLiveTranscriptionSession(
       .catch((error) => {
         console.error('[live-transcription] failed to persist line:', error);
       });
+  };
+
+  connection.on(LiveTranscriptionEvents.Open, () => {
+    ready = true;
+    // Flush any audio buffered before the socket opened.
+    for (const chunk of pending) connection.send(toArrayBuffer(chunk));
+    pending.length = 0;
+    emit({ type: 'ready' });
+
+    keepAlive = setInterval(() => {
+      try {
+        connection.keepAlive();
+      } catch {
+        /* ignore */
+      }
+    }, KEEPALIVE_MS);
+  });
+
+  connection.on(LiveTranscriptionEvents.Transcript, (data: DeepgramTranscript) => {
+    const alt = data.channel?.alternatives?.[0];
+    const text = alt?.transcript?.trim() ?? '';
+    const words = alt?.words ?? [];
+    const startSeconds = words[0]?.start ?? 0;
+    const speakerIdx = words[0]?.speaker;
+    const detectedSpeaker =
+      typeof speakerIdx === 'number' ? `Speaker ${speakerIdx + 1}` : null;
+
+    if (data.is_final) {
+      // Finalized segment: append to the current utterance buffer.
+      if (text) {
+        if (utterance) {
+          utterance.text = `${utterance.text} ${text}`.trim();
+        } else {
+          utterance = {
+            text,
+            startSeconds,
+            speaker: detectedSpeaker ?? 'Speaker 1',
+          };
+        }
+      }
+      // Commit the whole utterance at a natural pause; otherwise keep buffering
+      // and reflect progress as a live (interim) line.
+      if (data.speech_final) {
+        commitUtterance();
+      } else {
+        emitInterim();
+      }
+      return;
+    }
+
+    // Interim hypothesis: show buffered text + the live partial as one line.
+    if (!text && !utterance) return;
+    const startForLine = utterance?.startSeconds ?? startSeconds;
+    const speakerForLine = utterance?.speaker ?? detectedSpeaker ?? 'Speaker 1';
+    const combined = utterance ? `${utterance.text} ${text}`.trim() : text;
+    emit({
+      type: 'transcript',
+      line: {
+        speaker: speakerForLine,
+        text: combined,
+        timestamp: formatTimestamp(startForLine),
+        timestampSeconds: Math.floor(startForLine),
+      },
+      isFinal: false,
+    });
+  });
+
+  // Backstop for long monologues without a clear endpoint: Deepgram fires
+  // UtteranceEnd after `utterance_end_ms` of silence — commit whatever buffered.
+  connection.on(LiveTranscriptionEvents.UtteranceEnd, () => {
+    commitUtterance();
   });
 
   connection.on(LiveTranscriptionEvents.Error, (error: unknown) => {
@@ -152,6 +213,8 @@ export function createLiveTranscriptionSession(
   });
 
   connection.on(LiveTranscriptionEvents.Close, () => {
+    // Flush the last in-progress utterance so the final sentence isn't lost.
+    commitUtterance();
     if (keepAlive) clearInterval(keepAlive);
   });
 
@@ -184,6 +247,8 @@ export function createLiveTranscriptionSession(
 // Minimal shape of the Deepgram transcript event we consume.
 interface DeepgramTranscript {
   is_final?: boolean;
+  /** True at an endpoint (natural pause) — the utterance is complete. */
+  speech_final?: boolean;
   channel?: {
     alternatives?: Array<{
       transcript?: string;

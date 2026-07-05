@@ -26,6 +26,7 @@ export default function MeetingExportBar({
     try {
       const safe = meetingTitle.replace(/[^a-z0-9-_ ]/gi, '').trim() || 'meeting';
       await downloadMeetingExport(meetingId, format, safe);
+      toast.success(`Downloaded ${safe}.${format}`);
     } catch {
       toast.error(`Failed to export ${format.toUpperCase()}`);
     } finally {
@@ -40,7 +41,8 @@ export default function MeetingExportBar({
         type='button'
         size='sm'
         variant='outline'
-        className={cn('rounded-full', COPILOT_BTN_OUTLINE)}
+        // Fixed width keeps the label swap ("Markdown" → "Exporting…") from jerking the layout.
+        className={cn('w-32 justify-center rounded-full', COPILOT_BTN_OUTLINE)}
         disabled={busy !== null}
         onClick={() => void download('md')}
       >
@@ -51,7 +53,7 @@ export default function MeetingExportBar({
         type='button'
         size='sm'
         variant='outline'
-        className={cn('rounded-full', COPILOT_BTN_OUTLINE)}
+        className={cn('w-28 justify-center rounded-full', COPILOT_BTN_OUTLINE)}
         disabled={busy !== null}
         onClick={() => void download('pdf')}
       >

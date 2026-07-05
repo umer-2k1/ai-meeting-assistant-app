@@ -1,9 +1,12 @@
 import express from 'express';
+import multer from 'multer';
 import { requireAuth } from '../middleware/auth.js';
+import prisma from '../lib/prisma.js';
 import {
   createMeeting,
   addTranscriptLine,
   updateMeetingAudio,
+  updateMeetingAudioBuffer,
   completeMeeting,
   getMeetingWithDetails,
   getUserMeetings,
@@ -17,9 +20,17 @@ import {
 } from '../services/meeting.js';
 import { processMeeting, reprocessMeeting } from '../services/processing.js';
 import { answerMeetingQuestion } from '../services/ai.js';
+import { transcribeAudioBuffer } from '../services/transcribe-file.js';
+import { isCloudinaryConfigured } from '../services/cloudinary.js';
 import { buildMeetingMarkdown, buildMeetingPdf } from '../services/export.js';
 import { shareMeetingByEmail, shareMeetingToSlack } from '../services/share.js';
 import { getRouteParam } from '../lib/params.js';
+
+/** In-memory upload for recorded/imported audio (uploaded on to Cloudinary). */
+const audioUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 200 * 1024 * 1024 }, // 200 MB
+});
 
 /** Filesystem-safe slug for download filenames. */
 function safeName(name: string): string {
@@ -114,6 +125,60 @@ router.post('/', requireAuth, async (req, res) => {
 });
 
 /**
+ * POST /api/meetings/import
+ * Import an audio file as a new meeting: create it, batch-transcribe with
+ * Deepgram, store the audio, and run the normal processing pipeline. The heavy
+ * work runs in the background so the client gets the new meeting id immediately
+ * and can watch it move PROCESSING → COMPLETED.
+ */
+router.post('/import', requireAuth, audioUpload.single('audio'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No audio file provided' });
+    const userId = req.user!.id;
+    const audioBuffer = req.file.buffer;
+    const title =
+      (req.file.originalname || '').replace(/\.[^.]+$/, '').trim().slice(0, 80) ||
+      'Imported audio';
+
+    const meeting = await createMeeting({ userId, title, startTime: new Date() });
+    await prisma.meeting.update({
+      where: { id: meeting.id },
+      data: { status: 'PROCESSING', recordingStarted: new Date() },
+    });
+
+    // Respond now; transcription + processing continue in the background.
+    res.json({ meeting });
+
+    void (async () => {
+      try {
+        const lines = await transcribeAudioBuffer(audioBuffer);
+        for (const line of lines) {
+          await addTranscriptLine(meeting.id, line);
+        }
+        if (isCloudinaryConfigured()) {
+          await updateMeetingAudioBuffer(meeting.id, audioBuffer).catch(() => {});
+        }
+        await processMeeting(meeting.id);
+      } catch (err) {
+        console.error('[import] failed:', err);
+        await prisma.meeting
+          .update({
+            where: { id: meeting.id },
+            data: {
+              status: 'FAILED',
+              processingError: err instanceof Error ? err.message : 'Import failed',
+            },
+          })
+          .catch(() => {});
+      }
+    })();
+  } catch (error) {
+    console.error('Import audio error:', error);
+    res.status(500).json({ error: 'Failed to import audio' });
+  }
+});
+
+/**
  * POST /api/meetings/:id/transcript
  * Add transcript line to meeting
  */
@@ -168,6 +233,34 @@ router.post('/:id/complete', requireAuth, async (req, res) => {
   } catch (error) {
     console.error('Complete meeting error:', error);
     res.status(500).json({ error: 'Failed to complete meeting' });
+  }
+});
+
+/**
+ * POST /api/meetings/:id/audio
+ * Store the recorded audio blob for a meeting (multipart field "audio") so the
+ * detail page plays real audio. No-op (200) if Cloudinary isn't configured.
+ */
+router.post('/:id/audio', requireAuth, audioUpload.single('audio'), async (req, res) => {
+  try {
+    const meetingId = getRouteParam(req.params.id);
+    const owned = await prisma.meeting.findFirst({
+      where: { id: meetingId, userId: req.user!.id },
+      select: { id: true },
+    });
+    if (!owned) return res.status(404).json({ error: 'Meeting not found' });
+    if (!req.file) return res.status(400).json({ error: 'No audio file provided' });
+
+    if (!isCloudinaryConfigured()) {
+      // Audio storage not configured — succeed quietly, playback stays demo.
+      return res.json({ audioUrl: null, stored: false });
+    }
+
+    const meeting = await updateMeetingAudioBuffer(meetingId, req.file.buffer);
+    res.json({ audioUrl: meeting.audioUrl, stored: true });
+  } catch (error) {
+    console.error('Upload meeting audio error:', error);
+    res.status(500).json({ error: 'Failed to upload audio' });
   }
 });
 

@@ -22,6 +22,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { TypewriterText } from '@/components/ui/typewriter-text';
 import { cn } from '@/lib/utils';
 
 import {
@@ -195,7 +196,9 @@ export default function MeetingDetailScreen({
 
         <div className='flex flex-wrap items-start justify-between gap-4'>
           <div className='min-w-0 flex-1 space-y-2'>
-            <h1 className='text-2xl font-semibold tracking-tight text-foreground'>{meeting.title}</h1>
+            <h1 className='text-2xl font-semibold tracking-tight text-foreground'>
+              <TypewriterText text={meeting.title} />
+            </h1>
             <p className='text-sm text-muted-foreground'>
               {displayDate} · {meeting.duration}
               {meeting.participantCount > 0 && ` · ${meeting.participantCount} participants`}
@@ -465,7 +468,7 @@ export default function MeetingDetailScreen({
 
                 <div className='h-0.5 w-full shrink-0 bg-primary/35' aria-hidden />
 
-                <div className='min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-3'>
+                <div className='max-h-[60vh] min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-3'>
                   {meeting.transcript.length === 0 ? (
                     <p className='text-sm text-muted-foreground'>No transcript lines yet.</p>
                   ) : (
