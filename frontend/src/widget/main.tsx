@@ -9,6 +9,7 @@ import { createRoot } from 'react-dom/client';
 import { syncDocumentThemeFromStorage } from '@/lib/theme/document-theme';
 
 import FloatingSystemWidget from './floating-system-widget';
+import { WidgetErrorBoundary } from './widget-error-boundary';
 
 syncDocumentThemeFromStorage();
 
@@ -17,6 +18,8 @@ const root = createRoot(container as HTMLElement);
 
 root.render(
   <StrictMode>
-    <FloatingSystemWidget />
+    <WidgetErrorBoundary>
+      <FloatingSystemWidget />
+    </WidgetErrorBoundary>
   </StrictMode>
 );

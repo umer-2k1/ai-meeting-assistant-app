@@ -44,6 +44,8 @@ let tray = null;
 
 let widgetExpanded = false;
 let widgetUserPlaced = false;
+/** True once the widget renderer has painted (ready-to-show) — gates show(). */
+let widgetContentReady = false;
 /** @type {{ winX: number; winY: number; cursorX: number; cursorY: number } | null} */
 let widgetDragState = null;
 /** @type {{ edge: string; startWidth: number; startHeight: number; cursorX: number; cursorY: number } | null} */
@@ -233,8 +235,10 @@ function syncWidgetVisibility() {
     positionWidgetBottomRight();
   }
 
-  if (!widgetWindow.isVisible()) {
-    widgetWindow.show();
+  // Show only after first paint; otherwise the ready-to-show handler will show
+  // it (prevents a blank transparent window flashing before React mounts).
+  if (widgetContentReady && !widgetWindow.isVisible()) {
+    widgetWindow.showInactive();
   }
 }
 
@@ -525,19 +529,25 @@ function createWidgetWindow() {
     }
   });
 
+  // Float above everything — including full-screen apps and the menu bar — and
+  // stay present across all Spaces, so the widget is genuinely a screen-wide
+  // overlay rather than something tied to one window/desktop.
+  widgetWindow.setAlwaysOnTop(true, 'screen-saver');
   if (process.platform === 'darwin') {
     widgetWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-    widgetWindow.setAlwaysOnTop(true, 'floating');
   }
 
   loadWidgetContent(widgetWindow);
 
+  // Only show once the renderer has actually painted — showing a transparent
+  // window before first paint is what left a blank/empty overlay on screen.
   widgetWindow.once('ready-to-show', () => {
+    widgetContentReady = true;
     if (!widgetUserPlaced) {
       positionWidgetBottomRight();
     }
     if (recordingState.isRecording) {
-      widgetWindow.show();
+      widgetWindow.showInactive();
     }
     emit('recording:state', { ...recordingState });
   });
@@ -545,6 +555,7 @@ function createWidgetWindow() {
   widgetWindow.on('closed', () => {
     widgetWindow = null;
     widgetExpanded = false;
+    widgetContentReady = false;
   });
 }
 
