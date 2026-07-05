@@ -7,6 +7,7 @@ import {
   completeMeeting,
   getMeetingWithDetails,
   getUserMeetings,
+  serializeMeetingForApi,
 } from '../services/meeting.js';
 import { processMeeting, reprocessMeeting } from '../services/processing.js';
 import { answerMeetingQuestion } from '../services/ai.js';
@@ -28,7 +29,7 @@ router.get('/', requireAuth, async (req, res) => {
       offset: offset ? parseInt(offset as string) : undefined,
     });
 
-    res.json({ meetings });
+    res.json({ meetings: meetings.map((m) => serializeMeetingForApi(m)) });
   } catch (error) {
     console.error('Get meetings error:', error);
     res.status(500).json({ error: 'Failed to fetch meetings' });
@@ -48,7 +49,7 @@ router.get('/:id', requireAuth, async (req, res) => {
       return res.status(404).json({ error: 'Meeting not found' });
     }
 
-    res.json({ meeting });
+    res.json({ meeting: serializeMeetingForApi(meeting) });
   } catch (error) {
     console.error('Get meeting error:', error);
     res.status(500).json({ error: 'Failed to fetch meeting' });

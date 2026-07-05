@@ -5,7 +5,7 @@
  * Provides standard methods for connection management, authentication, and status.
  */
 
-import type { IntegrationProvider } from '@prisma/client';
+import type { IntegrationProvider } from '../lib/enums.js';
 
 export interface ConnectorConfig {
   userId: string;

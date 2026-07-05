@@ -6,8 +6,9 @@
  */
 
 import { OAuth2Client } from 'google-auth-library';
-import type { IntegrationProvider } from '@prisma/client';
+import type { IntegrationProvider } from '../../lib/enums.js';
 import prisma from '../../lib/prisma.js';
+import { serializeStringList } from '../../lib/json-list.js';
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID!;
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET!;
@@ -220,14 +221,14 @@ export class GoogleOAuthService {
         accessToken,
         refreshToken,
         tokenExpiry: expiresAt,
-        scopes,
+        scopes: serializeStringList(scopes),
         isActive: true,
       },
       update: {
         accessToken,
         refreshToken,
         tokenExpiry: expiresAt,
-        scopes,
+        scopes: serializeStringList(scopes),
         isActive: true,
         lastSyncAt: new Date(),
       },

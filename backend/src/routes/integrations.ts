@@ -14,7 +14,7 @@ import {
   buildIntegrationErrorPage,
   buildDesktopIntegrationRedirectPage,
 } from '../lib/integration-callback-page.js';
-import type { IntegrationProvider } from '@prisma/client';
+import type { IntegrationProvider } from '../lib/enums.js';
 
 const router = express.Router();
 const DESKTOP_PROTOCOL = process.env.DESKTOP_PROTOCOL || 'ai-meeting-copilot';

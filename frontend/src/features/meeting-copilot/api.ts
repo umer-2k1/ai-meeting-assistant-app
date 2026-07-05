@@ -1,3 +1,4 @@
+import { BACKEND_URL, TOKEN_KEY } from '@/lib/config';
 import type { ActionItem, TranscriptLine } from './types';
 
 export type AskMeetingResponse = {
@@ -78,12 +79,15 @@ function buildFallbackAnswer({
 }
 
 export async function askMeetingQuestion(payload: AskPayload): Promise<AskMeetingResponse> {
-  const backendUrl = import.meta.env['VITE_BACKEND_URL'] ?? 'http://localhost:4000';
+  const token = localStorage.getItem(TOKEN_KEY);
 
-  const timeout = AbortSignal.timeout(4000);
-  const response = await fetch(`${backendUrl}/api/ask-meeting`, {
+  const timeout = AbortSignal.timeout(15000);
+  const response = await fetch(`${BACKEND_URL}/api/ask-meeting`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {})
+    },
     body: JSON.stringify(payload),
     signal: timeout
   }).catch(() => null);
@@ -97,13 +101,15 @@ export async function askMeetingQuestion(payload: AskPayload): Promise<AskMeetin
     data &&
     typeof data === 'object' &&
     'answer' in data &&
-    typeof data.answer === 'string' &&
-    'timestamp' in data &&
-    typeof data.timestamp === 'string'
+    typeof data.answer === 'string'
   ) {
+    const timestamp =
+      'timestamp' in data && typeof data.timestamp === 'string'
+        ? data.timestamp
+        : DEFAULT_TIMESTAMP;
     return {
       answer: data.answer,
-      timestamp: data.timestamp,
+      timestamp,
       provider: 'backend'
     };
   }

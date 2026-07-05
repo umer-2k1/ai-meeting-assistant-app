@@ -1,18 +1,6 @@
--- CreateEnum
-CREATE TYPE "MeetingStatus" AS ENUM ('SCHEDULED', 'LIVE', 'PROCESSING', 'COMPLETED', 'CANCELLED');
-
--- CreateEnum
-CREATE TYPE "Priority" AS ENUM ('LOW', 'MEDIUM', 'HIGH', 'URGENT');
-
--- CreateEnum
-CREATE TYPE "ActionStatus" AS ENUM ('PENDING', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED');
-
--- CreateEnum
-CREATE TYPE "IntegrationType" AS ENUM ('SLACK', 'EMAIL', 'PDF_EXPORT', 'MARKDOWN_EXPORT', 'CALENDAR_SYNC');
-
 -- CreateTable
 CREATE TABLE "User" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "email" TEXT NOT NULL,
     "name" TEXT,
     "avatarUrl" TEXT,
@@ -22,45 +10,60 @@ CREATE TABLE "User" (
     "refreshToken" TEXT,
     "timezone" TEXT NOT NULL DEFAULT 'UTC',
     "language" TEXT NOT NULL DEFAULT 'en',
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-    "lastLoginAt" TIMESTAMP(3),
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    "lastLoginAt" DATETIME
+);
 
-    CONSTRAINT "User_pkey" PRIMARY KEY ("id")
+-- CreateTable
+CREATE TABLE "Integration" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "userId" TEXT NOT NULL,
+    "provider" TEXT NOT NULL,
+    "accessToken" TEXT,
+    "refreshToken" TEXT,
+    "tokenExpiry" DATETIME,
+    "scopes" TEXT NOT NULL DEFAULT '[]',
+    "isActive" BOOLEAN NOT NULL DEFAULT true,
+    "metadata" JSONB,
+    "connectedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "lastSyncAt" DATETIME,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "Integration_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 -- CreateTable
 CREATE TABLE "Meeting" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "title" TEXT NOT NULL,
     "description" TEXT,
-    "startTime" TIMESTAMP(3) NOT NULL,
-    "endTime" TIMESTAMP(3),
+    "startTime" DATETIME NOT NULL,
+    "endTime" DATETIME,
     "duration" INTEGER,
-    "status" "MeetingStatus" NOT NULL DEFAULT 'SCHEDULED',
+    "status" TEXT NOT NULL DEFAULT 'SCHEDULED',
     "audioUrl" TEXT,
     "audioDuration" INTEGER,
-    "recordingStarted" TIMESTAMP(3),
-    "recordingEnded" TIMESTAMP(3),
+    "recordingStarted" DATETIME,
+    "recordingEnded" DATETIME,
     "platform" TEXT,
     "platformMeetingId" TEXT,
     "platformUrl" TEXT,
     "aiSummary" TEXT,
     "summaryHtml" TEXT,
-    "keyDecisions" TEXT[],
-    "risks" TEXT[],
-    "highlights" TEXT[],
+    "keyDecisions" TEXT NOT NULL DEFAULT '[]',
+    "risks" TEXT NOT NULL DEFAULT '[]',
+    "highlights" TEXT NOT NULL DEFAULT '[]',
+    "processingError" TEXT,
     "embeddingId" TEXT,
     "userId" TEXT NOT NULL,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-
-    CONSTRAINT "Meeting_pkey" PRIMARY KEY ("id")
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "Meeting_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 -- CreateTable
 CREATE TABLE "MeetingAttendee" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "meetingId" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "email" TEXT,
@@ -69,49 +72,47 @@ CREATE TABLE "MeetingAttendee" (
     "company" TEXT,
     "title" TEXT,
     "bio" TEXT,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-
-    CONSTRAINT "MeetingAttendee_pkey" PRIMARY KEY ("id")
+    "enrichedAt" DATETIME,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "MeetingAttendee_meetingId_fkey" FOREIGN KEY ("meetingId") REFERENCES "Meeting" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 -- CreateTable
 CREATE TABLE "TranscriptLine" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "meetingId" TEXT NOT NULL,
     "speaker" TEXT NOT NULL,
     "text" TEXT NOT NULL,
     "timestamp" TEXT NOT NULL,
     "timestampSeconds" INTEGER NOT NULL,
-    "confidence" DOUBLE PRECISION,
+    "confidence" REAL,
     "highlighted" BOOLEAN NOT NULL DEFAULT false,
     "embeddingId" TEXT,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "TranscriptLine_pkey" PRIMARY KEY ("id")
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "TranscriptLine_meetingId_fkey" FOREIGN KEY ("meetingId") REFERENCES "Meeting" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 -- CreateTable
 CREATE TABLE "ActionItem" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "meetingId" TEXT NOT NULL,
     "task" TEXT NOT NULL,
     "assignee" TEXT,
-    "dueDate" TIMESTAMP(3),
-    "priority" "Priority" NOT NULL DEFAULT 'MEDIUM',
-    "status" "ActionStatus" NOT NULL DEFAULT 'PENDING',
+    "dueDate" DATETIME,
+    "priority" TEXT NOT NULL DEFAULT 'MEDIUM',
+    "status" TEXT NOT NULL DEFAULT 'PENDING',
     "timestamp" TEXT,
     "context" TEXT,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-    "completedAt" TIMESTAMP(3),
-
-    CONSTRAINT "ActionItem_pkey" PRIMARY KEY ("id")
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    "completedAt" DATETIME,
+    CONSTRAINT "ActionItem_meetingId_fkey" FOREIGN KEY ("meetingId") REFERENCES "Meeting" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 -- CreateTable
 CREATE TABLE "AIChatMessage" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "meetingId" TEXT,
     "userId" TEXT NOT NULL,
     "question" TEXT NOT NULL,
@@ -121,62 +122,57 @@ CREATE TABLE "AIChatMessage" (
     "model" TEXT,
     "tokensUsed" INTEGER,
     "responseTime" INTEGER,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "AIChatMessage_pkey" PRIMARY KEY ("id")
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "AIChatMessage_meetingId_fkey" FOREIGN KEY ("meetingId") REFERENCES "Meeting" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "AIChatMessage_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 -- CreateTable
 CREATE TABLE "MeetingNote" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "meetingId" TEXT NOT NULL,
     "userId" TEXT NOT NULL,
     "content" TEXT NOT NULL,
     "contentHtml" TEXT,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-
-    CONSTRAINT "MeetingNote_pkey" PRIMARY KEY ("id")
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "MeetingNote_meetingId_fkey" FOREIGN KEY ("meetingId") REFERENCES "Meeting" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "MeetingNote_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 -- CreateTable
 CREATE TABLE "MeetingTag" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "meetingId" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "color" TEXT,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "MeetingTag_pkey" PRIMARY KEY ("id")
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "MeetingTag_meetingId_fkey" FOREIGN KEY ("meetingId") REFERENCES "Meeting" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 -- CreateTable
 CREATE TABLE "VectorEmbedding" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "entityType" TEXT NOT NULL,
     "entityId" TEXT NOT NULL,
     "qdrantId" TEXT NOT NULL,
     "collectionName" TEXT NOT NULL,
     "model" TEXT NOT NULL DEFAULT 'gemini',
     "dimension" INTEGER NOT NULL DEFAULT 768,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "VectorEmbedding_pkey" PRIMARY KEY ("id")
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 -- CreateTable
 CREATE TABLE "IntegrationLog" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "entityType" TEXT NOT NULL,
     "entityId" TEXT NOT NULL,
-    "integrationType" "IntegrationType" NOT NULL,
+    "integrationType" TEXT NOT NULL,
     "destination" TEXT,
     "status" TEXT NOT NULL DEFAULT 'pending',
     "error" TEXT,
     "metadata" JSONB,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "IntegrationLog_pkey" PRIMARY KEY ("id")
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 -- CreateIndex
@@ -190,6 +186,18 @@ CREATE INDEX "User_email_idx" ON "User"("email");
 
 -- CreateIndex
 CREATE INDEX "User_googleId_idx" ON "User"("googleId");
+
+-- CreateIndex
+CREATE INDEX "Integration_userId_idx" ON "Integration"("userId");
+
+-- CreateIndex
+CREATE INDEX "Integration_provider_idx" ON "Integration"("provider");
+
+-- CreateIndex
+CREATE INDEX "Integration_isActive_idx" ON "Integration"("isActive");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Integration_userId_provider_key" ON "Integration"("userId", "provider");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Meeting_embeddingId_key" ON "Meeting"("embeddingId");
@@ -237,10 +245,10 @@ CREATE INDEX "MeetingNote_meetingId_idx" ON "MeetingNote"("meetingId");
 CREATE INDEX "MeetingNote_userId_idx" ON "MeetingNote"("userId");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "MeetingTag_meetingId_name_key" ON "MeetingTag"("meetingId", "name");
+CREATE INDEX "MeetingTag_meetingId_idx" ON "MeetingTag"("meetingId");
 
 -- CreateIndex
-CREATE INDEX "MeetingTag_meetingId_idx" ON "MeetingTag"("meetingId");
+CREATE UNIQUE INDEX "MeetingTag_meetingId_name_key" ON "MeetingTag"("meetingId", "name");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "VectorEmbedding_qdrantId_key" ON "VectorEmbedding"("qdrantId");
@@ -256,30 +264,3 @@ CREATE INDEX "IntegrationLog_entityType_entityId_idx" ON "IntegrationLog"("entit
 
 -- CreateIndex
 CREATE INDEX "IntegrationLog_integrationType_idx" ON "IntegrationLog"("integrationType");
-
--- AddForeignKey
-ALTER TABLE "Meeting" ADD CONSTRAINT "Meeting_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "MeetingAttendee" ADD CONSTRAINT "MeetingAttendee_meetingId_fkey" FOREIGN KEY ("meetingId") REFERENCES "Meeting"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "TranscriptLine" ADD CONSTRAINT "TranscriptLine_meetingId_fkey" FOREIGN KEY ("meetingId") REFERENCES "Meeting"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "ActionItem" ADD CONSTRAINT "ActionItem_meetingId_fkey" FOREIGN KEY ("meetingId") REFERENCES "Meeting"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "AIChatMessage" ADD CONSTRAINT "AIChatMessage_meetingId_fkey" FOREIGN KEY ("meetingId") REFERENCES "Meeting"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "AIChatMessage" ADD CONSTRAINT "AIChatMessage_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "MeetingNote" ADD CONSTRAINT "MeetingNote_meetingId_fkey" FOREIGN KEY ("meetingId") REFERENCES "Meeting"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "MeetingNote" ADD CONSTRAINT "MeetingNote_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "MeetingTag" ADD CONSTRAINT "MeetingTag_meetingId_fkey" FOREIGN KEY ("meetingId") REFERENCES "Meeting"("id") ON DELETE CASCADE ON UPDATE CASCADE;

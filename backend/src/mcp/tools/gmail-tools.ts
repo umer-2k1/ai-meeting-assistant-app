@@ -4,7 +4,7 @@
  * Tool definitions for LLM to interact with Gmail
  */
 
-import type { IntegrationProvider } from '@prisma/client';
+import type { IntegrationProvider } from '../../lib/enums.js';
 import { ConnectorManager } from '../../connectors/connector-manager.js';
 import type { McpTool } from './calendar-tools.js';
 

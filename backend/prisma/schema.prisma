@@ -1,12 +1,20 @@
 // This is your Prisma schema file
 // Learn more: https://pris.ly/d/prisma-schema
+//
+// NOTE: This project uses SQLite for easy open-source local setup.
+// SQLite/Prisma limitations that shape this schema:
+//   - No scalar list columns (`String[]`) -> stored as JSON-encoded `String`
+//     columns (see backend/src/lib/json-list.ts for the get/set convention).
+//   - No native enums -> stored as `String` columns; the allowed values live in
+//     backend/src/lib/enums.ts (mirrored by the zod schemas in lib/schemas.ts).
+//   - No `@db.Text` native attribute -> `String` already maps to TEXT.
 
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
   url      = env("DATABASE_URL")
 }
 
@@ -19,28 +27,28 @@ model User {
   email         String    @unique
   name          String?
   avatarUrl     String?
-  
+
   // Google OAuth fields
   googleId      String?   @unique
   googleEmail   String?
-  accessToken   String?   @db.Text
-  refreshToken  String?   @db.Text
-  
+  accessToken   String?
+  refreshToken  String?
+
   // Preferences
   timezone      String    @default("UTC")
   language      String    @default("en")
-  
+
   // Timestamps
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   lastLoginAt   DateTime?
-  
+
   // Relations
   meetings      Meeting[]
   chatMessages  AIChatMessage[]
   notes         MeetingNote[]
   integrations  Integration[]
-  
+
   @@index([email])
   @@index([googleId])
 }
@@ -50,42 +58,36 @@ model User {
 // ========================================
 
 model Integration {
-  id              String              @id @default(cuid())
+  id              String    @id @default(cuid())
   userId          String
-  user            User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  provider        IntegrationProvider
-  
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // IntegrationProvider: GOOGLE_CALENDAR | GMAIL | SLACK | MICROSOFT
+  provider        String
+
   // OAuth tokens
-  accessToken     String?             @db.Text
-  refreshToken    String?             @db.Text
+  accessToken     String?
+  refreshToken    String?
   tokenExpiry     DateTime?
-  
-  // Scopes granted
-  scopes          String[]
-  
+
+  // Scopes granted (JSON-encoded string[])
+  scopes          String    @default("[]")
+
   // Connection status
-  isActive        Boolean             @default(true)
-  
+  isActive        Boolean   @default(true)
+
   // Provider-specific configuration
   metadata        Json?
-  
+
   // Timestamps
-  connectedAt     DateTime            @default(now())
+  connectedAt     DateTime  @default(now())
   lastSyncAt      DateTime?
-  updatedAt       DateTime            @updatedAt
-  
+  updatedAt       DateTime  @updatedAt
+
   @@unique([userId, provider])
   @@index([userId])
   @@index([provider])
   @@index([isActive])
-}
-
-enum IntegrationProvider {
-  GOOGLE_CALENDAR
-  GMAIL
-  SLACK
-  MICROSOFT
 }
 
 // ========================================
@@ -93,61 +95,57 @@ enum IntegrationProvider {
 // ========================================
 
 model Meeting {
-  id                String              @id @default(cuid())
+  id                String    @id @default(cuid())
   title             String
-  description       String?             @db.Text
+  description       String?
   startTime         DateTime
   endTime           DateTime?
-  duration          Int?                // Duration in seconds
-  status            MeetingStatus       @default(SCHEDULED)
-  
+  duration          Int?      // Duration in seconds
+  // MeetingStatus: SCHEDULED | LIVE | PROCESSING | COMPLETED | CANCELLED | FAILED
+  status            String    @default("SCHEDULED")
+
   // Recording metadata
   audioUrl          String?
-  audioDuration     Int?                // Duration in seconds
+  audioDuration     Int?      // Duration in seconds
   recordingStarted  DateTime?
   recordingEnded    DateTime?
-  
+
   // Platform info
-  platform          String?             // "zoom", "meet", "teams", "in-person"
+  platform          String?   // "zoom", "meet", "teams", "in-person"
   platformMeetingId String?
   platformUrl       String?
-  
+
   // AI-generated content
-  aiSummary         String?             @db.Text
-  summaryHtml       String?             @db.Text
-  keyDecisions      String[]
-  risks             String[]
-  highlights        String[]
-  
+  aiSummary         String?
+  summaryHtml       String?
+  // JSON-encoded string[]
+  keyDecisions      String    @default("[]")
+  risks             String    @default("[]")
+  highlights        String    @default("[]")
+  // Optional processing error message (set when status = FAILED)
+  processingError   String?
+
   // Vector embedding for semantic search
-  embeddingId       String?             @unique
-  
+  embeddingId       String?   @unique
+
   // Relations
   userId            String
-  user              User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   attendees         MeetingAttendee[]
   transcript        TranscriptLine[]
   actionItems       ActionItem[]
   chatMessages      AIChatMessage[]
   notes             MeetingNote[]
   tags              MeetingTag[]
-  
+
   // Timestamps
-  createdAt         DateTime            @default(now())
-  updatedAt         DateTime            @updatedAt
-  
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
   @@index([userId])
   @@index([startTime])
   @@index([status])
-}
-
-enum MeetingStatus {
-  SCHEDULED
-  LIVE
-  PROCESSING
-  COMPLETED
-  CANCELLED
 }
 
 // ========================================
@@ -158,21 +156,22 @@ model MeetingAttendee {
   id              String    @id @default(cuid())
   meetingId       String
   meeting         Meeting   @relation(fields: [meetingId], references: [id], onDelete: Cascade)
-  
+
   name            String
   email           String?
   role            String?   // "organizer", "required", "optional"
-  
+
   // Enrichment data
   linkedinUrl     String?
   company         String?
   title           String?
-  bio             String?   @db.Text
-  
+  bio             String?
+  enrichedAt      DateTime?
+
   // Timestamps
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
-  
+
   @@index([meetingId])
   @@index([email])
 }
@@ -185,22 +184,22 @@ model TranscriptLine {
   id              String    @id @default(cuid())
   meetingId       String
   meeting         Meeting   @relation(fields: [meetingId], references: [id], onDelete: Cascade)
-  
+
   speaker         String
-  text            String    @db.Text
+  text            String
   timestamp       String    // Format: "00:12:34"
   timestampSeconds Int      // Seconds from start
-  
+
   // Metadata
   confidence      Float?    // 0.0 to 1.0
   highlighted     Boolean   @default(false)
-  
-  // Vector embedding for semantic search
+
+  // Vector embedding for semantic search (Qdrant point UUID)
   embeddingId     String?
-  
+
   // Timestamps
   createdAt       DateTime  @default(now())
-  
+
   @@index([meetingId])
   @@index([timestampSeconds])
 }
@@ -210,42 +209,30 @@ model TranscriptLine {
 // ========================================
 
 model ActionItem {
-  id              String          @id @default(cuid())
+  id              String    @id @default(cuid())
   meetingId       String
-  meeting         Meeting         @relation(fields: [meetingId], references: [id], onDelete: Cascade)
-  
-  task            String          @db.Text
+  meeting         Meeting   @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+
+  task            String
   assignee        String?
   dueDate         DateTime?
-  priority        Priority        @default(MEDIUM)
-  status          ActionStatus    @default(PENDING)
-  
+  // Priority: LOW | MEDIUM | HIGH | URGENT
+  priority        String    @default("MEDIUM")
+  // ActionStatus: PENDING | IN_PROGRESS | COMPLETED | CANCELLED
+  status          String    @default("PENDING")
+
   // Context
-  timestamp       String?         // Where in meeting it was mentioned
-  context         String?         @db.Text
-  
+  timestamp       String?   // Where in meeting it was mentioned
+  context         String?
+
   // Timestamps
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
   completedAt     DateTime?
-  
+
   @@index([meetingId])
   @@index([status])
   @@index([dueDate])
-}
-
-enum Priority {
-  LOW
-  MEDIUM
-  HIGH
-  URGENT
-}
-
-enum ActionStatus {
-  PENDING
-  IN_PROGRESS
-  COMPLETED
-  CANCELLED
 }
 
 // ========================================
@@ -256,25 +243,25 @@ model AIChatMessage {
   id              String    @id @default(cuid())
   meetingId       String?
   meeting         Meeting?  @relation(fields: [meetingId], references: [id], onDelete: Cascade)
-  
+
   userId          String
   user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  question        String    @db.Text
-  answer          String    @db.Text
-  
+
+  question        String
+  answer          String
+
   // Context used for answer
   contextType     String?   // "transcript", "summary", "action_items", "history"
-  contextSnippet  String?   @db.Text
-  
+  contextSnippet  String?
+
   // Metadata
   model           String?   // Which LLM was used
   tokensUsed      Int?
   responseTime    Int?      // Milliseconds
-  
+
   // Timestamps
   createdAt       DateTime  @default(now())
-  
+
   @@index([meetingId])
   @@index([userId])
 }
@@ -287,17 +274,17 @@ model MeetingNote {
   id              String    @id @default(cuid())
   meetingId       String
   meeting         Meeting   @relation(fields: [meetingId], references: [id], onDelete: Cascade)
-  
+
   userId          String
   user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  content         String    @db.Text
-  contentHtml     String?   @db.Text
-  
+
+  content         String
+  contentHtml     String?
+
   // Timestamps
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
-  
+
   @@index([meetingId])
   @@index([userId])
 }
@@ -310,13 +297,13 @@ model MeetingTag {
   id              String    @id @default(cuid())
   meetingId       String
   meeting         Meeting   @relation(fields: [meetingId], references: [id], onDelete: Cascade)
-  
+
   name            String
   color           String?   // Hex color code
-  
+
   // Timestamps
   createdAt       DateTime  @default(now())
-  
+
   @@unique([meetingId, name])
   @@index([meetingId])
 }
@@ -327,22 +314,22 @@ model MeetingTag {
 
 model VectorEmbedding {
   id              String    @id @default(cuid())
-  
+
   // Reference
   entityType      String    // "meeting", "transcript_line", "summary"
   entityId        String
-  
-  // Qdrant metadata
+
+  // Qdrant metadata (qdrantId is a UUID point id)
   qdrantId        String    @unique
   collectionName  String
-  
+
   // Embedding metadata
   model           String    @default("gemini")
   dimension       Int       @default(768)
-  
+
   // Timestamps
   createdAt       DateTime  @default(now())
-  
+
   @@index([entityType, entityId])
   @@index([qdrantId])
 }
@@ -352,34 +339,26 @@ model VectorEmbedding {
 // ========================================
 
 model IntegrationLog {
-  id              String          @id @default(cuid())
-  
+  id              String    @id @default(cuid())
+
   // What was shared
-  entityType      String          // "meeting", "summary", "transcript"
+  entityType      String    // "meeting", "summary", "transcript"
   entityId        String
-  
-  // Integration details
-  integrationType IntegrationType
-  destination     String?         // Channel ID, email address, etc.
-  
+
+  // IntegrationType: SLACK | EMAIL | PDF_EXPORT | MARKDOWN_EXPORT | CALENDAR_SYNC
+  integrationType String
+  destination     String?   // Channel ID, email address, etc.
+
   // Status
-  status          String          @default("pending") // "pending", "success", "failed"
-  error           String?         @db.Text
-  
+  status          String    @default("pending") // "pending", "success", "failed"
+  error           String?
+
   // Metadata
   metadata        Json?
-  
+
   // Timestamps
-  createdAt       DateTime        @default(now())
-  
+  createdAt       DateTime  @default(now())
+
   @@index([entityType, entityId])
   @@index([integrationType])
-}
-
-enum IntegrationType {
-  SLACK
-  EMAIL
-  PDF_EXPORT
-  MARKDOWN_EXPORT
-  CALENDAR_SYNC
 }

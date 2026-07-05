@@ -6,7 +6,7 @@
 
 import { google } from 'googleapis';
 import { OAuth2Client } from 'google-auth-library';
-import type { IntegrationProvider } from '@prisma/client';
+import type { IntegrationProvider } from '../../lib/enums.js';
 import { BaseConnector, type ConnectorConfig, type ConnectorStatus, type TokenRefreshResult } from '../base-connector.js';
 import { googleOAuthService } from './oauth.js';
 import { ConnectorManager } from '../connector-manager.js';

@@ -1,4 +1,5 @@
 import prisma from '../lib/prisma.js';
+import { serializeStringList } from '../lib/json-list.js';
 import {
   generateMeetingSummary,
   extractActionItems,
@@ -64,10 +65,11 @@ export async function processMeeting(meetingId: string) {
       where: { id: meetingId },
       data: {
         aiSummary: summaryResult.summary,
-        keyDecisions: summaryResult.decisions,
-        risks: summaryResult.risks,
-        highlights: summaryResult.keyPoints,
+        keyDecisions: serializeStringList(summaryResult.decisions),
+        risks: serializeStringList(summaryResult.risks),
+        highlights: serializeStringList(summaryResult.keyPoints),
         status: 'COMPLETED',
+        processingError: null,
       },
     });
 
@@ -164,11 +166,13 @@ export async function processMeeting(meetingId: string) {
   } catch (error) {
     console.error('[Processing] Error:', error);
 
-    // Mark meeting as completed with error
+    // Mark meeting as FAILED and record the error so the UI can surface it.
     await prisma.meeting.update({
       where: { id: meetingId },
       data: {
-        status: 'COMPLETED',
+        status: 'FAILED',
+        processingError:
+          error instanceof Error ? error.message : 'Unknown processing error',
       },
     }).catch(() => {});
 

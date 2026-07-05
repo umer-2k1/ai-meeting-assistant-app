@@ -1,5 +1,6 @@
 import prisma from '../lib/prisma.js';
 import { uploadAndCleanup } from './cloudinary.js';
+import { parseStringList } from '../lib/json-list.js';
 import type { Meeting, TranscriptLine } from '@prisma/client';
 
 /**
@@ -161,4 +162,34 @@ export async function getUserMeetings(
     take: options.limit || 50,
     skip: options.offset || 0,
   });
+}
+
+/**
+ * Map a Prisma meeting row to the API shape.
+ *
+ * SQLite stores `keyDecisions`, `risks`, `highlights` as JSON strings; parse
+ * them back into arrays so API consumers always receive `string[]`. Pass any
+ * meeting-like object (with or without relations/_count) — extra fields are
+ * preserved untouched. Returns `null` for a `null` input for convenience.
+ */
+export function serializeMeetingForApi<
+  T extends {
+    keyDecisions?: string | string[] | null;
+    risks?: string | string[] | null;
+    highlights?: string | string[] | null;
+  }
+>(meeting: T | null): (Omit<T, 'keyDecisions' | 'risks' | 'highlights'> & {
+  keyDecisions: string[];
+  risks: string[];
+  highlights: string[];
+}) | null {
+  if (!meeting) return null;
+  const asList = (v: string | string[] | null | undefined): string[] =>
+    Array.isArray(v) ? v : parseStringList(v);
+  return {
+    ...meeting,
+    keyDecisions: asList(meeting.keyDecisions),
+    risks: asList(meeting.risks),
+    highlights: asList(meeting.highlights),
+  };
 }
