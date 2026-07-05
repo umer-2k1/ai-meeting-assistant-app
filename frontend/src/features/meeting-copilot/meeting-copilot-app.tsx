@@ -60,6 +60,8 @@ import {
   streamMeetingAnswer,
 } from './meetings-api';
 import { Skeleton } from '@/components/ui/skeleton';
+import { BrandLogo } from '@/components/brand/brand-mark';
+import { BrandLoader } from '@/components/brand/brand-loader';
 import type { AiAnswer, Meeting, TranscriptLine } from './types';
 
 type View = 'dashboard' | 'live' | 'detail' | 'calendar' | 'device-check' | 'settings' | 'prep';
@@ -138,14 +140,8 @@ function AppSidebar({
   const { user, logout } = useAuth();
   return (
     <aside className='sticky top-0 hidden h-dvh w-64 shrink-0 flex-col overflow-y-auto overscroll-contain border-r border-border bg-sidebar p-4 text-sidebar-foreground lg:flex'>
-      <div className='mb-3 inline-flex items-center gap-3 rounded-xl border border-primary/30 bg-card px-3 py-2'>
-        <div className='inline-flex size-8 items-center justify-center rounded-lg bg-gradient-to-br from-[#1E3A8A] via-[#3B82F6] to-[#06B6D4] text-white'>
-          <IconBolt className='size-4' />
-        </div>
-        <div>
-          <p className='text-sm font-semibold text-foreground'>Speller.ai</p>
-          <p className='text-[11px] text-muted-foreground'>AI Meeting Copilot</p>
-        </div>
+      <div className='mb-3 inline-flex items-center rounded-xl border border-primary/30 bg-card px-3 py-2'>
+        <BrandLogo size={32} animated={activeView === 'live'} />
       </div>
 
       <div className='rounded-xl border border-border bg-muted/40 p-3'>
@@ -165,7 +161,7 @@ function AppSidebar({
               className={cn(
                 'flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm transition-all duration-200',
                 activeView === entry.id
-                  ? 'bg-gradient-to-r from-[#1E3A8A] to-[#3B82F6] text-white shadow-[0_8px_24px_rgba(59,130,246,0.35)]'
+                  ? 'bg-primary text-primary-foreground shadow-sm'
                   : 'text-muted-foreground hover:bg-[var(--copilot-nav-hover)] hover:text-foreground'
               )}
             >
@@ -207,7 +203,7 @@ function AppSidebar({
       )}
 
       <Button
-        className='mt-auto bg-gradient-to-r from-[#1E3A8A] via-[#3B82F6] to-[#06B6D4] text-white hover:opacity-95'
+        className='mt-auto bg-primary hover:bg-primary/90 text-white hover:opacity-95'
         onClick={() => {
           onStartRecording();
         }}
@@ -309,7 +305,7 @@ function DashboardScreen({
 
       <div className='flex flex-wrap gap-2'>
         <Button
-          className='bg-gradient-to-r from-[#1E3A8A] via-[#3B82F6] to-[#06B6D4] text-white'
+          className='bg-primary hover:bg-primary/90 text-white'
           onClick={() => {
             onStartRecording();
           }}
@@ -371,7 +367,7 @@ function DashboardScreen({
               </div>
               {!searchText.trim() && (
                 <Button
-                  className='bg-gradient-to-r from-[#1E3A8A] via-[#3B82F6] to-[#06B6D4] text-white'
+                  className='bg-primary hover:bg-primary/90 text-white'
                   onClick={onStartRecording}
                 >
                   <IconMicrophone className='mr-1.5 size-4' />
@@ -516,11 +512,11 @@ function LiveScreen({
               <IconPlayerStop className='mr-1.5 size-4' />
               Stop
             </Button>
-            <Button variant='secondary' className='bg-[#1E3A8A]/30 text-foreground/85 hover:bg-[#1E3A8A]/50'>
+            <Button variant='secondary' className='bg-primary/10 text-primary hover:bg-primary/15'>
               <IconSparkles className='mr-1.5 size-4' />
               Highlight
             </Button>
-            <Button variant='secondary' className='bg-[#1E3A8A]/30 text-foreground/85 hover:bg-[#1E3A8A]/50'>
+            <Button variant='secondary' className='bg-primary/10 text-primary hover:bg-primary/15'>
               <IconFileText className='mr-1.5 size-4' />
               Note
             </Button>
@@ -1125,7 +1121,7 @@ export default function MeetingCopilotApp() {
                 />
               ) : detailLoading ? (
                 <div className='flex flex-1 items-center justify-center'>
-                  <IconLoader2 className='size-6 animate-spin text-muted-foreground' />
+                  <BrandLoader label='Loading meeting…' />
                 </div>
               ) : (
                 <div className='flex flex-1 flex-col items-center justify-center gap-3 text-center'>

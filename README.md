@@ -2,7 +2,15 @@
 
 **Production-ready AI-powered meeting assistant with real-time transcription, intelligent insights, and seamless integrations.**
 
-> Built with Electron, React, Node.js, PostgreSQL, Deepgram, Groq, Google Gemini, and Qdrant.
+> Built with Electron, React, Node.js, SQLite, Deepgram, Groq, Google Gemini, and Qdrant.
+
+> ⚡ **New here? Start with [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md)** — a
+> from-scratch local setup guide (Node 22 + pnpm, Qdrant via Docker, required API
+> keys, and the run commands). The app now uses **SQLite** (no Postgres needed).
+>
+> 📐 **How it works end-to-end:** [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) —
+> module map, the data model, and every request/data flow (auth, calendar, live
+> transcription, processing, RAG chat, sharing) with real file paths.
 
 ---
 
@@ -172,11 +180,10 @@ Add these to your `.env` files:
 
 ## 📖 Documentation
 
-- **Final Status:** [`docs/FINAL_STATUS.md`](docs/FINAL_STATUS.md) ⭐ **NEW - Complete overview**
-- **Production Enhancements:** [`docs/PRODUCTION_ENHANCEMENTS.md`](docs/PRODUCTION_ENHANCEMENTS.md) ⭐ **NEW**
-- **Architecture:** [`docs/README.md`](docs/README.md) - Complete system design
-- **Completed Features:** [`docs/completed.md`](docs/completed.md)
-- **Todo List:** [`docs/todo.md`](docs/todo.md)
+- **Getting Started:** [`docs/GETTING_STARTED.md`](docs/GETTING_STARTED.md) — set up & run from scratch
+- **Architecture:** [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — how it works end-to-end (module map + data flows)
+- **Implementation details:** [`docs/PRODUCTION_HARDENING_IMPLEMENTATION.md`](docs/PRODUCTION_HARDENING_IMPLEMENTATION.md) — what each phase built + follow-ups
+- **Plan:** [`docs/PRODUCTION_HARDENING_PLAN.md`](docs/PRODUCTION_HARDENING_PLAN.md)
 - **Requirements:** [`NEW_REQUIREMENT.md`](NEW_REQUIREMENT.md)
 
 ---
@@ -352,15 +359,18 @@ MIT License - See LICENSE file for details
 
 ## 🎉 What's Next?
 
-### Milestone 5 (Planned)
-- [ ] Slack integration
-- [ ] Email delivery (SendGrid)
-- [ ] Google Calendar sync (via MCP)
-- [ ] PDF/Markdown export
-- [ ] Pre-meeting intelligence
-- [ ] Attendee enrichment (LinkedIn)
+Recently delivered (see [`docs/PRODUCTION_HARDENING_IMPLEMENTATION.md`](docs/PRODUCTION_HARDENING_IMPLEMENTATION.md)):
 
-See [`docs/todo.md`](docs/todo.md) for complete roadmap.
+- [x] Google Calendar sync + pre-meeting intelligence
+- [x] Live transcription (Deepgram) + RAG-grounded AI chat
+- [x] Markdown/PDF export, Email (Gmail) & Slack sharing
+- [x] Attendee enrichment (Serper, optional)
+
+Follow-ups still open:
+
+- [ ] Encrypt stored OAuth tokens at rest
+- [ ] Structured request logging (pino) + automated tests / CI
+- [ ] Optional local-first vector store / file storage (drop Qdrant + Cloudinary setup)
 
 ---
 
@@ -397,10 +407,9 @@ pnpm desktop:dev
 ## 📞 Support
 
 For technical support or questions:
-- **Quick Start**: [`docs/FINAL_STATUS.md`](docs/FINAL_STATUS.md) ⭐ **Read this first!**
-- **Production Features**: [`docs/PRODUCTION_ENHANCEMENTS.md`](docs/PRODUCTION_ENHANCEMENTS.md)
-- **Architecture**: [`docs/README.md`](docs/README.md)
-- **Setup Issues**: Check troubleshooting section above
+- **Quick Start**: [`docs/GETTING_STARTED.md`](docs/GETTING_STARTED.md) ⭐ **Read this first!**
+- **Architecture**: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
+- **Setup Issues**: See the troubleshooting table in [`docs/GETTING_STARTED.md`](docs/GETTING_STARTED.md)
 
 ---
 

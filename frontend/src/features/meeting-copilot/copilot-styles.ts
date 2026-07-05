@@ -11,4 +11,4 @@ export const COPILOT_BTN_OUTLINE =
 export const COPILOT_INNER_PANEL = 'rounded-lg border border-border/70 bg-muted/50';
 
 export const COPILOT_HIGHLIGHT_PANEL =
-  'rounded-lg border border-cyan-500/50 bg-[var(--copilot-highlight-bg)] dark:border-[#06B6D4]/60';
+  'rounded-lg border border-primary/40 bg-[var(--copilot-highlight-bg)]';

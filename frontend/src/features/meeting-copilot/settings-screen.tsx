@@ -30,6 +30,7 @@ import { cn } from '@/lib/utils';
 import SettingsPermissionsPanel from './settings-permissions-panel';
 import { SettingsRow, SettingsSection, SettingsSwitch } from './settings-ui';
 import { useAuth } from '@/contexts/auth-context';
+import { BrandLoader } from '@/components/brand/brand-loader';
 
 const AUDIO_DEVICES = [
   { value: 'default', label: 'System default' },
@@ -522,8 +523,8 @@ function IntegrationsTab() {
 
   if (loading) {
     return (
-      <div className='flex items-center justify-center py-12'>
-        <div className='size-8 animate-spin rounded-full border-4 border-primary border-t-transparent' />
+      <div className='py-12'>
+        <BrandLoader label='Loading settings…' size={48} />
       </div>
     );
   }

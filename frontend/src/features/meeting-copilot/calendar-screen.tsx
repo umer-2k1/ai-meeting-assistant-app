@@ -21,6 +21,7 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
 import { COPILOT_BTN_OUTLINE, COPILOT_HIGHLIGHT_PANEL, COPILOT_SURFACE } from './copilot-styles';
+import { BrandLoader } from '@/components/brand/brand-loader';
 import { SettingsSwitch } from './settings-ui';
 import type { CalendarEvent } from './types';
 
@@ -188,7 +189,7 @@ function NextMeetingHero({
       <p className='mt-3 text-sm text-foreground/85'>{event.note}</p>
       <div className='mt-4 flex flex-wrap items-center gap-3'>
         <Button
-          className='bg-gradient-to-r from-[#1E3A8A] via-[#3B82F6] to-[#06B6D4] text-white'
+          className='bg-primary hover:bg-primary/90 text-white'
           onClick={onStartRecording}
         >
           <IconMicrophone className='mr-1.5 size-4' />
@@ -567,8 +568,8 @@ export default function CalendarScreen({
           onSync={() => void fetchCalendarEvents()}
           onManage={() => onManageIntegrations?.()}
         />
-        <div className='flex items-center justify-center py-12'>
-          <div className='size-8 animate-spin rounded-full border-4 border-primary border-t-transparent' />
+        <div className='py-12'>
+          <BrandLoader label='Loading your calendar…' size={48} />
         </div>
       </section>
     );

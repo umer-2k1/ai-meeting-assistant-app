@@ -3,7 +3,6 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   IconAdjustmentsHorizontal,
   IconArrowUp,
-  IconBolt,
   IconMail,
   IconMessageCircle,
   IconMicrophone,
@@ -16,6 +15,7 @@ import { askMeetingQuestion } from '@/features/meeting-copilot/api';
 import { fetchMeetings } from '@/features/meeting-copilot/meetings-api';
 import type { Meeting } from '@/features/meeting-copilot/types';
 import { cn } from '@/lib/utils';
+import { BrandMark } from '@/components/brand/brand-mark';
 
 import { useWidgetThemeSync } from './use-widget-theme-sync';
 import { useWidgetWindowDrag } from './use-widget-window-drag';
@@ -235,9 +235,7 @@ export default function FloatingSystemWidget() {
         >
           <div className='flex items-center gap-2.5'>
             <MessageToggleButton expanded onClick={toggleExpanded} />
-            <div className='inline-flex size-8 items-center justify-center rounded-full bg-gradient-to-br from-[#1E3A8A] to-[#06B6D4] text-white'>
-              <IconBolt className='size-4' />
-            </div>
+            <BrandMark size={30} animated={isLive} />
             <span className='font-mono text-sm font-semibold text-foreground'>{timerLabel}</span>
             {isLive && (
               <span className='rounded-full bg-[#EF4444]/20 px-2 py-0.5 text-[11px] font-medium text-[#FCA5A5]'>

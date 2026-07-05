@@ -1,4 +1,5 @@
 import { Skeleton } from '../components/ui/skeleton';
+import { BrandLoader } from './brand/brand-loader';
 
 export function MeetingCardSkeleton() {
   return (
@@ -144,21 +145,13 @@ export function StreamingTextIndicator() {
 }
 
 export function PageLoader() {
-  return (
-    <div className='flex min-h-screen items-center justify-center'>
-      <div className='text-center'>
-        <div className='mb-4 inline-block size-12 animate-spin rounded-full border-4 border-primary border-t-transparent' />
-        <p className='text-sm text-muted-foreground'>Loading...</p>
-      </div>
-    </div>
-  );
+  return <BrandLoader fullScreen label='Loading…' />;
 }
 
-export function ContentLoader({ message = 'Loading content...' }: { message?: string }) {
+export function ContentLoader({ message = 'Loading content…' }: { message?: string }) {
   return (
-    <div className='flex flex-col items-center justify-center py-12'>
-      <div className='mb-3 inline-block size-8 animate-spin rounded-full border-3 border-primary border-t-transparent' />
-      <p className='text-sm text-muted-foreground'>{message}</p>
+    <div className='py-12'>
+      <BrandLoader label={message} size={48} />
     </div>
   );
 }

@@ -1,30 +1,18 @@
 version: "3.9"
 
+# The app uses SQLite for its relational database (no Postgres needed).
+# The only service required for local dev is Qdrant, the vector database used
+# for semantic search / RAG.  Start it with:  docker compose up -d
 services:
-  postgres:
-    image: postgres:16
-    container_name: ai-meeting-copilot-postgres
-    restart: always
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: ai_meeting_copilot
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: ai-meeting-copilot-qdrant
+    restart: unless-stopped
     ports:
-      - "5432:5432"
+      - "6333:6333" # REST API — set QDRANT_URL=http://localhost:6333
+      - "6334:6334" # gRPC
     volumes:
-      - pgdata:/var/lib/postgresql/data
-
-  # pgadmin:
-  #   image: dpage/pgadmin4
-  #   container_name: ai-meeting-copilot-pgadmin
-  #   restart: always
-  #   environment:
-  #     PGADMIN_DEFAULT_EMAIL: admin@example.com
-  #     PGADMIN_DEFAULT_PASSWORD: admin
-  #   ports:
-  #     - "5050:80"
-  #   depends_on:
-  #     - postgres
+      - qdrant_storage:/qdrant/storage
 
 volumes:
-  pgdata:
+  qdrant_storage:

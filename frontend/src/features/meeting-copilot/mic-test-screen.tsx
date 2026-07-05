@@ -256,7 +256,7 @@ export default function MicTestScreen({
             {showPreview ? (
               <>
                 <Button
-                  className='rounded-full bg-gradient-to-r from-[#1E3A8A] via-[#3B82F6] to-[#06B6D4] text-white'
+                  className='rounded-full bg-primary hover:bg-primary/90 text-white'
                   onClick={() => {
                     discardPreview();
                     void startMonitoring();
@@ -271,7 +271,7 @@ export default function MicTestScreen({
               </>
             ) : !isMonitoring ? (
               <Button
-                className='rounded-full bg-gradient-to-r from-[#1E3A8A] via-[#3B82F6] to-[#06B6D4] text-white'
+                className='rounded-full bg-primary hover:bg-primary/90 text-white'
                 disabled={isBusy}
                 onClick={() => {
                   void startMonitoring();
@@ -282,7 +282,7 @@ export default function MicTestScreen({
               </Button>
             ) : (
               <Button
-                className='rounded-full bg-gradient-to-r from-[#1E3A8A] via-[#3B82F6] to-[#06B6D4] text-white'
+                className='rounded-full bg-primary hover:bg-primary/90 text-white'
                 onClick={() => {
                   void endTestAndPreview();
                 }}

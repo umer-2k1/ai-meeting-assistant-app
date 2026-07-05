@@ -5,7 +5,6 @@ import {
   IconBulb,
   IconChecklist,
   IconHistory,
-  IconLoader2,
   IconSparkles,
   IconUsers,
 } from '@tabler/icons-react';
@@ -13,6 +12,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { BrandLoader } from '@/components/brand/brand-loader';
 import { cn } from '@/lib/utils';
 
 import { COPILOT_BTN_OUTLINE, COPILOT_SURFACE } from './copilot-styles';
@@ -68,9 +68,8 @@ export default function PreMeetingScreen({
 
       {isLoading ? (
         <Card className={SURFACE}>
-          <CardContent className='flex items-center justify-center gap-2 py-16 text-muted-foreground'>
-            <IconLoader2 className='size-5 animate-spin' />
-            Preparing your brief…
+          <CardContent className='py-16'>
+            <BrandLoader label='Preparing your brief…' size={52} />
           </CardContent>
         </Card>
       ) : error ? (

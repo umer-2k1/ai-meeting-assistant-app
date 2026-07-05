@@ -33,9 +33,9 @@ export function LevelMeter({ level, peakLevel }: { level: number; peakLevel: num
               className={cn(
                 'w-2 rounded-full transition-all duration-75',
                 active
-                  ? 'bg-gradient-to-t from-[#1E3A8A] to-[#06B6D4]'
+                  ? 'bg-primary'
                   : peakHit
-                    ? 'bg-cyan-500/35'
+                    ? 'bg-primary/40'
                     : 'bg-muted-foreground/20'
               )}
               style={{ height: `${12 + threshold * 72}%` }}
