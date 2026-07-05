@@ -33,9 +33,11 @@ If eslint auto-fixes files, review the diff and include those changes in the com
    - `git add -A`
    - Do not stage secrets (`.env`, credentials, etc.) — warn the user if they try to commit them
 4. **Create short commit message**
+   - Subject line: 1 line max, short and focused
    - Base the message on the actual changes in the diff
    - Example: `git commit -m "fix(auth): handle expired token refresh"`
    - Example with issue key: `git commit -m "PROJ-123: fix(auth): handle expired token refresh"`
+   - For longer context, add a description after a blank line
 5. **Commit**
    - If the commit fails due to a pre-commit hook, fix the issue and create a **new** commit (do not amend unless the user explicitly asked)
 6. **Fetch and rebase onto latest main (optional but recommended)**
@@ -54,7 +56,8 @@ If eslint auto-fixes files, review the diff and include those changes in the com
 
 ## Commit rules
 
-- **Length:** <= 72 characters
+- **Subject line:** 1 line max, <= 72 characters (short and focused)
+- **Description (optional):** Add after a blank line if more context is needed
 - **Imperative mood:** Use "fix", "add", "update" (not "fixed", "added", "updated")
 - **Capitalize:** First letter of summary should be capitalized
 - **No period:** Don't end the subject line with a period
