@@ -70,6 +70,71 @@ export async function sweepOrphanedLiveMeetings(): Promise<string[]> {
 }
 
 /**
+ * Finalize a single LIVE meeting whose WebSocket closed without an explicit
+ * `/complete` (app closed, crashed, or navigated away mid-recording).
+ *
+ * Race-safe against the normal stop flow (which calls `/complete`): the caller
+ * should invoke this on a short delay so `/complete` wins the common case, and
+ * the LIVE→PROCESSING transition here is atomic (`updateMany` guarded on
+ * `status: 'LIVE'`) so processing is triggered at most once.
+ *
+ * - Not LIVE anymore → no-op (someone else finalized it).
+ * - LIVE + empty transcript → deleted (abandoned ghost session).
+ * - LIVE + has transcript → PROCESSING; returns `{ process: true }` so the
+ *   caller runs `processMeeting`.
+ */
+export async function finalizeAbandonedMeeting(
+  meetingId: string
+): Promise<{ process: boolean }> {
+  const meeting = await prisma.meeting.findUnique({
+    where: { id: meetingId },
+    select: {
+      status: true,
+      recordingStarted: true,
+      _count: { select: { transcript: true } },
+    },
+  });
+
+  if (!meeting || meeting.status !== 'LIVE') return { process: false };
+
+  if (meeting._count.transcript === 0) {
+    // Guard on status so we never delete a meeting the /complete path claimed.
+    await prisma.meeting.deleteMany({ where: { id: meetingId, status: 'LIVE' } });
+    return { process: false };
+  }
+
+  const recordingEnded = new Date();
+  const duration = meeting.recordingStarted
+    ? Math.floor((recordingEnded.getTime() - meeting.recordingStarted.getTime()) / 1000)
+    : null;
+
+  const claimed = await prisma.meeting.updateMany({
+    where: { id: meetingId, status: 'LIVE' },
+    data: { status: 'PROCESSING', endTime: recordingEnded, recordingEnded, duration },
+  });
+
+  return { process: claimed.count === 1 };
+}
+
+/**
+ * Attach `speakerCount` (distinct diarized transcript speakers) to meeting rows.
+ * Live/manual recordings never populate MeetingAttendee, so the participant
+ * count falls back to how many distinct speakers Deepgram detected.
+ */
+export async function attachSpeakerCounts<T extends { id: string }>(
+  meetings: T[]
+): Promise<(T & { speakerCount: number })[]> {
+  if (meetings.length === 0) return [];
+  const groups = await prisma.transcriptLine.groupBy({
+    by: ['meetingId', 'speaker'],
+    where: { meetingId: { in: meetings.map((m) => m.id) } },
+  });
+  const counts = new Map<string, number>();
+  for (const g of groups) counts.set(g.meetingId, (counts.get(g.meetingId) ?? 0) + 1);
+  return meetings.map((m) => ({ ...m, speakerCount: counts.get(m.id) ?? 0 }));
+}
+
+/**
  * Add transcript line to meeting
  */
 export async function addTranscriptLine(
@@ -193,7 +258,7 @@ export async function getUserMeetings(
     where.status = options.status;
   }
 
-  return prisma.meeting.findMany({
+  const meetings = await prisma.meeting.findMany({
     where,
     include: {
       attendees: true,
@@ -209,6 +274,7 @@ export async function getUserMeetings(
     take: options.limit || 50,
     skip: options.offset || 0,
   });
+  return attachSpeakerCounts(meetings);
 }
 
 /**
