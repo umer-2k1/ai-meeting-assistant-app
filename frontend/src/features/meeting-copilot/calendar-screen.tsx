@@ -412,10 +412,26 @@ export default function CalendarScreen({
   const [calendarConnected, setCalendarConnected] = useState(false);
   const [calendarEmail, setCalendarEmail] = useState<string | undefined>(undefined);
   const [connecting, setConnecting] = useState(false);
+  // `dateRange` is the *applied* window that actually drives fetching. `draftRange` is the
+  // in-progress calendar selection — editing it (clicking start, then end) does NOT refetch,
+  // so there's no jerk mid-selection. The user commits with the Apply button.
   const [dateRange, setDateRange] = useState<DateRange | undefined>(() => ({
     from: new Date(),
     to: addDays(new Date(), 30),
   }));
+  const [draftRange, setDraftRange] = useState<DateRange | undefined>(dateRange);
+
+  // Prev/next/Today set a complete range in one shot — apply those immediately and keep the
+  // calendar's draft in sync so it reflects the jumped-to window.
+  const applyRange = useCallback((next: DateRange) => {
+    setDraftRange(next);
+    setDateRange(next);
+  }, []);
+
+  const draftReady = Boolean(draftRange?.from && draftRange?.to);
+  const draftDiffersFromApplied =
+    draftRange?.from?.getTime() !== dateRange?.from?.getTime() ||
+    draftRange?.to?.getTime() !== dateRange?.to?.getTime();
 
   const fetchCalendarEvents = useCallback(async () => {
     try {
@@ -652,10 +668,10 @@ export default function CalendarScreen({
             className='size-8 rounded-lg'
             aria-label='Previous week'
             onClick={() =>
-              setDateRange((r) => ({
-                from: addDays(r?.from ?? new Date(), -7),
-                to: addDays(r?.to ?? addDays(new Date(), 30), -7),
-              }))
+              applyRange({
+                from: addDays(dateRange?.from ?? new Date(), -7),
+                to: addDays(dateRange?.to ?? addDays(new Date(), 30), -7),
+              })
             }
           >
             <IconChevronLeft className='size-4' />
@@ -664,7 +680,7 @@ export default function CalendarScreen({
             size='sm'
             variant='secondary'
             className='rounded-lg px-3 text-xs'
-            onClick={() => setDateRange({ from: new Date(), to: addDays(new Date(), 30) })}
+            onClick={() => applyRange({ from: new Date(), to: addDays(new Date(), 30) })}
           >
             Today
           </Button>
@@ -674,10 +690,10 @@ export default function CalendarScreen({
             className='size-8 rounded-lg'
             aria-label='Next week'
             onClick={() =>
-              setDateRange((r) => ({
-                from: addDays(r?.from ?? new Date(), 7),
-                to: addDays(r?.to ?? addDays(new Date(), 30), 7),
-              }))
+              applyRange({
+                from: addDays(dateRange?.from ?? new Date(), 7),
+                to: addDays(dateRange?.to ?? addDays(new Date(), 30), 7),
+              })
             }
           >
             <IconChevronRight className='size-4' />
@@ -689,16 +705,43 @@ export default function CalendarScreen({
         <Calendar
           mode='range'
           numberOfMonths={1}
-          selected={dateRange}
-          onSelect={setDateRange}
-          defaultMonth={dateRange?.from}
+          selected={draftRange}
+          onSelect={setDraftRange}
+          defaultMonth={draftRange?.from}
         />
-        <div className='min-w-[180px] flex-1 space-y-2 text-sm text-muted-foreground'>
+        <div className='flex min-w-[180px] flex-1 flex-col gap-2 text-sm text-muted-foreground'>
           <p className='font-medium text-foreground'>Pick a date range</p>
           <p>
-            Select a start and end date to load meetings from your connected Google
-            Calendar for that window. Use the arrows to jump a week at a time.
+            Select a start and end date, then hit Apply to load meetings from your connected
+            Google Calendar for that window. Use the arrows to jump a week at a time.
           </p>
+          <p className='text-xs text-foreground/80'>
+            {draftRange?.from
+              ? draftRange.to
+                ? `${format(draftRange.from, 'MMM d')} – ${format(draftRange.to, 'MMM d, yyyy')}`
+                : `${format(draftRange.from, 'MMM d, yyyy')} — pick an end date`
+              : 'No dates selected'}
+          </p>
+          <div className='mt-auto flex items-center gap-2 pt-2'>
+            <Button
+              size='sm'
+              className='rounded-full bg-primary/90 text-primary-foreground hover:bg-primary'
+              disabled={!draftReady || !draftDiffersFromApplied || loading}
+              onClick={() => draftRange && setDateRange(draftRange)}
+            >
+              Apply range
+            </Button>
+            {draftDiffersFromApplied && (
+              <Button
+                size='sm'
+                variant='ghost'
+                className='rounded-full text-muted-foreground'
+                onClick={() => setDraftRange(dateRange)}
+              >
+                Reset
+              </Button>
+            )}
+          </div>
         </div>
       </div>
 
