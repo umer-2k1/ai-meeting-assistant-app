@@ -232,7 +232,7 @@ export default function MeetingDetailScreen({
   };
 
   return (
-    <section className='mx-auto flex max-w-4xl min-h-0 flex-1 flex-col gap-5'>
+    <section className='mx-auto flex w-full max-w-4xl min-h-0 min-w-0 flex-1 flex-col gap-5'>
       {/* Header */}
       <div className='shrink-0 space-y-4'>
         <button
