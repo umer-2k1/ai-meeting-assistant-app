@@ -5,7 +5,8 @@ import {
   extractActionItems,
 } from './ai.js';
 import {
-  generateEmbedding,
+  EMBEDDING_MODEL,
+  EMBEDDING_DIMENSION,
   embedTranscriptChunk,
   embedMeetingSummary,
 } from './embeddings.js';
@@ -15,32 +16,44 @@ import {
   storeTranscriptEmbedding,
 } from './vector-store.js';
 
+type MeetingWithTranscript = NonNullable<
+  Awaited<ReturnType<typeof loadMeeting>>
+>;
+
+function loadMeeting(meetingId: string) {
+  return prisma.meeting.findUnique({
+    where: { id: meetingId },
+    include: {
+      transcript: { orderBy: { timestampSeconds: 'asc' } },
+      attendees: true,
+      tags: true,
+    },
+  });
+}
+
 /**
- * Process meeting after recording ends
- * This is the main post-meeting intelligence pipeline
+ * Process meeting after recording ends.
+ *
+ * Critical path: generate the summary + action items and mark COMPLETED. This is
+ * what the user sees and it depends only on the transcript + the summary LLM.
+ *
+ * Vector indexing (Gemini embeddings + Qdrant) is **best-effort**: it powers RAG
+ * chat but a dead Qdrant cluster or a retired embedding model must NOT fail the
+ * meeting. RAG already falls back to the full transcript when vectors are absent.
  */
 export async function processMeeting(meetingId: string) {
   console.log(`[Processing] Starting post-meeting processing for ${meetingId}`);
 
+  let meeting: MeetingWithTranscript;
+  let summaryResult: Awaited<ReturnType<typeof generateMeetingSummary>>;
+
   try {
-    // Ensure Qdrant collections exist
-    await ensureCollections();
-
     // 1. Get meeting with transcript
-    const meeting = await prisma.meeting.findUnique({
-      where: { id: meetingId },
-      include: {
-        transcript: {
-          orderBy: { timestampSeconds: 'asc' },
-        },
-        attendees: true,
-        tags: true,
-      },
-    });
-
-    if (!meeting) {
+    const loaded = await loadMeeting(meetingId);
+    if (!loaded) {
       throw new Error('Meeting not found');
     }
+    meeting = loaded;
 
     // 2. Combine transcript into text
     const transcriptText = meeting.transcript
@@ -48,19 +61,24 @@ export async function processMeeting(meetingId: string) {
       .join('\n\n');
 
     if (!transcriptText) {
-      console.warn('[Processing] No transcript to process');
-      return;
+      console.warn('[Processing] No transcript to process — completing empty meeting');
+      await prisma.meeting.update({
+        where: { id: meetingId },
+        data: { status: 'COMPLETED', processingError: null },
+      });
+      return { success: true, meetingId, summary: '', actionItemsCount: 0 };
     }
 
     // 3. Generate AI summary and extract decisions/risks
     console.log('[Processing] Generating AI summary...');
-    const summaryResult = await generateMeetingSummary(transcriptText);
+    summaryResult = await generateMeetingSummary(transcriptText);
 
     // 4. Extract action items
     console.log('[Processing] Extracting action items...');
     const actionItems = await extractActionItems(transcriptText);
 
-    // 5. Update meeting with AI-generated content
+    // 5. Update meeting with AI-generated content — mark COMPLETED here so the
+    //    user sees the summary regardless of whether vector indexing succeeds.
     await prisma.meeting.update({
       where: { id: meetingId },
       data: {
@@ -88,82 +106,15 @@ export async function processMeeting(meetingId: string) {
       });
     }
 
-    // 7. Generate and store meeting embedding
-    console.log('[Processing] Generating meeting embedding...');
-    const meetingEmbedding = await embedMeetingSummary({
-      title: meeting.title,
-      summary: summaryResult.summary,
-      keyPoints: summaryResult.keyPoints,
-      decisions: summaryResult.decisions,
-    });
-
-    const meetingPointId = await storeMeetingEmbedding(meetingId, meetingEmbedding, {
-      userId: meeting.userId,
-      title: meeting.title,
-      summary: summaryResult.summary,
-      startTime: meeting.startTime,
-      tags: meeting.tags.map((t) => t.name),
-    });
-
-    await prisma.meeting
-      .update({ where: { id: meetingId }, data: { embeddingId: meetingPointId } })
-      .catch(() => {});
-
-    // 8. Generate and store transcript embeddings (batch process in chunks)
-    console.log('[Processing] Generating transcript embeddings...');
-    const BATCH_SIZE = 10;
-    for (let i = 0; i < meeting.transcript.length; i += BATCH_SIZE) {
-      const batch = meeting.transcript.slice(i, i + BATCH_SIZE);
-
-      await Promise.all(
-        batch.map(async (line) => {
-          const embedding = await embedTranscriptChunk({
-            speaker: line.speaker,
-            text: line.text,
-            timestamp: line.timestamp,
-          });
-
-          const pointId = await storeTranscriptEmbedding(line.id, embedding, {
-            meetingId,
-            speaker: line.speaker,
-            text: line.text,
-            timestamp: line.timestamp,
-          });
-
-          await prisma.transcriptLine
-            .update({ where: { id: line.id }, data: { embeddingId: pointId } })
-            .catch(() => {});
-
-          // Store embedding reference in database
-          await prisma.vectorEmbedding.create({
-            data: {
-              entityType: 'transcript_line',
-              entityId: line.id,
-              qdrantId: pointId,
-              collectionName: 'transcripts',
-              model: 'gemini',
-              dimension: 768,
-            },
-          });
-        })
-      );
-
-      console.log(`[Processing] Processed ${i + batch.length}/${meeting.transcript.length} transcript lines`);
-    }
-
-    // 9. Store meeting embedding reference
-    await prisma.vectorEmbedding.create({
-      data: {
-        entityType: 'meeting',
-        entityId: meetingId,
-        qdrantId: meetingPointId,
-        collectionName: 'meetings',
-        model: 'gemini',
-        dimension: 768,
-      },
-    });
-
     console.log(`[Processing] Successfully completed processing for ${meetingId}`);
+
+    // 7. Best-effort vector indexing — never fails the meeting.
+    await indexMeetingVectors(meeting, summaryResult).catch((error) => {
+      console.warn(
+        '[Processing] Vector indexing skipped (best-effort):',
+        error instanceof Error ? error.message : error
+      );
+    });
 
     return {
       success: true,
@@ -174,7 +125,8 @@ export async function processMeeting(meetingId: string) {
   } catch (error) {
     console.error('[Processing] Error:', error);
 
-    // Mark meeting as FAILED and record the error so the UI can surface it.
+    // Only summary/action-item/DB failures reach here — genuine failures worth
+    // surfacing. Vector/embedding problems are handled above and never land here.
     await prisma.meeting.update({
       where: { id: meetingId },
       data: {
@@ -185,6 +137,102 @@ export async function processMeeting(meetingId: string) {
     }).catch(() => {});
 
     throw error;
+  }
+}
+
+/**
+ * Generate + store embeddings for the meeting and its transcript lines.
+ * Best-effort: throwing here only skips RAG indexing; the meeting stays COMPLETED.
+ * Individual transcript-line failures are swallowed so one bad line doesn't abort
+ * the rest.
+ */
+async function indexMeetingVectors(
+  meeting: MeetingWithTranscript,
+  summaryResult: Awaited<ReturnType<typeof generateMeetingSummary>>
+) {
+  await ensureCollections();
+
+  // Meeting-level embedding.
+  console.log('[Processing] Generating meeting embedding...');
+  const meetingEmbedding = await embedMeetingSummary({
+    title: meeting.title,
+    summary: summaryResult.summary,
+    keyPoints: summaryResult.keyPoints,
+    decisions: summaryResult.decisions,
+  });
+
+  const meetingPointId = await storeMeetingEmbedding(meeting.id, meetingEmbedding, {
+    userId: meeting.userId,
+    title: meeting.title,
+    summary: summaryResult.summary,
+    startTime: meeting.startTime,
+    tags: meeting.tags.map((t) => t.name),
+  });
+
+  await prisma.meeting
+    .update({ where: { id: meeting.id }, data: { embeddingId: meetingPointId } })
+    .catch(() => {});
+
+  await prisma.vectorEmbedding
+    .create({
+      data: {
+        entityType: 'meeting',
+        entityId: meeting.id,
+        qdrantId: meetingPointId,
+        collectionName: 'meetings',
+        model: EMBEDDING_MODEL,
+        dimension: EMBEDDING_DIMENSION,
+      },
+    })
+    .catch(() => {});
+
+  // Transcript-line embeddings, in chunks. A failure on one line is logged and
+  // skipped rather than aborting the batch.
+  console.log('[Processing] Generating transcript embeddings...');
+  const BATCH_SIZE = 10;
+  for (let i = 0; i < meeting.transcript.length; i += BATCH_SIZE) {
+    const batch = meeting.transcript.slice(i, i + BATCH_SIZE);
+
+    await Promise.all(
+      batch.map(async (line) => {
+        try {
+          const embedding = await embedTranscriptChunk({
+            speaker: line.speaker,
+            text: line.text,
+            timestamp: line.timestamp,
+          });
+
+          const pointId = await storeTranscriptEmbedding(line.id, embedding, {
+            meetingId: meeting.id,
+            speaker: line.speaker,
+            text: line.text,
+            timestamp: line.timestamp,
+          });
+
+          await prisma.transcriptLine
+            .update({ where: { id: line.id }, data: { embeddingId: pointId } })
+            .catch(() => {});
+
+          await prisma.vectorEmbedding.create({
+            data: {
+              entityType: 'transcript_line',
+              entityId: line.id,
+              qdrantId: pointId,
+              collectionName: 'transcripts',
+              model: EMBEDDING_MODEL,
+              dimension: EMBEDDING_DIMENSION,
+            },
+          });
+        } catch (error) {
+          console.warn(
+            `[Processing] Skipped embedding for transcript line ${line.id}:`,
+            error instanceof Error ? error.message : error
+          );
+        }
+      })
+    );
+
+    console.log(`[Processing] Processed ${i + batch.length}/${meeting.transcript.length} transcript lines`);
   }
 }
 

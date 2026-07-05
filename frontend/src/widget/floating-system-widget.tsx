@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   IconAdjustmentsHorizontal,
@@ -15,6 +15,7 @@ import { askMeetingQuestion } from '@/features/meeting-copilot/api';
 import { fetchMeetings } from '@/features/meeting-copilot/meetings-api';
 import type { Meeting } from '@/features/meeting-copilot/types';
 import { cn } from '@/lib/utils';
+import type { TranscriptLine } from '@/features/meeting-copilot/types';
 import { BrandMark } from '@/components/brand/brand-mark';
 
 import { useWidgetThemeSync } from './use-widget-theme-sync';
@@ -64,6 +65,9 @@ export default function FloatingSystemWidget() {
   const [askAnswer, setAskAnswer] = useState<string | null>(null);
   const [isAsking, setIsAsking] = useState(false);
   const [meeting, setMeeting] = useState<Meeting | null>(null);
+  const [transcript, setTranscript] = useState<TranscriptLine[]>([]);
+  const [interimLine, setInterimLine] = useState<TranscriptLine | null>(null);
+  const transcriptEndRef = useRef<HTMLDivElement | null>(null);
 
   // Load the most recent meeting for the highlights panel + Ask AI context.
   useEffect(() => {
@@ -101,11 +105,41 @@ export default function FloatingSystemWidget() {
         setExpanded(false);
         setShowHighlights(false);
         setAskAnswer(null);
+        setTranscript([]);
+        setInterimLine(null);
       }
     });
 
     return unsubscribe;
   }, []);
+
+  // Live transcript mirrored from the capturing window (main app) over IPC.
+  useEffect(() => {
+    const desktopApi = globalThis.window.desktop;
+    if (!desktopApi) return;
+
+    return desktopApi.recording.onTranscript((line) => {
+      const uiLine: TranscriptLine = {
+        id: line.id,
+        speaker: line.speaker,
+        text: line.text,
+        timestamp: line.timestamp,
+      };
+      if (line.isFinal) {
+        setInterimLine(null);
+        setTranscript((cur) =>
+          cur.some((l) => l.id === uiLine.id) ? cur : [...cur, uiLine]
+        );
+      } else {
+        setInterimLine(uiLine);
+      }
+    });
+  }, []);
+
+  // Keep the newest line in view as the transcript grows.
+  useEffect(() => {
+    transcriptEndRef.current?.scrollIntoView({ block: 'end' });
+  }, [transcript, interimLine, expanded]);
 
   useEffect(() => {
     const desktopApi = globalThis.window.desktop;
@@ -275,6 +309,33 @@ export default function FloatingSystemWidget() {
         </div>
 
         <div className='widget-no-drag min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4'>
+          {(transcript.length > 0 || interimLine || isLive) && (
+            <div className='widget-surface-muted rounded-xl border p-3'>
+              <p className='widget-text-muted mb-2 text-[11px] font-semibold tracking-[0.12em] uppercase'>
+                Live Transcript
+              </p>
+              {transcript.length === 0 && !interimLine ? (
+                <p className='text-sm text-muted-foreground'>Listening…</p>
+              ) : (
+                <div className='space-y-1.5 text-sm text-foreground/90'>
+                  {transcript.map((line) => (
+                    <p key={line.id}>
+                      <span className='font-medium text-primary'>{line.speaker}: </span>
+                      {line.text}
+                    </p>
+                  ))}
+                  {interimLine && (
+                    <p className='text-foreground/60'>
+                      <span className='font-medium text-primary/70'>{interimLine.speaker}: </span>
+                      {interimLine.text}
+                    </p>
+                  )}
+                </div>
+              )}
+              <div ref={transcriptEndRef} />
+            </div>
+          )}
+
           <div className='widget-surface-muted rounded-xl border p-3'>
             <p className='text-sm'>Want to see last meeting highlights?</p>
             <button

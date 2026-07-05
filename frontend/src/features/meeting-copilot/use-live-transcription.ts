@@ -144,6 +144,14 @@ export function useLiveTranscription(): UseLiveTranscription {
               text: msg.line.text,
               timestamp: msg.line.timestamp,
             };
+            // Mirror the line to the floating widget (desktop only; no-op on web).
+            globalThis.window.desktop?.recording.pushTranscript({
+              id: line.id,
+              speaker: line.speaker,
+              text: line.text,
+              timestamp: line.timestamp,
+              isFinal: Boolean(msg.isFinal),
+            });
             if (msg.isFinal) {
               setInterimLine(null);
               setTranscript((cur) =>

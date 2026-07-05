@@ -23,6 +23,53 @@ export async function createMeeting(data: {
 }
 
 /**
+ * Resolve LIVE meetings orphaned by an abandoned session or a crash.
+ *
+ * A meeting is created as LIVE the moment "New Recording" is clicked and only
+ * leaves LIVE when the user stops it. If the app is closed (or the stop never
+ * fires) the row stays LIVE forever, cluttering the dashboard with ghost
+ * sessions. After a server restart nothing can still be recording, so every
+ * remaining LIVE row is stale:
+ *   - empty ones (no transcript) are deleted as junk (relations cascade),
+ *   - ones with transcript are pushed to PROCESSING and returned so the caller
+ *     can finish them (generate a summary) instead of losing the content.
+ *
+ * Returns the ids of non-empty meetings that still need processing.
+ */
+export async function sweepOrphanedLiveMeetings(): Promise<string[]> {
+  const liveMeetings = await prisma.meeting.findMany({
+    where: { status: 'LIVE' },
+    select: { id: true, recordingStarted: true, _count: { select: { transcript: true } } },
+  });
+
+  const toProcess: string[] = [];
+
+  for (const meeting of liveMeetings) {
+    if (meeting._count.transcript === 0) {
+      await prisma.meeting.delete({ where: { id: meeting.id } }).catch(() => {});
+      continue;
+    }
+
+    await prisma.meeting
+      .update({
+        where: { id: meeting.id },
+        data: { status: 'PROCESSING', recordingEnded: new Date() },
+      })
+      .catch(() => {});
+    toProcess.push(meeting.id);
+  }
+
+  if (liveMeetings.length > 0) {
+    console.log(
+      `[startup] Swept ${liveMeetings.length} orphaned LIVE meeting(s): ` +
+        `${liveMeetings.length - toProcess.length} empty deleted, ${toProcess.length} queued for processing`
+    );
+  }
+
+  return toProcess;
+}
+
+/**
  * Add transcript line to meeting
  */
 export async function addTranscriptLine(

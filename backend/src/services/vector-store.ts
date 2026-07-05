@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { QdrantClient } from '@qdrant/js-client-rest';
+import { EMBEDDING_DIMENSION } from './embeddings.js';
 
 const QDRANT_URL = process.env.QDRANT_URL || 'http://localhost:6333';
 const QDRANT_API_KEY = process.env.QDRANT_API_KEY;
@@ -36,7 +37,7 @@ export async function ensureCollections() {
     if (!meetingsExists) {
       await client.createCollection(COLLECTIONS.MEETINGS, {
         vectors: {
-          size: 768, // Gemini embedding dimension
+          size: EMBEDDING_DIMENSION, // Gemini embedding dimension
           distance: 'Cosine',
         },
       });
@@ -47,7 +48,7 @@ export async function ensureCollections() {
     if (!transcriptsExists) {
       await client.createCollection(COLLECTIONS.TRANSCRIPTS, {
         vectors: {
-          size: 768,
+          size: EMBEDDING_DIMENSION,
           distance: 'Cosine',
         },
       });

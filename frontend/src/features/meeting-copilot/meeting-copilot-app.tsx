@@ -457,6 +457,7 @@ function LiveScreen({
   isRecording,
   isPaused,
   transcript,
+  interimLine,
   askInput,
   setAskInput,
   onAskAi,
@@ -470,6 +471,7 @@ function LiveScreen({
   isRecording: boolean;
   isPaused: boolean;
   transcript: TranscriptLine[];
+  interimLine: TranscriptLine | null;
   askInput: string;
   setAskInput: (value: string) => void;
   onAskAi: (question?: string) => Promise<void>;
@@ -527,6 +529,11 @@ function LiveScreen({
             Live Transcript
           </p>
           <div aria-live='polite' className='max-h-[420px] space-y-3 overflow-y-auto pr-2'>
+            {transcript.length === 0 && !interimLine && (
+              <p className='text-sm text-muted-foreground'>
+                {isRecording ? 'Listening…' : 'Transcript will appear here once recording starts.'}
+              </p>
+            )}
             {transcript.map((line) => (
               <div
                 key={line.id}
@@ -542,6 +549,20 @@ function LiveScreen({
                 <p className='text-sm text-foreground/85'>{line.text}</p>
               </div>
             ))}
+            {/* Volatile tail: the line Deepgram is still revising. Greyed and
+                append-only in feel, it firms up into a committed card on final —
+                the Otter-style stable/volatile split, so text never flickers. */}
+            {interimLine && (
+              <div className={cn('rounded-lg border border-dashed p-3', COPILOT_INNER_PANEL)}>
+                <p className='mb-1 text-xs font-medium text-muted-foreground'>
+                  [{interimLine.timestamp}] {interimLine.speaker}
+                </p>
+                <p className='text-sm text-foreground/50'>
+                  {interimLine.text}
+                  <span className='ml-1 inline-block animate-pulse text-primary'>▍</span>
+                </p>
+              </div>
+            )}
           </div>
           <form
             className='space-y-2'
@@ -1090,7 +1111,8 @@ export default function MeetingCopilotApp() {
                 elapsedSeconds={elapsedSeconds}
                 isRecording={isRecording}
                 isPaused={isRecordingPaused}
-                transcript={interimLine ? [...liveTranscript, interimLine] : liveTranscript}
+                transcript={liveTranscript}
+                interimLine={interimLine}
                 askInput={askInput}
                 setAskInput={setAskInput}
                 onAskAi={askAi}

@@ -22,6 +22,8 @@ import {
 import { validateEnvOrExit } from './lib/validate-env.js';
 import prisma from './lib/prisma.js';
 import { answerWithTools } from './services/ai-agent.js';
+import { sweepOrphanedLiveMeetings } from './services/meeting.js';
+import { processMeeting } from './services/processing.js';
 import { authorizeStreamUpgrade, WS_SUBPROTOCOL } from './lib/ws-auth.js';
 import {
   createLiveTranscriptionSession,
@@ -242,6 +244,20 @@ async function startServer() {
     console.error('[startup] Failed to connect to database:', error);
     console.error('[startup] Run `npm run db:migrate` (or `db:push`) to create the SQLite database.');
     process.exit(1);
+  }
+
+  // Clean up LIVE meetings orphaned by a crash or an abandoned session (nothing
+  // can still be recording after a restart). Empty ones are deleted; ones with
+  // transcript are finished off in the background.
+  try {
+    const orphaned = await sweepOrphanedLiveMeetings();
+    for (const meetingId of orphaned) {
+      void processMeeting(meetingId).catch((error) => {
+        console.error(`[startup] Failed to finish orphaned meeting ${meetingId}:`, error);
+      });
+    }
+  } catch (error) {
+    console.error('[startup] Orphaned-meeting sweep failed:', error);
   }
 
   const server = http.createServer(app);

@@ -37,7 +37,8 @@ contextBridge.exposeInMainWorld('desktop', {
     stop: () => ipcRenderer.invoke('desktop:recording:stop'),
     getStatus: () => ipcRenderer.invoke('desktop:recording:status'),
     onStateChange: (callback) => registerListener('recording:state', callback),
-    onTranscript: (callback) => registerListener('recording:transcript', callback)
+    onTranscript: (callback) => registerListener('recording:transcript', callback),
+    pushTranscript: (line) => ipcRenderer.send('desktop:recording:push-transcript', line)
   },
   theme: {
     broadcast: (preference) => ipcRenderer.invoke('desktop:theme:broadcast', preference),

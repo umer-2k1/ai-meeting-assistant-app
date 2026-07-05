@@ -714,6 +714,17 @@ function registerIpcHandlers() {
   ipcMain.handle('desktop:recording:stop', () => stopRecording());
   ipcMain.handle('desktop:recording:status', () => ({ ...recordingState }));
 
+  // Live transcript relay: the capturing window (main app) owns the Deepgram WS
+  // stream; forward each line to the floating widget so it can show the transcript
+  // too. Fire-and-forget (ipcRenderer.send) — the widget subscribes via
+  // recording.onTranscript. Ignored when the widget isn't open.
+  ipcMain.on('desktop:recording:push-transcript', (_event, line) => {
+    if (!line || !recordingState.isRecording) return;
+    if (widgetWindow && !widgetWindow.isDestroyed()) {
+      widgetWindow.webContents.send('recording:transcript', line);
+    }
+  });
+
   ipcMain.handle('desktop:widget:set-expanded', (_event, expanded) => {
     resizeWidgetWindow(Boolean(expanded));
     return {
