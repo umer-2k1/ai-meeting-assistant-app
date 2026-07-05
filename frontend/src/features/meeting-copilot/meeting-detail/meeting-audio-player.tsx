@@ -218,7 +218,9 @@ export default function MeetingAudioPlayer({
         type='button'
         size='sm'
         variant='outline'
-        className='shrink-0 rounded-full px-2.5 text-xs tabular-nums'
+        // Fixed width + centered so "0.75x"/"1.25x" never reflow the slider.
+        className='w-14 shrink-0 justify-center rounded-full px-0 text-xs tabular-nums'
+        aria-label={`Playback speed ${playbackRate}x`}
         onClick={() => setRateIndex((i) => (i + 1) % PLAYBACK_RATES.length)}
       >
         {playbackRate}x

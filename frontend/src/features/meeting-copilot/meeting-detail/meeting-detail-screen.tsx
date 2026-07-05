@@ -60,10 +60,24 @@ function priorityVariant(priority: 'high' | 'medium' | 'low') {
 function buildSummaryHtml(meeting: Meeting): string {
   if (meeting.summaryHtml) return meeting.summaryHtml;
 
-  const decisions =
-    meeting.decisions.length > 0
-      ? `<ul>${meeting.decisions.map((d) => `<li>${d}</li>`).join('')}</ul>`
+  const section = (title: string, body: string) => (body ? `<h3>${title}</h3>${body}` : '');
+  const list = (items: string[]) =>
+    items.length > 0 ? `<ul>${items.map((i) => `<li>${i}</li>`).join('')}</ul>` : '';
+
+  const decisions = list(meeting.decisions);
+  const actions =
+    meeting.actionItems.length > 0
+      ? `<ul>${meeting.actionItems
+          .map(
+            (a) =>
+              `<li><strong>@${a.assignee}</strong> — ${a.task}${a.due ? ` <em>(due ${a.due})</em>` : ''}</li>`
+          )
+          .join('')}</ul>`
       : '';
+
+  const summaryBody = meeting.aiSummary
+    ? `<p>${meeting.aiSummary}</p>`
+    : '<p><em>No summary generated yet. Re-analyse this meeting to produce one.</em></p>';
 
   return `
     <div class="editor-callout">
@@ -71,8 +85,9 @@ function buildSummaryHtml(meeting: Meeting): string {
       <p><em>AI-generated summary — edit formatting in the rich summary field on the meeting record.</em></p>
     </div>
     <h2>Executive summary</h2>
-    <p>${meeting.aiSummary}</p>
-    ${decisions ? `<h3>Key decisions</h3>${decisions}` : ''}
+    ${summaryBody}
+    ${section('Key decisions', decisions)}
+    ${section('Action items', actions)}
   `;
 }
 
@@ -80,6 +95,35 @@ function transcriptToPlainText(m: Meeting): string {
   return m.transcript
     .map((line) => `[${line.timestamp}] ${line.speaker}\n${line.text}`)
     .join('\n\n');
+}
+
+/**
+ * Copy text with a resilient fallback. The async clipboard API rejects in some
+ * Electron/insecure contexts; fall back to a hidden textarea + execCommand so a
+ * copy never silently no-ops (which read as "the button does nothing").
+ */
+async function copyTextToClipboard(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    /* fall through to legacy path */
+  }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    return ok;
+  } catch {
+    return false;
+  }
 }
 
 type MeetingDetailScreenProps = {
@@ -95,9 +139,11 @@ type MeetingDetailScreenProps = {
   onReprocess: () => void;
 };
 
-/** Shared by tab panes that fill the card and scroll internally */
+/** Shared by tab panes that fill the card and scroll internally. The stable
+ *  scrollbar gutter keeps every tab the exact same width whether or not its
+ *  content overflows — no reflow/jump when switching tabs. */
 const TAB_PANE =
-  'mt-0 flex min-h-0 flex-1 flex-col outline-none data-[state=inactive]:hidden';
+  'mt-0 flex min-h-0 flex-1 flex-col outline-none data-[state=inactive]:hidden [scrollbar-gutter:stable]';
 
 export default function MeetingDetailScreen({
   meeting,
@@ -135,8 +181,11 @@ export default function MeetingDetailScreen({
 
   const copyLink = async () => {
     const url = `${window.location.origin}/meetings/${meeting.id}`;
-    await navigator.clipboard.writeText(url);
-    toast.success('Link copied to clipboard');
+    if (await copyTextToClipboard(url)) {
+      toast.success('Link copied to clipboard');
+    } else {
+      toast.error('Could not copy link');
+    }
   };
 
   const saveNotes = async () => {
@@ -339,7 +388,12 @@ export default function MeetingDetailScreen({
       </div>
 
       {/* Export destinations */}
-      <MeetingExportBar meetingId={meeting.id} meetingTitle={meeting.title} className='shrink-0' />
+      <MeetingExportBar
+        meetingId={meeting.id}
+        meetingTitle={meeting.title}
+        audioUrl={meeting.audioUrl}
+        className='shrink-0'
+      />
 
       {/* Tabs */}
       <Card className={cn(COPILOT_SURFACE, 'flex min-h-0 flex-1 flex-col')}>
@@ -456,8 +510,11 @@ export default function MeetingDetailScreen({
                       variant='outline'
                       className={cn('h-8 rounded-full text-xs', COPILOT_BTN_OUTLINE)}
                       onClick={async () => {
-                        await navigator.clipboard.writeText(transcriptToPlainText(meeting));
-                        toast.success('Transcript copied');
+                        if (await copyTextToClipboard(transcriptToPlainText(meeting))) {
+                          toast.success('Transcript copied');
+                        } else {
+                          toast.error('Could not copy transcript');
+                        }
                       }}
                     >
                       <IconCopy className='mr-1 size-3.5' />
@@ -468,7 +525,7 @@ export default function MeetingDetailScreen({
 
                 <div className='h-0.5 w-full shrink-0 bg-primary/35' aria-hidden />
 
-                <div className='max-h-[60vh] min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-3'>
+                <div className='min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-3 [scrollbar-gutter:stable]'>
                   {meeting.transcript.length === 0 ? (
                     <p className='text-sm text-muted-foreground'>No transcript lines yet.</p>
                   ) : (

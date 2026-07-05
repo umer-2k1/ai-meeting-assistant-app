@@ -47,18 +47,21 @@ export async function generateMeetingSummary(
 
   const lengthHint =
     options?.length === 'brief'
-      ? 'a very short 1-2 sentence executive summary'
+      ? 'a tight 2-3 sentence executive summary capturing the essence of the meeting'
       : options?.length === 'detailed'
-        ? 'a thorough executive summary of one short paragraph'
-        : 'a concise 2-3 sentence executive summary';
+        ? 'a comprehensive executive summary of 3-4 full paragraphs that walks through the context, the main topics discussed in the order they came up, the reasoning behind conclusions, and where things were left — written so someone who missed the meeting fully understands what happened'
+        : 'a substantive executive summary of 1-2 full paragraphs covering the purpose, the main topics, and the outcomes';
+
+  const pointCount = options?.length === 'brief' ? '3-4' : '5-8';
 
   const prompt = ChatPromptTemplate.fromTemplate(`
-You are an AI meeting assistant. Analyze the following meeting transcript and provide:
+You are an expert AI meeting assistant. Read the meeting transcript carefully and produce a rich, accurate briefing. Never invent facts not present in the transcript. Write in clear, professional prose.
 
-1. {lengthHint}
-2. Key discussion points (3-5 bullet points)
-3. Decisions made (list all explicit decisions)
-4. Risks or blockers identified (if any)
+Produce:
+1. summary: {lengthHint}.
+2. keyPoints: {pointCount} specific, self-contained bullet points covering the substantive discussion — topics, arguments, data mentioned, agreements, and open questions. Each bullet is a full, informative sentence, not a fragment.
+3. decisions: every explicit decision or commitment made (empty array if none).
+4. risks: risks, blockers, concerns, or dependencies raised (empty array if none).
 
 Transcript:
 {transcript}
@@ -74,10 +77,51 @@ Respond ONLY with a JSON object of this exact shape:
 
   const chain = prompt.pipe(llm).pipe(new StringOutputParser());
   return invokeJson(
-    () => chain.invoke({ transcript, lengthHint }),
+    () => chain.invoke({ transcript, lengthHint, pointCount }),
     summarySchema,
     'meeting summary'
   );
+}
+
+/**
+ * Assemble a rich HTML summary (Tiptap-compatible) from the structured summary
+ * result. Rendered directly in the Summary tab so it shows everything — exec
+ * summary, key points, decisions, risks — not just a bare paragraph.
+ */
+export function renderSummaryHtml(result: {
+  summary: string;
+  keyPoints?: string[];
+  decisions?: string[];
+  risks?: string[];
+}): string {
+  const esc = (s: string) =>
+    s
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  const list = (items?: string[]) =>
+    items && items.length > 0
+      ? `<ul>${items.map((i) => `<li>${esc(i)}</li>`).join('')}</ul>`
+      : '';
+  const section = (title: string, body: string) =>
+    body ? `<h3>${title}</h3>${body}` : '';
+
+  const summaryParas = result.summary
+    .split(/\n{2,}/)
+    .map((p) => p.trim())
+    .filter(Boolean)
+    .map((p) => `<p>${esc(p)}</p>`)
+    .join('');
+
+  return [
+    '<h2>Executive summary</h2>',
+    summaryParas || `<p>${esc(result.summary)}</p>`,
+    section('Key points', list(result.keyPoints)),
+    section('Key decisions', list(result.decisions)),
+    section('Risks &amp; blockers', list(result.risks)),
+  ]
+    .filter(Boolean)
+    .join('\n');
 }
 
 /**

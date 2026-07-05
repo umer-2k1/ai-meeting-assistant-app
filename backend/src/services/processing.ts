@@ -5,6 +5,7 @@ import {
   generateMeetingSummary,
   extractActionItems,
   generateMeetingTitleAndTags,
+  renderSummaryHtml,
 } from './ai.js';
 import {
   EMBEDDING_MODEL,
@@ -96,6 +97,7 @@ export async function processMeeting(meetingId: string) {
       where: { id: meetingId },
       data: {
         aiSummary: summaryResult.summary,
+        summaryHtml: renderSummaryHtml(summaryResult),
         keyDecisions: serializeStringList(summaryResult.decisions),
         risks: serializeStringList(summaryResult.risks),
         highlights: serializeStringList(summaryResult.keyPoints),

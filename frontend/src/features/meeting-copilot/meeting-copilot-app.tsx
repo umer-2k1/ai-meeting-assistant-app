@@ -909,6 +909,17 @@ export default function MeetingCopilotApp() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      // Never hijack keys while the user is typing in a field — otherwise the
+      // Space shortcut below pauses the recording on every space you type into
+      // the Ask box (and Cmd+N/K collide with text). Bail on inputs, textareas,
+      // selects, and any contenteditable region.
+      const target = event.target as HTMLElement | null;
+      const isTyping =
+        !!target &&
+        (target.isContentEditable ||
+          ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName));
+      if (isTyping) return;
+
       const withCommand = event.metaKey || event.ctrlKey;
 
       if (withCommand && event.key.toLowerCase() === 'n') {
