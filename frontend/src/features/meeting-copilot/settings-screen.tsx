@@ -488,8 +488,13 @@ function IntegrationsTab() {
         setConnecting((prev) => ({ ...prev, [integrationId]: false }));
       }
     } else {
-      // Slack not yet implemented
-      alert('Slack integration coming soon!');
+      // Slack is an app-level (bot-token) integration configured on the server,
+      // not a per-user OAuth connect.
+      alert(
+        connected.slack
+          ? 'Slack is connected. Use the Share button on a meeting to post its report to a channel.'
+          : 'To enable Slack, add SLACK_BOT_TOKEN to the backend environment and restart the server.'
+      );
     }
   };
 

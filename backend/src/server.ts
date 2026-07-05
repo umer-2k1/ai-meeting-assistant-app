@@ -1,13 +1,18 @@
 import './load-env.js';
+import http from 'node:http';
 import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import session from 'express-session';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
+import { WebSocketServer, type WebSocket } from 'ws';
 import passport from './lib/passport.js';
 import authRoutes from './routes/auth.js';
 import meetingsRoutes from './routes/meetings.js';
 import liveRoutes from './routes/live.js';
 import integrationsRoutes from './routes/integrations.js';
+import intelligenceRoutes from './routes/intelligence.js';
 import { requireAuth } from './middleware/auth.js';
 import {
   getAuthConfigIssues,
@@ -17,6 +22,11 @@ import {
 import { validateEnvOrExit } from './lib/validate-env.js';
 import prisma from './lib/prisma.js';
 import { answerWithTools } from './services/ai-agent.js';
+import { authorizeStreamUpgrade, WS_SUBPROTOCOL } from './lib/ws-auth.js';
+import {
+  createLiveTranscriptionSession,
+  type TranscriptMessage,
+} from './services/live-transcription.js';
 
 // Fail fast if required credentials are missing (before anything else runs).
 validateEnvOrExit();
@@ -28,6 +38,10 @@ const port = Number(process.env.PORT ?? 3001);
 // Middleware
 // ========================================
 
+// Security headers. crossOriginResourcePolicy relaxed so the SPA (different
+// origin/port in dev) can consume API responses and downloads.
+app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
+
 app.use(
   cors({
     origin: process.env.FRONTEND_URL || 'http://localhost:3000',
@@ -35,7 +49,18 @@ app.use(
   })
 );
 
-app.use(express.json());
+// Rate limit the API surface (WS upgrades bypass Express and are unaffected).
+app.use(
+  '/api',
+  rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 600,
+    standardHeaders: true,
+    legacyHeaders: false,
+  })
+);
+
+app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
@@ -90,6 +115,7 @@ app.use('/auth', authRoutes);
 app.use('/api/meetings', meetingsRoutes);
 app.use('/api/live', liveRoutes);
 app.use('/api/integrations', integrationsRoutes);
+app.use('/api/intelligence', intelligenceRoutes);
 
 /**
  * POST /api/ask-meeting
@@ -143,6 +169,59 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
 });
 
 // ========================================
+// Live transcription WebSocket
+// ========================================
+
+function attachLiveTranscriptionWs(server: http.Server) {
+  const wss = new WebSocketServer({
+    noServer: true,
+    // The client offers ["meeting-stream", <jwt>]; select the tag so the
+    // browser accepts the handshake (the jwt is read in ws-auth, not selected).
+    handleProtocols: (protocols) => (protocols.has(WS_SUBPROTOCOL) ? WS_SUBPROTOCOL : false),
+  });
+
+  server.on('upgrade', (request, socket, head) => {
+    // Only handle the live-stream path; ignore other upgrades.
+    void (async () => {
+      const auth = await authorizeStreamUpgrade(request).catch(() => null);
+      if (!auth) {
+        socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+        socket.destroy();
+        return;
+      }
+      wss.handleUpgrade(request, socket, head, (ws) => {
+        wss.emit('connection', ws, request, auth);
+      });
+    })();
+  });
+
+  wss.on('connection', (ws: WebSocket, _request: http.IncomingMessage, auth: { meetingId: string }) => {
+    const emit = (message: TranscriptMessage) => {
+      if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(message));
+    };
+
+    const session = createLiveTranscriptionSession({ meetingId: auth.meetingId, emit });
+
+    ws.on('message', (data: Buffer, isBinary: boolean) => {
+      if (isBinary) {
+        session.sendAudio(data);
+        return;
+      }
+      // JSON control frames (e.g. {"type":"stop"}).
+      try {
+        const msg = JSON.parse(data.toString());
+        if (msg?.type === 'stop') session.close();
+      } catch {
+        /* ignore non-JSON text frames */
+      }
+    });
+
+    ws.on('close', () => session.close());
+    ws.on('error', () => session.close());
+  });
+}
+
+// ========================================
 // Server Start
 // ========================================
 
@@ -165,13 +244,17 @@ async function startServer() {
     process.exit(1);
   }
 
-  const server = app.listen(port);
+  const server = http.createServer(app);
+  attachLiveTranscriptionWs(server);
 
   server.on('listening', () => {
     console.log(`🚀 AI Meeting Copilot Backend running on http://localhost:${port}`);
     console.log(`📊 Health check: http://localhost:${port}/api/health`);
     console.log(`🔐 Auth endpoint: http://localhost:${port}/auth/google`);
+    console.log(`🎙️  Live transcription WS: ws://localhost:${port}/api/live/:meetingId/stream`);
   });
+
+  server.listen(port);
 
   server.on('error', (error: NodeJS.ErrnoException) => {
     if (error.code === 'EADDRINUSE') {

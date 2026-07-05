@@ -15,7 +15,9 @@ const {
 } = require('electron');
 
 const permissions = require('./permissions.cjs');
-const AudioRecordingService = require('./audio-recording-service.cjs');
+// NOTE: Audio capture happens in the renderer (getUserMedia/getDisplayMedia →
+// MediaRecorder → WebSocket → Deepgram). The main process only tracks recording
+// state for the widget/tray/timer. See use-live-transcription.ts.
 
 const APP_NAME = 'AI Meeting Copilot';
 const DESKTOP_PROTOCOL = process.env.DESKTOP_PROTOCOL || 'ai-meeting-copilot';
@@ -25,9 +27,6 @@ const DESKTOP_PROTOCOL = process.env.DESKTOP_PROTOCOL || 'ai-meeting-copilot';
 // CoreAudio Tap gives us "System Audio Recording Only" permission instead of "Screen & System Audio Recording".
 
 const isTestMode = process.env.ELECTRON_TEST_MODE === '1';
-
-// Initialize audio recording service
-const audioService = new AudioRecordingService();
 
 const WIDGET_SIZES = {
   compact: { width: 300, height: 52 },

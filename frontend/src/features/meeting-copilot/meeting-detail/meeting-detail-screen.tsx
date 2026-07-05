@@ -1,14 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import {
   IconBug,
   IconCopy,
-  IconDotsVertical,
   IconInfoCircle,
   IconLink,
-  IconMail,
   IconRefresh,
-  IconShare2,
   IconSparkles,
   IconStar,
   IconStarFilled,
@@ -27,10 +24,28 @@ import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger
+} from '@/components/ui/alert-dialog';
 import { COPILOT_BTN_OUTLINE, COPILOT_INPUT, COPILOT_SURFACE } from '../copilot-styles';
+import {
+  createNoteApi,
+  deleteMeetingApi,
+  reprocessMeetingApi,
+  updateNoteApi
+} from '../meetings-api';
 import type { AiAnswer, Meeting } from '../types';
 import MeetingAudioPlayer from './meeting-audio-player';
 import MeetingExportBar from './meeting-export-bar';
+import MeetingShareDialog from './meeting-share-dialog';
 import { getTagClassName } from './tag-styles';
 
 type View = 'dashboard' | 'live' | 'detail' | 'calendar' | 'device-check' | 'settings';
@@ -75,6 +90,8 @@ type MeetingDetailScreenProps = {
   onAskAi: (question?: string) => Promise<void>;
   isAsking: boolean;
   askError: string | null;
+  onDeleted: () => void;
+  onReprocess: () => void;
 };
 
 /** Shared by tab panes that fill the card and scroll internally */
@@ -89,11 +106,26 @@ export default function MeetingDetailScreen({
   setDetailAskInput,
   onAskAi,
   isAsking,
-  askError
+  askError,
+  onDeleted,
+  onReprocess
 }: MeetingDetailScreenProps) {
   const [isFavorite, setIsFavorite] = useState(meeting.isFavorite ?? false);
   const [myNotes, setMyNotes] = useState(meeting.notes);
+  const [existingNoteId, setExistingNoteId] = useState<string | null>(
+    meeting.meetingNotes?.[0]?.id ?? null
+  );
+  const [isSavingNotes, setIsSavingNotes] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [isReprocessing, setIsReprocessing] = useState(false);
   const [completedActions, setCompletedActions] = useState<Record<string, boolean>>({});
+
+  // Re-sync local editable state when a different meeting is loaded.
+  useEffect(() => {
+    setMyNotes(meeting.notes);
+    setExistingNoteId(meeting.meetingNotes?.[0]?.id ?? null);
+    setIsFavorite(meeting.isFavorite ?? false);
+  }, [meeting.id, meeting.notes, meeting.meetingNotes, meeting.isFavorite]);
 
   const displayDate = meeting.displayDate ?? meeting.startedAt;
   const audioSeconds = meeting.audioDurationSeconds ?? 60;
@@ -106,10 +138,47 @@ export default function MeetingDetailScreen({
     toast.success('Link copied to clipboard');
   };
 
-  const shareMeeting = () => {
-    toast.info('Share dialog', {
-      description: 'Team sharing will connect to backend permissions (see docs/meeting-details.md).'
-    });
+  const saveNotes = async () => {
+    setIsSavingNotes(true);
+    try {
+      if (existingNoteId) {
+        await updateNoteApi(existingNoteId, myNotes);
+      } else {
+        const note = await createNoteApi(meeting.id, myNotes);
+        setExistingNoteId(note.id);
+      }
+      toast.success('Notes saved');
+    } catch {
+      toast.error('Failed to save notes');
+    } finally {
+      setIsSavingNotes(false);
+    }
+  };
+
+  const deleteMeeting = async () => {
+    setIsDeleting(true);
+    try {
+      await deleteMeetingApi(meeting.id);
+      toast.success('Meeting deleted');
+      onDeleted();
+    } catch {
+      toast.error('Failed to delete meeting');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const reprocessMeeting = async () => {
+    setIsReprocessing(true);
+    try {
+      await reprocessMeetingApi(meeting.id);
+      toast.success('Re-analysis started');
+      onReprocess();
+    } catch {
+      toast.error('Failed to start re-analysis');
+    } finally {
+      setIsReprocessing(false);
+    }
   };
 
   return (
@@ -158,19 +227,45 @@ export default function MeetingDetailScreen({
               type='button'
               size='icon'
               variant='ghost'
-              className='size-9 text-destructive hover:text-destructive'
-              aria-label='Delete meeting'
-              onClick={() =>
-                toast.error('Delete meeting', {
-                  description: 'Destructive actions require backend confirmation.'
-                })
-              }
+              className='size-9'
+              aria-label='Re-analyze meeting'
+              disabled={isReprocessing}
+              onClick={() => void reprocessMeeting()}
             >
-              <IconTrash className='size-4' />
+              <IconRefresh className={cn('size-4', isReprocessing && 'animate-spin')} />
             </Button>
-            <Button type='button' size='icon' variant='ghost' className='size-9' aria-label='More options'>
-              <IconDotsVertical className='size-4' />
-            </Button>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button
+                  type='button'
+                  size='icon'
+                  variant='ghost'
+                  className='size-9 text-destructive hover:text-destructive'
+                  aria-label='Delete meeting'
+                  disabled={isDeleting}
+                >
+                  <IconTrash className='size-4' />
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Delete this meeting?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This permanently removes the transcript, summary, action items, and notes for
+                    “{meeting.title}”. This cannot be undone.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction
+                    className='bg-destructive text-white hover:bg-destructive/90'
+                    onClick={() => void deleteMeeting()}
+                  >
+                    Delete
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           </div>
         </div>
 
@@ -192,25 +287,42 @@ export default function MeetingDetailScreen({
         </div>
       </div>
 
+      {/* Processing status */}
+      {meeting.status === 'processing' && (
+        <div className='shrink-0 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300'>
+          Generating summary and action items… this can take a moment. Refresh to see results.
+        </div>
+      )}
+      {meeting.status === 'failed' && (
+        <div className='flex shrink-0 flex-wrap items-center justify-between gap-3 rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-700 dark:text-red-300'>
+          <span>
+            Processing failed{meeting.processingError ? `: ${meeting.processingError}` : '.'}
+          </span>
+          <Button
+            type='button'
+            size='sm'
+            variant='outline'
+            className={cn('rounded-full', COPILOT_BTN_OUTLINE)}
+            disabled={isReprocessing}
+            onClick={() => void reprocessMeeting()}
+          >
+            <IconRefresh className={cn('mr-1 size-3.5', isReprocessing && 'animate-spin')} />
+            Retry
+          </Button>
+        </div>
+      )}
+
       {/* Audio */}
       <MeetingAudioPlayer durationSeconds={audioSeconds} audioUrl={meeting.audioUrl} className='shrink-0' />
 
       {/* Primary actions */}
       <div className='flex shrink-0 flex-wrap gap-2'>
-        <Button
-          type='button'
-          size='sm'
-          variant='outline'
-          className={cn('rounded-full border-emerald-500/50 text-emerald-700 dark:text-emerald-300', COPILOT_BTN_OUTLINE)}
-          onClick={shareMeeting}
-        >
-          <IconShare2 className='mr-1.5 size-3.5' />
-          Share
-        </Button>
-        <Button type='button' size='sm' variant='outline' className={cn('rounded-full', COPILOT_BTN_OUTLINE)}>
-          <IconMail className='mr-1.5 size-3.5' />
-          Email
-        </Button>
+        <MeetingShareDialog
+          meetingId={meeting.id}
+          attendeeEmails={(meeting.attendees ?? [])
+            .map((a) => a.email)
+            .filter((e): e is string => Boolean(e))}
+        />
         <Button
           type='button'
           size='sm'
@@ -219,22 +331,12 @@ export default function MeetingDetailScreen({
           onClick={() => void copyLink()}
         >
           <IconLink className='mr-1.5 size-3.5' />
-          Web Link
-        </Button>
-        <Button
-          type='button'
-          size='sm'
-          variant='outline'
-          className={cn('rounded-full', COPILOT_BTN_OUTLINE)}
-          onClick={() => void copyLink()}
-        >
-          <IconCopy className='mr-1.5 size-3.5' />
-          Copy
+          Copy link
         </Button>
       </div>
 
       {/* Export destinations */}
-      <MeetingExportBar meetingTitle={meeting.title} className='shrink-0' />
+      <MeetingExportBar meetingId={meeting.id} meetingTitle={meeting.title} className='shrink-0' />
 
       {/* Tabs */}
       <Card className={cn(COPILOT_SURFACE, 'flex min-h-0 flex-1 flex-col')}>
@@ -297,6 +399,17 @@ export default function MeetingDetailScreen({
                 minHeight='240px'
                 paneScroll
               />
+              <div className='mt-3 flex justify-end'>
+                <Button
+                  type='button'
+                  size='sm'
+                  className='bg-primary text-primary-foreground hover:bg-primary/90'
+                  disabled={isSavingNotes}
+                  onClick={() => void saveNotes()}
+                >
+                  {isSavingNotes ? 'Saving…' : 'Save notes'}
+                </Button>
+              </div>
             </TabsContent>
 
             <TabsContent value='transcript' className={cn(TAB_PANE, 'overflow-hidden')}>
@@ -314,13 +427,10 @@ export default function MeetingDetailScreen({
                       size='sm'
                       variant='outline'
                       className={cn('h-8 rounded-full text-xs', COPILOT_BTN_OUTLINE)}
-                      onClick={() =>
-                        toast.info('Reanalyse transcript', {
-                          description: 'Will re-run diarization and ASR when the pipeline is connected.'
-                        })
-                      }
+                      disabled={isReprocessing}
+                      onClick={() => void reprocessMeeting()}
                     >
-                      <IconRefresh className='mr-1 size-3.5' />
+                      <IconRefresh className={cn('mr-1 size-3.5', isReprocessing && 'animate-spin')} />
                       Reanalyse
                     </Button>
                     <Button

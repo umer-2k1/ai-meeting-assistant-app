@@ -193,3 +193,138 @@ export function serializeMeetingForApi<
     highlights: asList(meeting.highlights),
   };
 }
+
+/**
+ * Delete a meeting (and, via cascade, its transcript/action items/notes/etc.).
+ * Verifies ownership. Also best-effort removes its vectors from Qdrant.
+ */
+export async function deleteMeeting(meetingId: string, userId: string) {
+  const meeting = await prisma.meeting.findFirst({
+    where: { id: meetingId, userId },
+  });
+  if (!meeting) {
+    throw new Error('Meeting not found or access denied');
+  }
+
+  // Best-effort: remove vectors before deleting the row.
+  try {
+    const { deleteMeetingEmbeddings } = await import('./vector-store.js');
+    await deleteMeetingEmbeddings(meetingId);
+  } catch (error) {
+    console.warn('[deleteMeeting] failed to remove vectors (continuing):', error);
+  }
+
+  await prisma.vectorEmbedding.deleteMany({ where: { entityId: meetingId } });
+  return prisma.meeting.delete({ where: { id: meetingId } });
+}
+
+/**
+ * Search a user's meetings. Uses semantic (Qdrant) search when available and
+ * merges with a SQL title/summary match so results are returned even before any
+ * embeddings exist. Returns full meeting rows (with attendees/tags/counts).
+ */
+export async function searchMeetings(userId: string, query: string, limit = 20) {
+  const q = query.trim();
+  if (!q) {
+    return getUserMeetings(userId, { limit });
+  }
+
+  const orderedIds: string[] = [];
+  const seen = new Set<string>();
+  const push = (id?: string | null) => {
+    if (id && !seen.has(id)) {
+      seen.add(id);
+      orderedIds.push(id);
+    }
+  };
+
+  // 1. Semantic search (best-effort; skipped if Qdrant/Gemini unavailable).
+  try {
+    const { generateEmbedding } = await import('./embeddings.js');
+    const { searchSimilarMeetings } = await import('./vector-store.js');
+    const embedding = await generateEmbedding(q);
+    const results = await searchSimilarMeetings(embedding, userId, limit);
+    for (const r of results) {
+      const payload = r.payload as { meetingId?: string } | undefined;
+      push(payload?.meetingId);
+    }
+  } catch (error) {
+    console.warn('[searchMeetings] semantic search unavailable, using SQL only:', error);
+  }
+
+  // 2. SQL keyword fallback/augmentation on title + summary.
+  const sqlMatches = await prisma.meeting.findMany({
+    where: {
+      userId,
+      OR: [{ title: { contains: q } }, { aiSummary: { contains: q } }],
+    },
+    orderBy: { startTime: 'desc' },
+    take: limit,
+  });
+  for (const m of sqlMatches) push(m.id);
+
+  if (orderedIds.length === 0) return [];
+
+  // 3. Hydrate the ordered ids with full relations, preserving rank order.
+  const meetings = await prisma.meeting.findMany({
+    where: { id: { in: orderedIds }, userId },
+    include: {
+      attendees: true,
+      tags: true,
+      _count: { select: { transcript: true, actionItems: true } },
+    },
+  });
+  const byId = new Map(meetings.map((m) => [m.id, m]));
+  return orderedIds.map((id) => byId.get(id)).filter((m): m is NonNullable<typeof m> => Boolean(m));
+}
+
+// ========================================
+// Meeting Notes
+// ========================================
+
+export async function listNotes(meetingId: string, userId: string) {
+  return prisma.meetingNote.findMany({
+    where: { meetingId, userId },
+    orderBy: { updatedAt: 'desc' },
+  });
+}
+
+export async function createNote(
+  meetingId: string,
+  userId: string,
+  data: { content: string; contentHtml?: string | null }
+) {
+  // Ensure the meeting belongs to the user before attaching a note.
+  const meeting = await prisma.meeting.findFirst({ where: { id: meetingId, userId } });
+  if (!meeting) throw new Error('Meeting not found or access denied');
+
+  return prisma.meetingNote.create({
+    data: {
+      meetingId,
+      userId,
+      content: data.content,
+      contentHtml: data.contentHtml ?? null,
+    },
+  });
+}
+
+export async function updateNote(
+  noteId: string,
+  userId: string,
+  data: { content: string; contentHtml?: string | null }
+) {
+  const note = await prisma.meetingNote.findFirst({ where: { id: noteId, userId } });
+  if (!note) throw new Error('Note not found or access denied');
+
+  return prisma.meetingNote.update({
+    where: { id: noteId },
+    data: { content: data.content, contentHtml: data.contentHtml ?? null },
+  });
+}
+
+export async function deleteNote(noteId: string, userId: string) {
+  const note = await prisma.meetingNote.findFirst({ where: { id: noteId, userId } });
+  if (!note) throw new Error('Note not found or access denied');
+
+  return prisma.meetingNote.delete({ where: { id: noteId } });
+}

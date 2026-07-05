@@ -27,6 +27,14 @@ function App() {
                 </ProtectedRoute>
               }
             />
+            <Route
+              path='/meetings/:meetingId'
+              element={
+                <ProtectedRoute>
+                  <MeetingCopilotApp />
+                </ProtectedRoute>
+              }
+            />
 
             {/* Redirect root to dashboard (will be redirected to login if not authenticated) */}
             <Route path='/' element={<Navigate to='/dashboard' replace />} />

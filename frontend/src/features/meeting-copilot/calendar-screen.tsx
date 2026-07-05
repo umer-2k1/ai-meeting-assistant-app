@@ -11,6 +11,7 @@ import {
   IconMicrophone,
   IconRefresh,
   IconRepeat,
+  IconSparkles,
   IconUsers,
   IconVideo
 } from '@tabler/icons-react';
@@ -138,16 +139,20 @@ function CalendarStat({
   );
 }
 
+type PrepHandler = (ctx: NonNullable<CalendarEvent['prep']>) => void;
+
 function NextMeetingHero({
   event,
   autoRecord,
   onAutoRecordChange,
-  onStartRecording
+  onStartRecording,
+  onPrepare
 }: {
   event: CalendarEvent;
   autoRecord: boolean;
   onAutoRecordChange: (enabled: boolean) => void;
   onStartRecording: () => void;
+  onPrepare?: PrepHandler;
 }) {
   return (
     <article className={cn(COPILOT_HIGHLIGHT_PANEL, 'overflow-hidden p-5')}>
@@ -189,6 +194,17 @@ function NextMeetingHero({
           <IconMicrophone className='mr-1.5 size-4' />
           Start recording
         </Button>
+        {event.prep && onPrepare && (
+          <Button
+            variant='outline'
+            className={cn('rounded-full', COPILOT_BTN_OUTLINE)}
+            size='sm'
+            onClick={() => onPrepare(event.prep!)}
+          >
+            <IconSparkles className='mr-1.5 size-3.5' />
+            Prepare
+          </Button>
+        )}
         <Button variant='outline' className={cn('rounded-full', COPILOT_BTN_OUTLINE)} size='sm'>
           <IconLink className='mr-1.5 size-3.5' />
           Join meeting
@@ -213,12 +229,14 @@ function CalendarEventCard({
   autoRecord,
   onAutoRecordChange,
   onStartRecording,
+  onPrepare,
   isLast
 }: {
   event: CalendarEvent;
   autoRecord: boolean;
   onAutoRecordChange: (enabled: boolean) => void;
   onStartRecording: () => void;
+  onPrepare?: PrepHandler;
   isLast: boolean;
 }) {
   const isVideo =
@@ -294,6 +312,17 @@ function CalendarEventCard({
             <IconMicrophone className='mr-1.5 size-3.5' />
             Record
           </Button>
+          {event.prep && onPrepare && (
+            <Button
+              size='sm'
+              variant='outline'
+              className={cn('rounded-full', COPILOT_BTN_OUTLINE)}
+              onClick={() => onPrepare(event.prep!)}
+            >
+              <IconSparkles className='mr-1.5 size-3.5' />
+              Prepare
+            </Button>
+          )}
           {event.recurring ? (
             <div className='inline-flex items-center gap-2 rounded-full border border-border/70 bg-muted/40 px-3 py-1'>
               <span className='text-xs text-muted-foreground'>Auto-record</span>
@@ -327,6 +356,7 @@ function DayGroup({
   autoRecordById,
   setAutoRecord,
   onStartRecording,
+  onPrepare,
   skipFirstIfHero
 }: {
   label: string;
@@ -334,6 +364,7 @@ function DayGroup({
   autoRecordById: Record<string, boolean>;
   setAutoRecord: (id: string, enabled: boolean) => void;
   onStartRecording: () => void;
+  onPrepare?: PrepHandler;
   skipFirstIfHero?: boolean;
 }) {
   const visible = skipFirstIfHero ? events.slice(1) : events;
@@ -354,6 +385,7 @@ function DayGroup({
               setAutoRecord(event.id, enabled);
             }}
             onStartRecording={onStartRecording}
+            onPrepare={onPrepare}
             isLast={index === visible.length - 1}
           />
         ))}
@@ -364,10 +396,12 @@ function DayGroup({
 
 export default function CalendarScreen({
   onStartRecording,
-  onManageIntegrations
+  onManageIntegrations,
+  onPrepare
 }: {
   onStartRecording: () => void;
   onManageIntegrations?: () => void;
+  onPrepare?: PrepHandler;
 }) {
   const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
   const [loading, setLoading] = useState(true);
@@ -402,7 +436,15 @@ export default function CalendarScreen({
         dayLabel: getDayLabel(new Date(event.startTime)),
         attendees: event.attendees?.length,
         recurring: event.recurring,
-        startsSoon: isStartingSoon(new Date(event.startTime))
+        startsSoon: isStartingSoon(new Date(event.startTime)),
+        prep: {
+          title: event.title,
+          description: event.description,
+          attendees: (event.attendees ?? []).map((a) => ({
+            name: a.name || a.email,
+            email: a.email
+          }))
+        }
       }));
 
       setCalendarEvents(transformedEvents);
@@ -614,6 +656,7 @@ export default function CalendarScreen({
             setAutoRecord(nextEvent.id, enabled);
           }}
           onStartRecording={onStartRecording}
+          onPrepare={onPrepare}
         />
       )}
 
@@ -632,6 +675,7 @@ export default function CalendarScreen({
             autoRecordById={autoRecordById}
             setAutoRecord={setAutoRecord}
             onStartRecording={onStartRecording}
+            onPrepare={onPrepare}
             skipFirstIfHero={todayEvents[0]?.id === nextEvent?.id}
           />
           <DayGroup
@@ -640,6 +684,7 @@ export default function CalendarScreen({
             autoRecordById={autoRecordById}
             setAutoRecord={setAutoRecord}
             onStartRecording={onStartRecording}
+            onPrepare={onPrepare}
           />
         </div>
 

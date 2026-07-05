@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { QdrantClient } from '@qdrant/js-client-rest';
 
 const QDRANT_URL = process.env.QDRANT_URL || 'http://localhost:6333';
@@ -70,14 +71,16 @@ export async function storeMeetingEmbedding(
     startTime: Date;
     tags?: string[];
   }
-) {
+): Promise<string> {
   const client = getQdrantClient();
+  // Qdrant point ids must be UUIDs or unsigned ints (cuids are rejected).
+  const pointId = randomUUID();
 
   try {
     await client.upsert(COLLECTIONS.MEETINGS, {
       points: [
         {
-          id: meetingId,
+          id: pointId,
           vector: embedding,
           payload: {
             meetingId,
@@ -90,6 +93,7 @@ export async function storeMeetingEmbedding(
         },
       ],
     });
+    return pointId;
   } catch (error) {
     console.error('Failed to store meeting embedding:', error);
     throw error;
@@ -108,14 +112,16 @@ export async function storeTranscriptEmbedding(
     text: string;
     timestamp: string;
   }
-) {
+): Promise<string> {
   const client = getQdrantClient();
+  // Qdrant point ids must be UUIDs or unsigned ints (cuids are rejected).
+  const pointId = randomUUID();
 
   try {
     await client.upsert(COLLECTIONS.TRANSCRIPTS, {
       points: [
         {
-          id: transcriptId,
+          id: pointId,
           vector: embedding,
           payload: {
             transcriptId,
@@ -127,6 +133,7 @@ export async function storeTranscriptEmbedding(
         },
       ],
     });
+    return pointId;
   } catch (error) {
     console.error('Failed to store transcript embedding:', error);
     throw error;
@@ -208,9 +215,11 @@ export async function deleteMeetingEmbeddings(meetingId: string) {
   const client = getQdrantClient();
 
   try {
-    // Delete meeting embedding
+    // Delete by payload filter (point ids are UUIDs, not the meeting cuid).
     await client.delete(COLLECTIONS.MEETINGS, {
-      points: [meetingId],
+      filter: {
+        must: [{ key: 'meetingId', match: { value: meetingId } }],
+      },
     });
 
     // Delete all transcript embeddings for this meeting

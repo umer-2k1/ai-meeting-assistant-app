@@ -8,7 +8,7 @@ import {
 } from '../services/meeting.js';
 import { answerMeetingQuestionStream } from '../services/ai-stream.js';
 import { searchTranscripts, generateEmbedding } from '../services/embeddings.js';
-import { storeTranscriptEmbedding } from '../services/vector-store.js';
+import { embedTranscriptLineInBackground } from '../services/transcript-embedding.js';
 import { getRouteParam } from '../lib/params.js';
 
 const router = express.Router();
@@ -65,38 +65,14 @@ router.post('/meetings/:id/transcript', requireAuth, async (req, res) => {
 
     const transcriptLine = await addTranscriptLine(meetingId, validated);
 
-    // Generate embedding in background (don't block response)
-    const { embedTranscriptChunk } = await import('../services/embeddings.js');
-    const { default: prisma } = await import('../lib/prisma.js');
-    
-    embedTranscriptChunk({
+    // Generate + store embedding in the background (don't block the response).
+    embedTranscriptLineInBackground({
+      id: transcriptLine.id,
+      meetingId,
       speaker: transcriptLine.speaker,
       text: transcriptLine.text,
       timestamp: transcriptLine.timestamp,
-    })
-      .then((embedding) => {
-        return storeTranscriptEmbedding(transcriptLine.id, embedding, {
-          meetingId,
-          speaker: transcriptLine.speaker,
-          text: transcriptLine.text,
-          timestamp: transcriptLine.timestamp,
-        });
-      })
-      .then(() => {
-        return prisma.vectorEmbedding.create({
-          data: {
-            entityType: 'transcript_line',
-            entityId: transcriptLine.id,
-            qdrantId: transcriptLine.id,
-            collectionName: 'transcripts',
-            model: 'gemini',
-            dimension: 768,
-          },
-        });
-      })
-      .catch((error) => {
-        console.error('Background embedding error:', error);
-      });
+    });
 
     res.json({ transcriptLine });
   } catch (error) {
@@ -130,22 +106,27 @@ router.post('/meetings/:id/ask', requireAuth, async (req, res) => {
         return;
       }
 
-      // Get relevant context using vector search
-      const queryEmbedding = await generateEmbedding(validated.question);
-      const relevantSnippets = await searchTranscripts(queryEmbedding, meetingId, 5);
-
       type TranscriptPayload = {
         timestamp?: string;
         speaker?: string;
         text?: string;
       };
 
-      const transcriptContext = relevantSnippets
-        .map((result) => {
-          const payload = result.payload as TranscriptPayload;
-          return `[${payload.timestamp ?? ''}] ${payload.speaker ?? ''}: ${payload.text ?? ''}`;
-        })
-        .join('\n');
+      // Get relevant context via vector search (best-effort — if Qdrant/Gemini
+      // is unavailable we fall back to the full transcript below).
+      let transcriptContext = '';
+      try {
+        const queryEmbedding = await generateEmbedding(validated.question);
+        const relevantSnippets = await searchTranscripts(queryEmbedding, meetingId, 5);
+        transcriptContext = relevantSnippets
+          .map((result) => {
+            const payload = result.payload as TranscriptPayload;
+            return `[${payload.timestamp ?? ''}] ${payload.speaker ?? ''}: ${payload.text ?? ''}`;
+          })
+          .join('\n');
+      } catch (searchError) {
+        console.warn('[live:ask] vector search unavailable, using full transcript:', searchError);
+      }
 
       const fullTranscript = meeting.transcript
         .map((line) => `[${line.timestamp}] ${line.speaker}: ${line.text}`)

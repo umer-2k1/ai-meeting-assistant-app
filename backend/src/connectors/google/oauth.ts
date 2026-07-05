@@ -20,7 +20,9 @@ export const GOOGLE_INTEGRATIONS_REDIRECT_URI =
 
 /** Scopes requested during the Connect flow (keep minimal to reduce consent-screen friction). */
 const CONNECT_SCOPES_MAP: Record<string, string[]> = {
-  GOOGLE_CALENDAR: ['https://www.googleapis.com/auth/calendar.readonly'],
+  // calendar.events allows both reading events and creating them (needed by the
+  // MCP `create_meeting` tool); it is narrower than full `calendar`.
+  GOOGLE_CALENDAR: ['https://www.googleapis.com/auth/calendar.events'],
   GMAIL: ['https://www.googleapis.com/auth/gmail.send'],
 };
 

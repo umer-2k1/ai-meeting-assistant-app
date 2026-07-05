@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useParams } from 'react-router-dom';
 
 import {
   IconArrowUp,
@@ -12,6 +13,7 @@ import {
   IconInfoCircle,
   IconHeadphones,
   IconLayoutDashboard,
+  IconLoader2,
   IconMicrophone,
   IconLogout,
   IconPlayerPause,
@@ -31,7 +33,6 @@ import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
 import { UserProfile } from '@/components/user-profile';
 
-import { askMeetingQuestion } from './api';
 import {
   queryWebMicrophone,
   requestDesktopMicrophone,
@@ -47,12 +48,21 @@ import {
 } from './copilot-styles';
 import './copilot-theme.css';
 import CalendarScreen from './calendar-screen';
+import PreMeetingScreen, { type PreMeetingContext } from './pre-meeting-screen';
 import DeviceCheckScreen, { type DeviceCheckTab } from './device-check-screen';
 import MeetingDetailScreen from './meeting-detail/meeting-detail-screen';
-import { meetings, quickAiAnswers, starterTranscript } from './mock-data';
+import { useMeetingDetail, useMeetingList } from './use-meetings-data';
+import { useLiveTranscription } from './use-live-transcription';
+import {
+  completeMeetingApi,
+  createLiveMeetingApi,
+  searchMeetingsApi,
+  streamMeetingAnswer,
+} from './meetings-api';
+import { Skeleton } from '@/components/ui/skeleton';
 import type { AiAnswer, Meeting, TranscriptLine } from './types';
 
-type View = 'dashboard' | 'live' | 'detail' | 'calendar' | 'device-check' | 'settings';
+type View = 'dashboard' | 'live' | 'detail' | 'calendar' | 'device-check' | 'settings' | 'prep';
 type RuntimeMode = 'web' | 'desktop';
 
 type IconComponent = typeof IconLayoutDashboard;
@@ -102,38 +112,28 @@ const PAGE_META: Record<View, { title: string; description: string }> = {
   settings: {
     title: 'Settings',
     description: 'Configure audio, AI preferences, integrations, and privacy.'
+  },
+  prep: {
+    title: 'Pre-Meeting Brief',
+    description: 'Context, attendee intelligence, and talking points before you join.'
   }
 };
 
-function createRealtimeLine(nextIndex: number): TranscriptLine {
-  const speaker = nextIndex % 2 === 0 ? 'Sarah Chen' : 'Marcus Wong';
-  const second = 70 + nextIndex * 12;
-  const minutes = Math.floor(second / 60)
-    .toString()
-    .padStart(2, '0');
-  const seconds = (second % 60).toString().padStart(2, '0');
-
-  return {
-    id: `t-live-dynamic-${nextIndex}`,
-    timestamp: `00:${minutes}:${seconds}`,
-    speaker,
-    text:
-      nextIndex % 2 === 0
-        ? 'We should include this milestone in the Q3 launch checklist and track latency daily.'
-        : 'Action item captured: prepare release notes and confirm support readiness by Friday.'
-  };
-}
 
 function AppSidebar({
   activeView,
   onNavigate,
   onStartRecording,
-  selectedMeeting
+  recentMeetings,
+  selectedMeeting,
+  onOpenMeeting
 }: {
   activeView: View;
   onNavigate: (view: View) => void;
   onStartRecording: () => void;
-  selectedMeeting: Meeting;
+  recentMeetings: Meeting[];
+  selectedMeeting: Meeting | null;
+  onOpenMeeting: (meetingId: string) => void;
 }) {
   const { user, logout } = useAuth();
   return (
@@ -181,22 +181,30 @@ function AppSidebar({
           Recent
         </p>
         <div className='space-y-1'>
-          {meetings.slice(0, 3).map((meeting) => (
-            <div
-              key={meeting.id}
-              className='rounded-lg border border-transparent px-2 py-1.5 text-xs text-muted-foreground hover:border-primary/40 hover:bg-muted/60'
-            >
-              {meeting.title}
-            </div>
-          ))}
+          {recentMeetings.length === 0 ? (
+            <p className='px-2 py-1.5 text-xs text-muted-foreground'>No meetings yet</p>
+          ) : (
+            recentMeetings.slice(0, 3).map((meeting) => (
+              <button
+                key={meeting.id}
+                type='button'
+                onClick={() => onOpenMeeting(meeting.id)}
+                className='block w-full truncate rounded-lg border border-transparent px-2 py-1.5 text-left text-xs text-muted-foreground hover:border-primary/40 hover:bg-muted/60'
+              >
+                {meeting.title}
+              </button>
+            ))
+          )}
         </div>
       </div>
 
-      <div className='mt-4 rounded-xl border border-border bg-muted/40 p-3'>
-        <p className='text-[11px] text-muted-foreground'>Active meeting</p>
-        <p className='text-sm font-medium text-foreground'>{selectedMeeting.title}</p>
-        <p className='mt-1 text-xs text-muted-foreground'>{selectedMeeting.duration}</p>
-      </div>
+      {selectedMeeting && (
+        <div className='mt-4 rounded-xl border border-border bg-muted/40 p-3'>
+          <p className='text-[11px] text-muted-foreground'>Active meeting</p>
+          <p className='text-sm font-medium text-foreground'>{selectedMeeting.title}</p>
+          <p className='mt-1 text-xs text-muted-foreground'>{selectedMeeting.duration}</p>
+        </div>
+      )}
 
       <Button
         className='mt-auto bg-gradient-to-r from-[#1E3A8A] via-[#3B82F6] to-[#06B6D4] text-white hover:opacity-95'
@@ -222,24 +230,48 @@ function AppSidebar({
   );
 }
 
+const STATUS_BADGE: Record<Meeting['status'], { label: string; className: string }> = {
+  live: { label: 'Live', className: 'bg-[#EF4444] text-white border-transparent' },
+  processing: { label: 'Processing', className: 'bg-amber-500/15 text-amber-600 border-amber-500/40' },
+  scheduled: { label: 'Upcoming', className: 'bg-blue-500/10 text-blue-600 border-blue-500/40' },
+  completed: { label: 'Completed', className: 'border-border text-muted-foreground' },
+  failed: { label: 'Failed', className: 'bg-red-500/10 text-red-600 border-red-500/40' },
+  archived: { label: 'Archived', className: 'border-border text-muted-foreground' }
+};
+
 function DashboardScreen({
   filteredMeetings,
+  allMeetings,
   searchText,
   setSearchText,
   onOpenMeeting,
-  onStartRecording
+  onStartRecording,
+  isLoading,
+  isSearching,
+  error,
+  onRetry
 }: {
   filteredMeetings: Meeting[];
+  allMeetings: Meeting[];
   searchText: string;
   setSearchText: (value: string) => void;
   onOpenMeeting: (meetingId: string) => void;
   onStartRecording: () => void;
+  isLoading: boolean;
+  isSearching: boolean;
+  error: string | null;
+  onRetry: () => void;
 }) {
+  const completedCount = allMeetings.filter((m) => m.status === 'completed').length;
+  const actionItemTotal = allMeetings.reduce((sum, m) => sum + (m.actionItemCount ?? 0), 0);
+  const liveOrProcessing = allMeetings.filter(
+    (m) => m.status === 'live' || m.status === 'processing'
+  ).length;
   const statCards = [
-    { label: 'Documents', value: '1,247', trend: '+12% from last month' },
-    { label: 'Words Analyzed', value: '2.4M', trend: '+18% from last month' },
-    { label: 'Accuracy Score', value: '98.5%', trend: '+2.1% improvement' },
-    { label: 'Time Saved', value: '156h', trend: '+20h from last month' }
+    { label: 'Total Meetings', value: String(allMeetings.length) },
+    { label: 'Completed', value: String(completedCount) },
+    { label: 'Action Items', value: String(actionItemTotal) },
+    { label: 'Live / Processing', value: String(liveOrProcessing) }
   ];
 
   return (
@@ -249,8 +281,9 @@ function DashboardScreen({
           <Card key={stat.label} className={SURFACE}>
             <CardContent className='space-y-1'>
               <p className='text-xs uppercase tracking-[0.12em] text-muted-foreground'>{stat.label}</p>
-              <p className='text-2xl font-semibold text-foreground'>{stat.value}</p>
-              <p className='text-xs text-[#06B6D4]'>{stat.trend}</p>
+              <p className='text-2xl font-semibold text-foreground'>
+                {isLoading ? <Skeleton className='h-8 w-16' /> : stat.value}
+              </p>
             </CardContent>
           </Card>
         ))}
@@ -292,66 +325,132 @@ function DashboardScreen({
       <div className='space-y-3'>
         <div className='flex items-center gap-2'>
           <IconFolders className='size-4 text-muted-foreground' />
-          <h2 className='text-lg font-semibold text-foreground'>Recent Meetings</h2>
+          <h2 className='text-lg font-semibold text-foreground'>
+            {searchText.trim() ? 'Search Results' : 'Recent Meetings'}
+          </h2>
+          {isSearching && <IconLoader2 className='size-4 animate-spin text-muted-foreground' />}
         </div>
-        {filteredMeetings.map((meeting) => (
-          <Card key={meeting.id} className={cn(SURFACE, 'transition-all hover:-translate-y-0.5 hover:border-[#3B82F6]/60')}>
-            <CardHeader className='space-y-3'>
-              <div className='flex items-center justify-between gap-3'>
-                <CardTitle className='text-foreground'>{meeting.title}</CardTitle>
-                <Badge
-                  variant={meeting.status === 'live' ? 'default' : 'outline'}
-                  className={cn(
-                    meeting.status === 'live' && 'bg-[#EF4444] text-white',
-                    meeting.status !== 'live' && 'border-border text-muted-foreground'
-                  )}
-                >
-                  {meeting.status === 'live' ? 'Live' : 'Completed'}
-                </Badge>
-              </div>
-              <div className='flex flex-wrap items-center gap-3 text-xs text-muted-foreground'>
-                <span className='inline-flex items-center gap-1'>
-                  <IconClock className='size-3.5' />
-                  {meeting.startedAt}
-                </span>
-                <span>{meeting.duration}</span>
-                <span className='inline-flex items-center gap-1'>
-                  <IconUsers className='size-3.5' />
-                  {meeting.participantCount} participants
-                </span>
-              </div>
-            </CardHeader>
-            <CardContent className='space-y-3'>
-              <p className='text-sm text-foreground/80'>{meeting.summarySnippet}</p>
-              <div className='flex flex-wrap gap-1'>
-                {meeting.tags.map((tag) => (
-                  <Badge
-                    key={`${meeting.id}-${tag}`}
-                    variant='outline'
-                    className='border-border bg-muted/70 text-muted-foreground'
-                  >
-                    #{tag}
-                  </Badge>
-                ))}
-              </div>
-              <div className='flex flex-wrap items-center justify-between gap-2'>
-                <p className='text-xs text-muted-foreground'>
-                  {meeting.actionItems.length} action items • {meeting.decisions.length} decisions
-                </p>
-                <Button
-                  size='sm'
-                  className='bg-primary text-primary-foreground hover:bg-primary/90'
-                  onClick={() => {
-                    onOpenMeeting(meeting.id);
-                  }}
-                >
-                  Open Meeting
-                  <IconArrowUpRight className='ml-1 size-3.5' />
-                </Button>
-              </div>
+
+        {error ? (
+          <Card className={SURFACE}>
+            <CardContent className='flex flex-col items-center gap-3 py-10 text-center'>
+              <p className='text-sm text-muted-foreground'>{error}</p>
+              <Button variant='outline' className={COPILOT_BTN_OUTLINE} onClick={onRetry}>
+                Retry
+              </Button>
             </CardContent>
           </Card>
-        ))}
+        ) : isLoading ? (
+          <div className='space-y-3'>
+            {[0, 1, 2].map((i) => (
+              <Card key={i} className={SURFACE}>
+                <CardHeader className='space-y-3'>
+                  <Skeleton className='h-5 w-2/5' />
+                  <Skeleton className='h-3 w-3/5' />
+                </CardHeader>
+                <CardContent className='space-y-3'>
+                  <Skeleton className='h-4 w-full' />
+                  <Skeleton className='h-4 w-4/5' />
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        ) : filteredMeetings.length === 0 ? (
+          <Card className={SURFACE}>
+            <CardContent className='flex flex-col items-center gap-3 py-12 text-center'>
+              <IconFolders className='size-8 text-muted-foreground/60' />
+              <div>
+                <p className='text-sm font-medium text-foreground'>
+                  {searchText.trim() ? 'No meetings match your search' : 'No meetings yet'}
+                </p>
+                <p className='mt-1 text-xs text-muted-foreground'>
+                  {searchText.trim()
+                    ? 'Try a different search term.'
+                    : 'Start a recording or connect your calendar to see meetings here.'}
+                </p>
+              </div>
+              {!searchText.trim() && (
+                <Button
+                  className='bg-gradient-to-r from-[#1E3A8A] via-[#3B82F6] to-[#06B6D4] text-white'
+                  onClick={onStartRecording}
+                >
+                  <IconMicrophone className='mr-1.5 size-4' />
+                  Start New Recording
+                </Button>
+              )}
+            </CardContent>
+          </Card>
+        ) : (
+          filteredMeetings.map((meeting) => {
+            const badge = STATUS_BADGE[meeting.status];
+            return (
+              <Card key={meeting.id} className={cn(SURFACE, 'transition-all hover:-translate-y-0.5 hover:border-[#3B82F6]/60')}>
+                <CardHeader className='space-y-3'>
+                  <div className='flex items-center justify-between gap-3'>
+                    <CardTitle className='text-foreground'>{meeting.title}</CardTitle>
+                    <Badge variant='outline' className={cn('shrink-0', badge.className)}>
+                      {badge.label}
+                    </Badge>
+                  </div>
+                  <div className='flex flex-wrap items-center gap-3 text-xs text-muted-foreground'>
+                    <span className='inline-flex items-center gap-1'>
+                      <IconClock className='size-3.5' />
+                      {meeting.startedAt}
+                    </span>
+                    <span>{meeting.duration}</span>
+                    <span className='inline-flex items-center gap-1'>
+                      <IconUsers className='size-3.5' />
+                      {meeting.participantCount} participants
+                    </span>
+                    {meeting.platformUrl && (
+                      <a
+                        href={meeting.platformUrl}
+                        target='_blank'
+                        rel='noreferrer'
+                        onClick={(e) => e.stopPropagation()}
+                        className='inline-flex items-center gap-1 text-primary hover:underline'
+                      >
+                        <IconArrowUpRight className='size-3.5' />
+                        {meeting.platform || 'Join'}
+                      </a>
+                    )}
+                  </div>
+                </CardHeader>
+                <CardContent className='space-y-3'>
+                  <p className='text-sm text-foreground/80'>{meeting.summarySnippet}</p>
+                  {meeting.tags.length > 0 && (
+                    <div className='flex flex-wrap gap-1'>
+                      {meeting.tags.map((tag) => (
+                        <Badge
+                          key={`${meeting.id}-${tag}`}
+                          variant='outline'
+                          className='border-border bg-muted/70 text-muted-foreground'
+                        >
+                          #{tag}
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
+                  <div className='flex flex-wrap items-center justify-between gap-2'>
+                    <p className='text-xs text-muted-foreground'>
+                      {meeting.actionItemCount ?? meeting.actionItems.length} action items • {meeting.decisions.length} decisions
+                    </p>
+                    <Button
+                      size='sm'
+                      className='bg-primary text-primary-foreground hover:bg-primary/90'
+                      onClick={() => {
+                        onOpenMeeting(meeting.id);
+                      }}
+                    >
+                      Open Meeting
+                      <IconArrowUpRight className='ml-1 size-3.5' />
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })
+        )}
       </div>
     </section>
   );
@@ -580,26 +679,46 @@ function FloatingWidget({
 }
 
 export default function MeetingCopilotApp() {
-  const fallbackMeeting = meetings[0];
-  if (!fallbackMeeting) {
-    throw new Error('No meeting seed data configured.');
-  }
-
-  const [view, setView] = useState<View>('dashboard');
-  const [selectedMeetingId, setSelectedMeetingId] = useState(fallbackMeeting.id);
+  const routeParams = useParams();
+  const [view, setView] = useState<View>(routeParams['meetingId'] ? 'detail' : 'dashboard');
+  const [selectedMeetingId, setSelectedMeetingId] = useState<string | null>(
+    routeParams['meetingId'] ?? null
+  );
   const [searchText, setSearchText] = useState('');
+  const [searchResults, setSearchResults] = useState<Meeting[] | null>(null);
+  const [isSearching, setIsSearching] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [isRecordingPaused, setIsRecordingPaused] = useState(false);
-  const [elapsedSeconds, setElapsedSeconds] = useState(764);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [runtimeMode, setRuntimeMode] = useState<RuntimeMode>('web');
   const [desktopPlatform, setDesktopPlatform] = useState<string | null>(null);
   const [deviceCheckTab, setDeviceCheckTab] = useState<DeviceCheckTab>('microphone');
-  const [liveTranscript, setLiveTranscript] = useState<TranscriptLine[]>(starterTranscript);
+  const [prepContext, setPrepContext] = useState<PreMeetingContext | null>(null);
   const [askInput, setAskInput] = useState('');
   const [detailAskInput, setDetailAskInput] = useState('');
   const [isAsking, setIsAsking] = useState(false);
   const [askError, setAskError] = useState<string | null>(null);
-  const [aiAnswers, setAiAnswers] = useState<AiAnswer[]>(quickAiAnswers);
+  const [aiAnswers, setAiAnswers] = useState<AiAnswer[]>([]);
+
+  const {
+    meetings: meetingList,
+    isLoading: meetingsLoading,
+    error: meetingsError,
+    refetch: refetchMeetings
+  } = useMeetingList();
+  const {
+    meeting: selectedMeetingDetail,
+    isLoading: detailLoading,
+    error: detailError,
+    refetch: refetchDetail
+  } = useMeetingDetail(selectedMeetingId);
+  const {
+    transcript: liveTranscript,
+    interimLine,
+    start: startLive,
+    stop: stopLive,
+    error: liveError
+  } = useLiveTranscription();
 
   useEffect(() => {
     const desktopApi = globalThis.window.desktop;
@@ -630,13 +749,8 @@ export default function MeetingCopilotApp() {
       setElapsedSeconds(state.elapsedSeconds);
     });
 
-    const unsubscribeTranscript = desktopApi.recording.onTranscript((line) => {
-      setLiveTranscript((current) => [...current, line]);
-    });
-
     return () => {
       unsubscribeState();
-      unsubscribeTranscript();
     };
   }, []);
 
@@ -652,20 +766,23 @@ export default function MeetingCopilotApp() {
     };
   }, [isRecording, isRecordingPaused, runtimeMode]);
 
+  // Debounced backend search: empty query shows the full list.
   useEffect(() => {
-    if (!isRecording || isRecordingPaused || runtimeMode === 'desktop') return;
-
-    const transcriptInterval = globalThis.setInterval(() => {
-      setLiveTranscript((current) => {
-        if (current.length > 10) return current;
-        return [...current, createRealtimeLine(current.length + 1)];
-      });
-    }, 7000);
-
-    return () => {
-      globalThis.clearInterval(transcriptInterval);
-    };
-  }, [isRecording, isRecordingPaused, runtimeMode]);
+    const query = searchText.trim();
+    if (!query) {
+      setSearchResults(null);
+      setIsSearching(false);
+      return;
+    }
+    setIsSearching(true);
+    const handle = globalThis.setTimeout(() => {
+      void searchMeetingsApi(query)
+        .then((results) => setSearchResults(results))
+        .catch(() => setSearchResults([]))
+        .finally(() => setIsSearching(false));
+    }, 300);
+    return () => globalThis.clearTimeout(handle);
+  }, [searchText]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -704,56 +821,51 @@ export default function MeetingCopilotApp() {
   }, [view, runtimeMode]);
 
   const selectedMeeting = useMemo(
-    () => meetings.find((meeting) => meeting.id === selectedMeetingId) ?? fallbackMeeting,
-    [fallbackMeeting, selectedMeetingId]
+    () => selectedMeetingDetail ?? meetingList.find((m) => m.id === selectedMeetingId) ?? null,
+    [selectedMeetingDetail, meetingList, selectedMeetingId]
   );
 
-  const filteredMeetings = useMemo(() => {
-    const query = searchText.trim().toLowerCase();
-    if (!query) return meetings;
-
-    return meetings.filter((meeting) => {
-      const searchable = [
-        meeting.title,
-        meeting.summarySnippet,
-        ...meeting.tags,
-        ...meeting.decisions
-      ].join(' ');
-
-      return searchable.toLowerCase().includes(query);
-    });
-  }, [searchText]);
+  const filteredMeetings = searchText.trim() ? searchResults ?? [] : meetingList;
 
   const askAi = async (questionOverride?: string) => {
     const question = (questionOverride ?? askInput).trim();
     if (!question || isAsking) return;
 
+    const meetingId = selectedMeeting?.id;
+    if (!meetingId) {
+      setAskError('Open or start a meeting before asking the AI.');
+      return;
+    }
+
     setIsAsking(true);
     setAskError(null);
 
-    try {
-      const response = await askMeetingQuestion({
-        meetingId: selectedMeeting.id,
-        question,
-        transcript: view === 'live' ? liveTranscript : selectedMeeting.transcript,
-        actionItems: selectedMeeting.actionItems
-      });
+    // Insert a placeholder answer and stream tokens into it (RAG-grounded SSE).
+    const answerId = crypto.randomUUID();
+    setAiAnswers((current) => [
+      { id: answerId, question, answer: '', timestamp: '' },
+      ...current
+    ]);
+    if (!questionOverride) setAskInput('');
 
-      const answer: AiAnswer = {
-        id: crypto.randomUUID(),
-        question,
-        answer:
-          response.provider === 'fallback'
-            ? `${response.answer} (local fallback)`
-            : response.answer,
-        timestamp: response.timestamp
-      };
-      setAiAnswers((current) => [answer, ...current]);
-      if (!questionOverride) {
-        setAskInput('');
+    try {
+      const { timestamp } = await streamMeetingAnswer(meetingId, question, {
+        onToken: (tokenText) => {
+          setAiAnswers((current) =>
+            current.map((a) =>
+              a.id === answerId ? { ...a, answer: a.answer + tokenText } : a
+            )
+          );
+        }
+      });
+      if (timestamp) {
+        setAiAnswers((current) =>
+          current.map((a) => (a.id === answerId ? { ...a, timestamp } : a))
+        );
       }
     } catch {
       setAskError('Ask AI is temporarily unavailable. Please retry.');
+      setAiAnswers((current) => current.filter((a) => a.id !== answerId));
     } finally {
       setIsAsking(false);
     }
@@ -763,8 +875,13 @@ export default function MeetingCopilotApp() {
     setView('live');
     setAskError(null);
     setIsRecordingPaused(false);
+    setElapsedSeconds(0);
+    setAiAnswers([]);
 
-    const beginSession = () => {
+    const beginSession = (liveMeetingId: string) => {
+      // Start the real renderer-side capture → WS → Deepgram pipeline.
+      void startLive(liveMeetingId, { captureSystemAudio: runtimeMode === 'desktop' });
+
       const desktopApi = globalThis.window.desktop;
       if (runtimeMode === 'desktop' && desktopApi) {
         void desktopApi.recording
@@ -804,6 +921,21 @@ export default function MeetingCopilotApp() {
     };
 
     void (async () => {
+      // Create a real backend meeting for this session so transcript + summary
+      // have a durable home. Audio streams into it; on stop it is processed.
+      let liveMeetingId = '';
+      try {
+        const meeting = await createLiveMeetingApi(
+          `Live session · ${new Date().toLocaleString()}`
+        );
+        liveMeetingId = meeting.id;
+        setSelectedMeetingId(meeting.id);
+      } catch {
+        setAskError('Could not start a meeting on the server. Check your connection and retry.');
+        setView('dashboard');
+        return;
+      }
+
       if (runtimeMode === 'desktop' && globalThis.window.desktop?.permissions) {
         const mic = await requestDesktopMicrophone();
         if (!mic?.granted) {
@@ -814,7 +946,7 @@ export default function MeetingCopilotApp() {
           setView('device-check');
           return;
         }
-        beginSession();
+        beginSession(liveMeetingId);
         return;
       }
 
@@ -828,30 +960,49 @@ export default function MeetingCopilotApp() {
         }
       }
 
-      beginSession();
+      beginSession(liveMeetingId);
     })();
   };
 
   const stopRecording = () => {
+    const meetingId = selectedMeetingId;
+    stopLive();
+
+    const finalize = () => {
+      setIsRecording(false);
+      setIsRecordingPaused(false);
+      if (meetingId) {
+        // Trigger post-meeting processing (summary/action items) and refresh.
+        void completeMeetingApi(meetingId)
+          .then(() => {
+            void refetchMeetings();
+            void refetchDetail();
+          })
+          .catch(() => {
+            // Processing failures surface on the detail screen via status.
+          });
+        setView('detail');
+      } else {
+        setView('dashboard');
+      }
+    };
+
     const desktopApi = globalThis.window.desktop;
     if (runtimeMode === 'desktop' && desktopApi) {
       void desktopApi.recording
         .stop()
         .then((state) => {
-          setIsRecording(state.isRecording);
-          setIsRecordingPaused(state.isPaused);
           setElapsedSeconds(state.elapsedSeconds);
-          setView('detail');
+          finalize();
         })
         .catch(() => {
           setAskError('Desktop stop command failed.');
+          finalize();
         });
       return;
     }
 
-    setIsRecording(false);
-    setIsRecordingPaused(false);
-    setView('detail');
+    finalize();
   };
 
   const pauseResumeRecording = () => {
@@ -885,7 +1036,12 @@ export default function MeetingCopilotApp() {
           activeView={view}
           onNavigate={setView}
           onStartRecording={startRecording}
+          recentMeetings={meetingList}
           selectedMeeting={selectedMeeting}
+          onOpenMeeting={(meetingId) => {
+            setSelectedMeetingId(meetingId);
+            setView('detail');
+          }}
         />
         <div className='flex min-h-0 min-w-0 flex-1 flex-col'>
           <header className='sticky top-0 z-20 shrink-0 border-b border-border bg-background/95 backdrop-blur-md supports-[backdrop-filter]:bg-background/85'>
@@ -919,6 +1075,7 @@ export default function MeetingCopilotApp() {
             {view === 'dashboard' && (
               <DashboardScreen
                 filteredMeetings={filteredMeetings}
+                allMeetings={meetingList}
                 searchText={searchText}
                 setSearchText={setSearchText}
                 onOpenMeeting={(meetingId) => {
@@ -926,6 +1083,10 @@ export default function MeetingCopilotApp() {
                   setView('detail');
                 }}
                 onStartRecording={startRecording}
+                isLoading={meetingsLoading}
+                isSearching={isSearching}
+                error={meetingsError}
+                onRetry={() => void refetchMeetings()}
               />
             )}
             {view === 'live' && (
@@ -933,34 +1094,61 @@ export default function MeetingCopilotApp() {
                 elapsedSeconds={elapsedSeconds}
                 isRecording={isRecording}
                 isPaused={isRecordingPaused}
-                transcript={liveTranscript}
+                transcript={interimLine ? [...liveTranscript, interimLine] : liveTranscript}
                 askInput={askInput}
                 setAskInput={setAskInput}
                 onAskAi={askAi}
                 aiAnswers={aiAnswers}
                 isAsking={isAsking}
-                askError={askError}
+                askError={askError ?? liveError}
                 onPauseResume={pauseResumeRecording}
                 onStop={stopRecording}
               />
             )}
-            {view === 'detail' && (
-              <MeetingDetailScreen
-                meeting={selectedMeeting}
-                aiAnswers={aiAnswers}
-                setView={setView}
-                detailAskInput={detailAskInput}
-                setDetailAskInput={setDetailAskInput}
-                onAskAi={askAi}
-                isAsking={isAsking}
-                askError={askError}
-              />
-            )}
+            {view === 'detail' &&
+              (selectedMeeting ? (
+                <MeetingDetailScreen
+                  meeting={selectedMeeting}
+                  aiAnswers={aiAnswers}
+                  setView={setView}
+                  detailAskInput={detailAskInput}
+                  setDetailAskInput={setDetailAskInput}
+                  onAskAi={askAi}
+                  isAsking={isAsking}
+                  askError={askError}
+                  onDeleted={() => {
+                    setSelectedMeetingId(null);
+                    void refetchMeetings();
+                    setView('dashboard');
+                  }}
+                  onReprocess={() => void refetchDetail()}
+                />
+              ) : detailLoading ? (
+                <div className='flex flex-1 items-center justify-center'>
+                  <IconLoader2 className='size-6 animate-spin text-muted-foreground' />
+                </div>
+              ) : (
+                <div className='flex flex-1 flex-col items-center justify-center gap-3 text-center'>
+                  <p className='text-sm text-muted-foreground'>
+                    {detailError ?? 'Meeting not found.'}
+                  </p>
+                  <Button variant='outline' className={COPILOT_BTN_OUTLINE} onClick={() => setView('dashboard')}>
+                    Back to dashboard
+                  </Button>
+                </div>
+              ))}
             {view === 'calendar' && (
               <CalendarScreen
                 onStartRecording={startRecording}
                 onManageIntegrations={() => setView('settings')}
+                onPrepare={(ctx) => {
+                  setPrepContext(ctx);
+                  setView('prep');
+                }}
               />
+            )}
+            {view === 'prep' && prepContext && (
+              <PreMeetingScreen context={prepContext} onBack={() => setView('calendar')} />
             )}
             {view === 'device-check' && (
               <DeviceCheckScreen

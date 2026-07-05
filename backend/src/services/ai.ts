@@ -1,6 +1,8 @@
 import { ChatGroq } from '@langchain/groq';
 import { ChatPromptTemplate } from '@langchain/core/prompts';
 import { StringOutputParser } from '@langchain/core/output_parsers';
+import { z } from 'zod';
+import { extractJsonBlock, invokeJson } from '../lib/llm-json.js';
 
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 
@@ -10,6 +12,7 @@ const GROQ_API_KEY = process.env.GROQ_API_KEY;
 export function createGroqLLM(options: {
   model?: string;
   temperature?: number;
+  json?: boolean;
 } = {}) {
   if (!GROQ_API_KEY) {
     throw new Error('GROQ_API_KEY not configured');
@@ -19,19 +22,27 @@ export function createGroqLLM(options: {
     apiKey: GROQ_API_KEY,
     model: options.model || 'llama-3.3-70b-versatile',
     temperature: options.temperature ?? 0.7,
+    // Groq JSON mode forces a syntactically valid JSON object response.
+    ...(options.json
+      ? { modelKwargs: { response_format: { type: 'json_object' } } }
+      : {}),
   });
 }
 
 /**
  * Generate meeting summary from transcript
  */
-export async function generateMeetingSummary(transcript: string): Promise<{
-  summary: string;
-  keyPoints: string[];
-  decisions: string[];
-  risks: string[];
-}> {
-  const llm = createGroqLLM({ temperature: 0.5 });
+const summarySchema = z.object({
+  summary: z.string(),
+  keyPoints: z.array(z.string()).default([]),
+  decisions: z.array(z.string()).default([]),
+  risks: z.array(z.string()).default([]),
+});
+
+export async function generateMeetingSummary(transcript: string): Promise<
+  z.infer<typeof summarySchema>
+> {
+  const llm = createGroqLLM({ temperature: 0.5, json: true });
 
   const prompt = ChatPromptTemplate.fromTemplate(`
 You are an AI meeting assistant. Analyze the following meeting transcript and provide:
@@ -44,7 +55,7 @@ You are an AI meeting assistant. Analyze the following meeting transcript and pr
 Transcript:
 {transcript}
 
-Respond in JSON format:
+Respond ONLY with a JSON object of this exact shape:
 {{
   "summary": "...",
   "keyPoints": ["...", "..."],
@@ -54,34 +65,37 @@ Respond in JSON format:
 `);
 
   const chain = prompt.pipe(llm).pipe(new StringOutputParser());
-
-  const result = await chain.invoke({ transcript });
-
-  try {
-    return JSON.parse(result);
-  } catch {
-    // Fallback if JSON parsing fails
-    return {
-      summary: result.substring(0, 500),
-      keyPoints: [],
-      decisions: [],
-      risks: [],
-    };
-  }
+  return invokeJson(() => chain.invoke({ transcript }), summarySchema, 'meeting summary');
 }
 
 /**
  * Extract action items from transcript
  */
+const actionItemsSchema = z.object({
+  items: z
+    .array(
+      z.object({
+        task: z.string(),
+        assignee: z.string().nullish(),
+        dueDate: z.string().nullish(),
+        priority: z
+          .enum(['LOW', 'MEDIUM', 'HIGH', 'URGENT'])
+          .catch('MEDIUM')
+          .default('MEDIUM'),
+      })
+    )
+    .default([]),
+});
+
 export async function extractActionItems(transcript: string): Promise<
   Array<{
     task: string;
     assignee?: string;
     dueDate?: string;
-    priority: 'LOW' | 'MEDIUM' | 'HIGH';
+    priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
   }>
 > {
-  const llm = createGroqLLM({ temperature: 0.3 });
+  const llm = createGroqLLM({ temperature: 0.3, json: true });
 
   const prompt = ChatPromptTemplate.fromTemplate(`
 You are an AI meeting assistant. Extract all action items from the following transcript.
@@ -89,32 +103,33 @@ You are an AI meeting assistant. Extract all action items from the following tra
 For each action item, identify:
 - Task description
 - Assignee (if mentioned)
-- Due date (if mentioned)
+- Due date in ISO 8601 (YYYY-MM-DD) if mentioned, otherwise null
 - Priority (HIGH, MEDIUM, or LOW)
 
 Transcript:
 {transcript}
 
-Respond in JSON format as an array:
-[
-  {{
-    "task": "...",
-    "assignee": "...",
-    "dueDate": "...",
-    "priority": "MEDIUM"
-  }}
-]
+Respond ONLY with a JSON object whose "items" is an array (empty if there are no
+action items):
+{{
+  "items": [
+    {{ "task": "...", "assignee": "..." or null, "dueDate": "YYYY-MM-DD" or null, "priority": "MEDIUM" }}
+  ]
+}}
 `);
 
   const chain = prompt.pipe(llm).pipe(new StringOutputParser());
-
-  const result = await chain.invoke({ transcript });
-
-  try {
-    return JSON.parse(result);
-  } catch {
-    return [];
-  }
+  const { items } = await invokeJson(
+    () => chain.invoke({ transcript }),
+    actionItemsSchema,
+    'action items'
+  );
+  return items.map((i) => ({
+    task: i.task,
+    assignee: i.assignee ?? undefined,
+    dueDate: i.dueDate ?? undefined,
+    priority: i.priority,
+  }));
 }
 
 /**
@@ -169,29 +184,37 @@ Respond in JSON format:
     question,
   });
 
+  // Chat answers degrade to plain text rather than hard-failing.
   try {
-    return JSON.parse(result);
-  } catch {
-    return {
-      answer: result,
+    const parsed = JSON.parse(extractJsonBlock(result)) as {
+      answer?: string;
+      timestamp?: string | null;
     };
+    return {
+      answer: parsed.answer ?? result,
+      timestamp: parsed.timestamp ?? undefined,
+    };
+  } catch {
+    return { answer: result };
   }
 }
 
 /**
  * Generate pre-meeting brief
  */
+const preMeetingBriefSchema = z.object({
+  briefing: z.string(),
+  suggestedTopics: z.array(z.string()).default([]),
+  reminders: z.array(z.string()).default([]),
+});
+
 export async function generatePreMeetingBrief(data: {
   title: string;
   description?: string;
   attendees: Array<{ name: string; role?: string; company?: string }>;
   previousMeetings?: string;
-}): Promise<{
-  briefing: string;
-  suggestedTopics: string[];
-  reminders: string[];
-}> {
-  const llm = createGroqLLM({ temperature: 0.6 });
+}): Promise<z.infer<typeof preMeetingBriefSchema>> {
+  const llm = createGroqLLM({ temperature: 0.6, json: true });
 
   const attendeesList = data.attendees
     .map((a) => `- ${a.name}${a.role ? ` (${a.role})` : ''}${a.company ? ` at ${a.company}` : ''}`)
@@ -224,20 +247,15 @@ Respond in JSON format:
 
   const chain = prompt.pipe(llm).pipe(new StringOutputParser());
 
-  const result = await chain.invoke({
-    title: data.title,
-    description: data.description || 'No description provided',
-    attendees: attendeesList,
-    previousContext: data.previousMeetings || 'No previous meetings',
-  });
-
-  try {
-    return JSON.parse(result);
-  } catch {
-    return {
-      briefing: result,
-      suggestedTopics: [],
-      reminders: [],
-    };
-  }
+  return invokeJson(
+    () =>
+      chain.invoke({
+        title: data.title,
+        description: data.description || 'No description provided',
+        attendees: attendeesList,
+        previousContext: data.previousMeetings || 'No previous meetings',
+      }),
+    preMeetingBriefSchema,
+    'pre-meeting brief'
+  );
 }

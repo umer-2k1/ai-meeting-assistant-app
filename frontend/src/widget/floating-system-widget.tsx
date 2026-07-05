@@ -13,14 +13,13 @@ import {
 } from '@tabler/icons-react';
 
 import { askMeetingQuestion } from '@/features/meeting-copilot/api';
-import { meetings, starterTranscript } from '@/features/meeting-copilot/mock-data';
+import { fetchMeetings } from '@/features/meeting-copilot/meetings-api';
+import type { Meeting } from '@/features/meeting-copilot/types';
 import { cn } from '@/lib/utils';
 
 import { useWidgetThemeSync } from './use-widget-theme-sync';
 import { useWidgetWindowDrag } from './use-widget-window-drag';
 import { useWidgetWindowResize } from './use-widget-window-resize';
-
-const meeting = meetings[0];
 
 function formatTimer(totalSeconds: number) {
   const mm = Math.floor(totalSeconds / 60)
@@ -64,6 +63,14 @@ export default function FloatingSystemWidget() {
   const [askInput, setAskInput] = useState('');
   const [askAnswer, setAskAnswer] = useState<string | null>(null);
   const [isAsking, setIsAsking] = useState(false);
+  const [meeting, setMeeting] = useState<Meeting | null>(null);
+
+  // Load the most recent meeting for the highlights panel + Ask AI context.
+  useEffect(() => {
+    void fetchMeetings()
+      .then((list) => setMeeting(list[0] ?? null))
+      .catch(() => setMeeting(null));
+  }, []);
 
   const timerLabel = useMemo(() => formatTimer(elapsedSeconds), [elapsedSeconds]);
   const isLive = isRecording && !isPaused;
@@ -135,15 +142,15 @@ export default function FloatingSystemWidget() {
 
   const submitQuestion = async () => {
     const question = askInput.trim();
-    if (!question || isAsking || !meeting) return;
+    if (!question || isAsking) return;
 
     setIsAsking(true);
     try {
       const response = await askMeetingQuestion({
-        meetingId: meeting.id,
+        meetingId: meeting?.id ?? '',
         question,
-        transcript: starterTranscript,
-        actionItems: meeting.actionItems
+        transcript: meeting?.transcript ?? [],
+        actionItems: meeting?.actionItems ?? []
       });
       setAskAnswer(response.answer);
       setAskInput('');

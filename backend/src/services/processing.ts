@@ -97,13 +97,17 @@ export async function processMeeting(meetingId: string) {
       decisions: summaryResult.decisions,
     });
 
-    await storeMeetingEmbedding(meetingId, meetingEmbedding, {
+    const meetingPointId = await storeMeetingEmbedding(meetingId, meetingEmbedding, {
       userId: meeting.userId,
       title: meeting.title,
       summary: summaryResult.summary,
       startTime: meeting.startTime,
       tags: meeting.tags.map((t) => t.name),
     });
+
+    await prisma.meeting
+      .update({ where: { id: meetingId }, data: { embeddingId: meetingPointId } })
+      .catch(() => {});
 
     // 8. Generate and store transcript embeddings (batch process in chunks)
     console.log('[Processing] Generating transcript embeddings...');
@@ -119,19 +123,23 @@ export async function processMeeting(meetingId: string) {
             timestamp: line.timestamp,
           });
 
-          await storeTranscriptEmbedding(line.id, embedding, {
+          const pointId = await storeTranscriptEmbedding(line.id, embedding, {
             meetingId,
             speaker: line.speaker,
             text: line.text,
             timestamp: line.timestamp,
           });
 
+          await prisma.transcriptLine
+            .update({ where: { id: line.id }, data: { embeddingId: pointId } })
+            .catch(() => {});
+
           // Store embedding reference in database
           await prisma.vectorEmbedding.create({
             data: {
               entityType: 'transcript_line',
               entityId: line.id,
-              qdrantId: line.id,
+              qdrantId: pointId,
               collectionName: 'transcripts',
               model: 'gemini',
               dimension: 768,
@@ -148,7 +156,7 @@ export async function processMeeting(meetingId: string) {
       data: {
         entityType: 'meeting',
         entityId: meetingId,
-        qdrantId: meetingId,
+        qdrantId: meetingPointId,
         collectionName: 'meetings',
         model: 'gemini',
         dimension: 768,
