@@ -116,16 +116,27 @@ function resolveAppIconPath() {
 }
 
 function loadAppIconImage() {
-  const iconPath = resolveAppIconPath();
-  if (!iconPath) return null;
+  const iconsDir = path.join(__dirname, 'icons');
 
-  const image = nativeImage.createFromPath(iconPath);
-  if (image.isEmpty()) {
-    console.warn('[desktop] Failed to load app icon from', iconPath);
-    return null;
+  // nativeImage (tray/dock/window) needs a raster it can actually decode. Electron's
+  // .icns decoder chokes on iconutil-produced PNG-compressed (ic12) files — it returns an
+  // empty image — so prefer the raw PNG here. The .icns stays reserved for packaging, where
+  // macOS itself parses the .app bundle icon. Try each candidate until one decodes.
+  const candidates = [
+    path.join(iconsDir, 'icon.png'),
+    path.join(__dirname, '..', 'public', 'favicon', 'favicon-512.webp'),
+    process.platform === 'darwin' ? path.join(iconsDir, 'icon.icns') : null,
+    process.platform === 'win32' ? path.join(iconsDir, 'icon.ico') : null,
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    if (!fs.existsSync(candidate)) continue;
+    const image = nativeImage.createFromPath(candidate);
+    if (!image.isEmpty()) return image;
   }
 
-  return image;
+  console.warn('[desktop] Failed to load app icon from', candidates.join(', '));
+  return null;
 }
 
 function applyWindowIcon(win) {
