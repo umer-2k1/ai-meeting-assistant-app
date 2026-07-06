@@ -8,6 +8,7 @@ import {
 } from '../services/meeting.js';
 import { answerMeetingQuestionStream } from '../services/ai-stream.js';
 import { searchTranscripts, generateEmbedding } from '../services/embeddings.js';
+import { isVectorStoreAvailable } from '../services/vector-store.js';
 import { embedTranscriptLineInBackground } from '../services/transcript-embedding.js';
 import { getRouteParam } from '../lib/params.js';
 
@@ -113,19 +114,23 @@ router.post('/meetings/:id/ask', requireAuth, async (req, res) => {
       };
 
       // Get relevant context via vector search (best-effort — if Qdrant/Gemini
-      // is unavailable we fall back to the full transcript below).
+      // is unavailable we fall back to the full transcript below). The circuit
+      // breaker skips the whole block (incl. the embedding call) once Qdrant has
+      // proven unreachable this session, so we don't waste work or spam logs.
       let transcriptContext = '';
-      try {
-        const queryEmbedding = await generateEmbedding(validated.question);
-        const relevantSnippets = await searchTranscripts(queryEmbedding, meetingId, 5);
-        transcriptContext = relevantSnippets
-          .map((result) => {
-            const payload = result.payload as TranscriptPayload;
-            return `[${payload.timestamp ?? ''}] ${payload.speaker ?? ''}: ${payload.text ?? ''}`;
-          })
-          .join('\n');
-      } catch (searchError) {
-        console.warn('[live:ask] vector search unavailable, using full transcript:', searchError);
+      if (isVectorStoreAvailable()) {
+        try {
+          const queryEmbedding = await generateEmbedding(validated.question);
+          const relevantSnippets = await searchTranscripts(queryEmbedding, meetingId, 5);
+          transcriptContext = relevantSnippets
+            .map((result) => {
+              const payload = result.payload as TranscriptPayload;
+              return `[${payload.timestamp ?? ''}] ${payload.speaker ?? ''}: ${payload.text ?? ''}`;
+            })
+            .join('\n');
+        } catch {
+          // vector-store already logged a single concise warning; fall through.
+        }
       }
 
       const fullTranscript = meeting.transcript

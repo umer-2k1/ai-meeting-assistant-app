@@ -7,6 +7,27 @@ const QDRANT_API_KEY = process.env.QDRANT_API_KEY;
 
 let qdrantClient: QdrantClient | null = null;
 
+// Circuit breaker: once Qdrant is unreachable (e.g. a suspended free-tier cluster
+// returning 404), stop retrying it on every request — that just adds latency and
+// log spam. Semantic search degrades to the full-transcript fallback in callers.
+let vectorStoreUnavailable = false;
+
+/** False once Qdrant has proven unreachable this session. */
+export function isVectorStoreAvailable(): boolean {
+  return !vectorStoreUnavailable;
+}
+
+/** Trip the breaker + log a single concise warning (not a full stack trace). */
+function noteVectorStoreDown(error: unknown) {
+  if (!vectorStoreUnavailable) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(
+      `[vector-store] Qdrant unavailable — semantic search disabled for this session (${message}). Falling back to full transcript.`
+    );
+  }
+  vectorStoreUnavailable = true;
+}
+
 /**
  * Initialize Qdrant client
  */
@@ -181,6 +202,7 @@ export async function searchTranscripts(
   meetingId?: string,
   limit: number = 10
 ) {
+  if (vectorStoreUnavailable) throw new Error('vector store unavailable');
   const client = getQdrantClient();
 
   try {
@@ -204,7 +226,7 @@ export async function searchTranscripts(
 
     return results;
   } catch (error) {
-    console.error('Failed to search transcripts:', error);
+    noteVectorStoreDown(error);
     throw error;
   }
 }
