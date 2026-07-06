@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect, useCallback } from 'react';
+import { useMemo, useState, useEffect, useCallback, useRef } from 'react';
 
 import {
   IconBell,
@@ -45,6 +45,7 @@ function CalendarConnectionCard({
   connected,
   email,
   connecting,
+  syncing,
   onConnect,
   onSync,
   onManage
@@ -52,6 +53,7 @@ function CalendarConnectionCard({
   connected: boolean;
   email?: string;
   connecting: boolean;
+  syncing?: boolean;
   onConnect: () => void;
   onSync: () => void;
   onManage: () => void;
@@ -94,9 +96,15 @@ function CalendarConnectionCard({
       <div className='flex shrink-0 flex-wrap gap-2'>
         {connected ? (
           <>
-            <Button size='sm' variant='outline' className={cn('rounded-full', COPILOT_BTN_OUTLINE)} onClick={onSync}>
-              <IconRefresh className='mr-1.5 size-3.5' />
-              Sync now
+            <Button
+              size='sm'
+              variant='outline'
+              className={cn('rounded-full', COPILOT_BTN_OUTLINE)}
+              onClick={onSync}
+              disabled={syncing}
+            >
+              <IconRefresh className={cn('mr-1.5 size-3.5', syncing && 'animate-spin')} />
+              {syncing ? 'Syncing…' : 'Sync now'}
             </Button>
             <Button size='sm' variant='ghost' className='rounded-full text-muted-foreground' onClick={onManage}>
               Manage
@@ -433,7 +441,12 @@ export default function CalendarScreen({
     draftRange?.from?.getTime() !== dateRange?.from?.getTime() ||
     draftRange?.to?.getTime() !== dateRange?.to?.getTime();
 
+  // Guard against overlapping fetches (rapid "Sync now" clicks, mount + poll).
+  const fetchInFlight = useRef(false);
+
   const fetchCalendarEvents = useCallback(async () => {
+    if (fetchInFlight.current) return;
+    fetchInFlight.current = true;
     try {
       setLoading(true);
       setError(null);
@@ -479,6 +492,7 @@ export default function CalendarScreen({
       }
       setCalendarEvents([]);
     } finally {
+      fetchInFlight.current = false;
       setLoading(false);
     }
   }, [dateRange]);
@@ -586,6 +600,7 @@ export default function CalendarScreen({
           email={calendarEmail}
           connecting={connecting}
           onConnect={handleConnectCalendar}
+          syncing={loading}
           onSync={() => void fetchCalendarEvents()}
           onManage={() => onManageIntegrations?.()}
         />
@@ -604,6 +619,7 @@ export default function CalendarScreen({
           email={calendarEmail}
           connecting={connecting}
           onConnect={handleConnectCalendar}
+          syncing={loading}
           onSync={() => void fetchCalendarEvents()}
           onManage={() => onManageIntegrations?.()}
         />
@@ -624,6 +640,7 @@ export default function CalendarScreen({
         connected={calendarConnected}
         email={calendarEmail}
         connecting={connecting}
+        syncing={loading}
         onConnect={handleConnectCalendar}
         onSync={() => void fetchCalendarEvents()}
         onManage={() => onManageIntegrations?.()}

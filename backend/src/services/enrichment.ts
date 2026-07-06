@@ -37,6 +37,7 @@ export async function enrichPerson(
       method: 'POST',
       headers: { 'X-API-KEY': key, 'Content-Type': 'application/json' },
       body: JSON.stringify({ q: query, num: 5 }),
+      signal: AbortSignal.timeout(10_000),
     });
     if (!res.ok) return null;
     const data = (await res.json()) as { organic?: SerperOrganic[] };

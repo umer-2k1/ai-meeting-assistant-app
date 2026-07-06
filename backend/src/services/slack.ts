@@ -25,6 +25,7 @@ async function slackApi<T = Record<string, unknown>>(
       'Content-Type': 'application/json; charset=utf-8',
     },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(15_000),
   });
   const data = (await res.json()) as { ok: boolean; error?: string } & T;
   if (!data.ok) {

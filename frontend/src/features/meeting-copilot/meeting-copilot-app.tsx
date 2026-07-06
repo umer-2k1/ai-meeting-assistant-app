@@ -857,15 +857,28 @@ export default function MeetingCopilotApp() {
 
   // Auto-refresh while the open meeting is still processing so the AI summary,
   // title, and tags appear on their own (and the title types out) — no manual
-  // "Refresh to see results" needed.
+  // "Refresh to see results" needed. Delay backs off 3s → 10s so a slow
+  // processing job doesn't hammer the backend.
   useEffect(() => {
     const status = selectedMeetingDetail?.status;
     if (status !== 'processing' && status !== 'live') return;
-    const id = globalThis.setInterval(() => {
-      void refetchDetail();
-      void refetchMeetings();
-    }, 3000);
-    return () => globalThis.clearInterval(id);
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    let delay = 3000;
+    const tick = () => {
+      timer = globalThis.setTimeout(() => {
+        void Promise.allSettled([refetchDetail(), refetchMeetings()]).then(() => {
+          if (cancelled) return;
+          delay = Math.min(delay * 1.5, 10_000);
+          tick();
+        });
+      }, delay);
+    };
+    tick();
+    return () => {
+      cancelled = true;
+      globalThis.clearTimeout(timer);
+    };
   }, [selectedMeetingDetail?.status, refetchDetail, refetchMeetings]);
 
   useEffect(() => {

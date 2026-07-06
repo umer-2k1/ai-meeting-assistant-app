@@ -156,12 +156,23 @@ export async function processMeeting(meetingId: string) {
 
     console.log(`[Processing] Successfully completed processing for ${meetingId}`);
 
-    // 7. Best-effort vector indexing — never fails the meeting.
-    await indexMeetingVectors(meeting, summaryResult).catch((error) => {
+    // 7. Best-effort vector indexing — never fails the meeting, but a persisted
+    //    warning lets the UI say "semantic search unavailable for this meeting"
+    //    instead of degrading silently.
+    await indexMeetingVectors(meeting, summaryResult).catch(async (error) => {
       console.warn(
         '[Processing] Vector indexing skipped (best-effort):',
         error instanceof Error ? error.message : error
       );
+      await prisma.meeting
+        .update({
+          where: { id: meetingId },
+          data: {
+            processingError:
+              'Semantic search indexing failed — Ask AI uses the full transcript for this meeting.',
+          },
+        })
+        .catch(() => {});
     });
 
     return {

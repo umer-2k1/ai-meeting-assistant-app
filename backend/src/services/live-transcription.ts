@@ -39,6 +39,9 @@ export function formatTimestamp(totalSeconds: number): string {
 }
 
 const KEEPALIVE_MS = 8000;
+/** Bounded reconnect on transient Deepgram drops: 3 tries, doubling delay. */
+const RECONNECT_MAX_ATTEMPTS = 3;
+const RECONNECT_BASE_DELAY_MS = 1000;
 
 /** Copy a Node Buffer into a standalone ArrayBuffer (Deepgram accepts ArrayBufferLike). */
 function toArrayBuffer(chunk: Buffer): ArrayBuffer {
@@ -60,28 +63,17 @@ export function createLiveTranscriptionSession(
   const { meetingId, emit } = options;
   const deepgram = createClient(process.env.DEEPGRAM_API_KEY!);
 
-  // Container-encoded Opus (webm) from the browser MediaRecorder — do NOT set
-  // `encoding`/`sample_rate`; Deepgram decodes the container itself.
-  const connection = deepgram.listen.live({
-    model: 'nova-2',
-    language: 'en',
-    diarize: true,
-    interim_results: true,
-    punctuate: true,
-    smart_format: true,
-    // Pace lines at natural pauses instead of flooding one every ~2s.
-    // `endpointing` = ms of silence before Deepgram marks `speech_final`;
-    // `utterance_end_ms` emits an UtteranceEnd event as a backstop for long
-    // monologues. We buffer finalized segments and commit a single line per
-    // utterance (Otter/Meet-style) — see the Transcript handler below.
-    endpointing: 800,
-    utterance_end_ms: 1000,
-  });
-
   let ready = false;
   const pending: Buffer[] = [];
   let keepAlive: ReturnType<typeof setInterval> | null = null;
   let closed = false;
+  let reconnectAttempts = 0;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  // The browser MediaRecorder sends one continuous WebM stream: only the FIRST
+  // chunk carries the container header, so a fresh Deepgram connection can't
+  // decode later chunks on their own. Keep the init chunk and replay it on
+  // every reconnect.
+  let initChunk: Buffer | null = null;
 
   // Accumulate finalized segments for the current utterance; commit as ONE line
   // at a natural pause (speech_final / UtteranceEnd). This is what makes lines
@@ -136,94 +128,152 @@ export function createLiveTranscriptionSession(
       });
   };
 
-  connection.on(LiveTranscriptionEvents.Open, () => {
-    ready = true;
-    // Flush any audio buffered before the socket opened.
-    for (const chunk of pending) connection.send(toArrayBuffer(chunk));
-    pending.length = 0;
-    emit({ type: 'ready' });
-
-    keepAlive = setInterval(() => {
-      try {
-        connection.keepAlive();
-      } catch {
-        /* ignore */
-      }
-    }, KEEPALIVE_MS);
-  });
-
-  connection.on(LiveTranscriptionEvents.Transcript, (data: DeepgramTranscript) => {
-    const alt = data.channel?.alternatives?.[0];
-    const text = alt?.transcript?.trim() ?? '';
-    const words = alt?.words ?? [];
-    const startSeconds = words[0]?.start ?? 0;
-    const speakerIdx = words[0]?.speaker;
-    const detectedSpeaker =
-      typeof speakerIdx === 'number' ? `Speaker ${speakerIdx + 1}` : null;
-
-    if (data.is_final) {
-      // Finalized segment: append to the current utterance buffer.
-      if (text) {
-        if (utterance) {
-          utterance.text = `${utterance.text} ${text}`.trim();
-        } else {
-          utterance = {
-            text,
-            startSeconds,
-            speaker: detectedSpeaker ?? 'Speaker 1',
-          };
-        }
-      }
-      // Commit the whole utterance at a natural pause; otherwise keep buffering
-      // and reflect progress as a live (interim) line.
-      if (data.speech_final) {
-        commitUtterance();
-      } else {
-        emitInterim();
-      }
-      return;
-    }
-
-    // Interim hypothesis: show buffered text + the live partial as one line.
-    if (!text && !utterance) return;
-    const startForLine = utterance?.startSeconds ?? startSeconds;
-    const speakerForLine = utterance?.speaker ?? detectedSpeaker ?? 'Speaker 1';
-    const combined = utterance ? `${utterance.text} ${text}`.trim() : text;
-    emit({
-      type: 'transcript',
-      line: {
-        speaker: speakerForLine,
-        text: combined,
-        timestamp: formatTimestamp(startForLine),
-        timestampSeconds: Math.floor(startForLine),
-      },
-      isFinal: false,
+  /**
+   * Open a Deepgram connection with all handlers attached. Called once at
+   * session start and again on each reconnect attempt.
+   */
+  const openConnection = () => {
+    // Container-encoded Opus (webm) from the browser MediaRecorder — do NOT set
+    // `encoding`/`sample_rate`; Deepgram decodes the container itself.
+    const connection = deepgram.listen.live({
+      model: 'nova-2',
+      language: 'en',
+      diarize: true,
+      interim_results: true,
+      punctuate: true,
+      smart_format: true,
+      // Pace lines at natural pauses instead of flooding one every ~2s.
+      // `endpointing` = ms of silence before Deepgram marks `speech_final`;
+      // `utterance_end_ms` emits an UtteranceEnd event as a backstop for long
+      // monologues. We buffer finalized segments and commit a single line per
+      // utterance (Otter/Meet-style) — see the Transcript handler below.
+      endpointing: 800,
+      utterance_end_ms: 1000,
     });
-  });
 
-  // Backstop for long monologues without a clear endpoint: Deepgram fires
-  // UtteranceEnd after `utterance_end_ms` of silence — commit whatever buffered.
-  connection.on(LiveTranscriptionEvents.UtteranceEnd, () => {
-    commitUtterance();
-  });
+    connection.on(LiveTranscriptionEvents.Open, () => {
+      ready = true;
+      reconnectAttempts = 0;
+      // Replay the container header on reconnects so Deepgram can decode the
+      // stream, then flush audio buffered while the socket was down.
+      if (initChunk && pending[0] !== initChunk) {
+        connection.send(toArrayBuffer(initChunk));
+      }
+      for (const chunk of pending) connection.send(toArrayBuffer(chunk));
+      pending.length = 0;
+      emit({ type: 'ready' });
 
-  connection.on(LiveTranscriptionEvents.Error, (error: unknown) => {
-    console.error('[live-transcription] Deepgram error:', error);
-    emit({ type: 'error', message: 'Transcription error' });
-  });
+      keepAlive = setInterval(() => {
+        try {
+          connection.keepAlive();
+        } catch {
+          /* ignore */
+        }
+      }, KEEPALIVE_MS);
+    });
 
-  connection.on(LiveTranscriptionEvents.Close, () => {
-    // Flush the last in-progress utterance so the final sentence isn't lost.
-    commitUtterance();
-    if (keepAlive) clearInterval(keepAlive);
-  });
+    connection.on(LiveTranscriptionEvents.Transcript, (data: DeepgramTranscript) => {
+      const alt = data.channel?.alternatives?.[0];
+      const text = alt?.transcript?.trim() ?? '';
+      const words = alt?.words ?? [];
+      const startSeconds = words[0]?.start ?? 0;
+      const speakerIdx = words[0]?.speaker;
+      const detectedSpeaker =
+        typeof speakerIdx === 'number' ? `Speaker ${speakerIdx + 1}` : null;
+
+      if (data.is_final) {
+        // Finalized segment: append to the current utterance buffer.
+        if (text) {
+          if (utterance) {
+            utterance.text = `${utterance.text} ${text}`.trim();
+          } else {
+            utterance = {
+              text,
+              startSeconds,
+              speaker: detectedSpeaker ?? 'Speaker 1',
+            };
+          }
+        }
+        // Commit the whole utterance at a natural pause; otherwise keep buffering
+        // and reflect progress as a live (interim) line.
+        if (data.speech_final) {
+          commitUtterance();
+        } else {
+          emitInterim();
+        }
+        return;
+      }
+
+      // Interim hypothesis: show buffered text + the live partial as one line.
+      if (!text && !utterance) return;
+      const startForLine = utterance?.startSeconds ?? startSeconds;
+      const speakerForLine = utterance?.speaker ?? detectedSpeaker ?? 'Speaker 1';
+      const combined = utterance ? `${utterance.text} ${text}`.trim() : text;
+      emit({
+        type: 'transcript',
+        line: {
+          speaker: speakerForLine,
+          text: combined,
+          timestamp: formatTimestamp(startForLine),
+          timestampSeconds: Math.floor(startForLine),
+        },
+        isFinal: false,
+      });
+    });
+
+    // Backstop for long monologues without a clear endpoint: Deepgram fires
+    // UtteranceEnd after `utterance_end_ms` of silence — commit whatever buffered.
+    connection.on(LiveTranscriptionEvents.UtteranceEnd, () => {
+      commitUtterance();
+    });
+
+    connection.on(LiveTranscriptionEvents.Error, (error: unknown) => {
+      console.error('[live-transcription] Deepgram error:', error);
+      // Close fires next and drives the reconnect; nothing to emit yet.
+    });
+
+    connection.on(LiveTranscriptionEvents.Close, () => {
+      // Flush the last in-progress utterance so the final sentence isn't lost.
+      commitUtterance();
+      if (keepAlive) {
+        clearInterval(keepAlive);
+        keepAlive = null;
+      }
+      if (closed) return;
+
+      // Unexpected drop while the session is still active — buffer incoming
+      // audio (see sendAudio) and retry with doubling backoff.
+      ready = false;
+      if (reconnectAttempts >= RECONNECT_MAX_ATTEMPTS) {
+        emit({
+          type: 'error',
+          message: 'Transcription connection lost. Stop and restart the recording to resume.',
+        });
+        return;
+      }
+      reconnectAttempts += 1;
+      const delay = RECONNECT_BASE_DELAY_MS * 2 ** (reconnectAttempts - 1);
+      console.warn(
+        `[live-transcription] connection dropped; reconnect ${reconnectAttempts}/${RECONNECT_MAX_ATTEMPTS} in ${delay}ms`
+      );
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+        if (!closed) activeConnection = openConnection();
+      }, delay);
+    });
+
+    return connection;
+  };
+
+  let activeConnection = openConnection();
 
   return {
     sendAudio(chunk: Buffer) {
       if (closed) return;
+      if (!initChunk) initChunk = chunk;
       if (ready) {
         try {
-          connection.send(toArrayBuffer(chunk));
+          activeConnection.send(toArrayBuffer(chunk));
         } catch (error) {
           console.error('[live-transcription] send failed:', error);
         }
@@ -235,8 +285,9 @@ export function createLiveTranscriptionSession(
       if (closed) return;
       closed = true;
       if (keepAlive) clearInterval(keepAlive);
+      if (reconnectTimer) clearTimeout(reconnectTimer);
       try {
-        connection.requestClose();
+        activeConnection.requestClose();
       } catch {
         /* ignore */
       }

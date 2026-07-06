@@ -311,7 +311,14 @@ export default function MeetingDetailScreen({
       {/* Processing status */}
       {meeting.status === 'processing' && (
         <div className='shrink-0 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300'>
-          Generating summary and action items… this can take a moment. Refresh to see results.
+          Generating summary and action items… this can take a moment. Results appear automatically.
+        </div>
+      )}
+      {/* Non-fatal warning (e.g. vector indexing failed): the summary exists,
+          but a degraded capability is worth telling the user about. */}
+      {meeting.status === 'completed' && meeting.processingError && (
+        <div className='shrink-0 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300'>
+          {meeting.processingError}
         </div>
       )}
       {meeting.status === 'failed' && (
