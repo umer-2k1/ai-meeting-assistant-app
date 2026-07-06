@@ -9,7 +9,6 @@ import {
   IconCalendarEvent,
   IconCircleFilled,
   IconClock,
-  IconFileText,
   IconFolders,
   IconInfoCircle,
   IconHeadphones,
@@ -62,6 +61,7 @@ import {
   importAudioApi,
   searchMeetingsApi,
   streamMeetingAnswer,
+  updateMeetingTitleApi,
 } from './meetings-api';
 import { Skeleton } from '@/components/ui/skeleton';
 import { BrandLogo } from '@/components/brand/brand-mark';
@@ -518,6 +518,9 @@ function LiveScreen({
   elapsedSeconds,
   isRecording,
   isPaused,
+  title,
+  onTitleChange,
+  onTitleCommit,
   transcript,
   interimLine,
   askInput,
@@ -533,6 +536,9 @@ function LiveScreen({
   elapsedSeconds: number;
   isRecording: boolean;
   isPaused: boolean;
+  title: string;
+  onTitleChange: (value: string) => void;
+  onTitleCommit: () => void;
   transcript: TranscriptLine[];
   interimLine: TranscriptLine | null;
   askInput: string;
@@ -590,7 +596,16 @@ function LiveScreen({
             <p className='text-sm text-foreground/80'>Timer: {mm}:{ss}</p>
           </div>
           <Input
-            defaultValue='Product Sync Meeting'
+            value={title}
+            onChange={(event) => onTitleChange(event.currentTarget.value)}
+            onBlur={onTitleCommit}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                event.currentTarget.blur();
+              }
+            }}
+            placeholder='Meeting title'
             aria-label='Meeting title'
             className={COPILOT_INPUT}
           />
@@ -602,14 +617,6 @@ function LiveScreen({
             <Button variant='destructive' onClick={onStop}>
               <IconPlayerStop className='mr-1.5 size-4' />
               Stop
-            </Button>
-            <Button variant='secondary' className='bg-primary/10 text-primary hover:bg-primary/15'>
-              <IconSparkles className='mr-1.5 size-4' />
-              Highlight
-            </Button>
-            <Button variant='secondary' className='bg-primary/10 text-primary hover:bg-primary/15'>
-              <IconFileText className='mr-1.5 size-4' />
-              Note
             </Button>
           </div>
         </CardHeader>
@@ -728,10 +735,25 @@ function LiveScreen({
                     {answer.question}
                   </div>
                   <div className='w-fit max-w-[95%] rounded-2xl rounded-bl-sm border border-border/70 bg-muted/70 px-3 py-1.5 text-sm text-foreground/90'>
-                    {answer.answer || (
-                      <span className='inline-flex items-center gap-1 text-muted-foreground'>
-                        <span className='inline-block size-2 animate-pulse rounded-full bg-[#06B6D4]' />
-                        Thinking…
+                    {answer.answer ||
+                      (answer.error ? null : (
+                        <span className='inline-flex items-center gap-1 text-muted-foreground'>
+                          <span className='inline-block size-2 animate-pulse rounded-full bg-primary' />
+                          Thinking…
+                        </span>
+                      ))}
+                    {answer.error && (
+                      <span className='mt-1 flex items-center gap-2 text-xs text-destructive'>
+                        <IconInfoCircle className='size-3.5 shrink-0' />
+                        Answer interrupted.
+                        <button
+                          type='button'
+                          className='font-medium underline underline-offset-2 hover:text-destructive/80'
+                          onClick={() => void onAskAi(answer.question)}
+                          disabled={isAsking}
+                        >
+                          Retry
+                        </button>
                       </span>
                     )}
                   </div>
@@ -748,12 +770,14 @@ function LiveScreen({
 function FloatingWidget({
   isRecording,
   elapsedSeconds,
+  meetingTitle,
   onPauseResume,
   onStop,
   onAsk
 }: {
   isRecording: boolean;
   elapsedSeconds: number;
+  meetingTitle: string;
   onPauseResume: () => void;
   onStop: () => void;
   onAsk: () => void;
@@ -766,10 +790,10 @@ function FloatingWidget({
   const ss = (elapsedSeconds % 60).toString().padStart(2, '0');
 
   return (
-    <div className={cn('fixed right-4 bottom-4 z-40 w-80 p-3', SURFACE)}>
+    <div className={cn('fixed right-4 bottom-4 z-40 w-80 max-w-[calc(100vw-2rem)] p-3', SURFACE)}>
       <p className='mb-1 text-sm font-semibold text-foreground'>AI Meeting Copilot</p>
       <p className='text-sm text-foreground/85'>🔴 Recording {mm}:{ss}</p>
-      <p className='mt-1 text-xs text-muted-foreground'>Product Sync Meeting</p>
+      <p className='mt-1 truncate text-xs text-muted-foreground'>{meetingTitle || 'Untitled meeting'}</p>
       <div className='mt-2 flex gap-2'>
         <Button size='sm' variant='outline' className='border-primary/50 text-primary' onClick={onAsk}>
           Ask AI
@@ -804,6 +828,7 @@ export default function MeetingCopilotApp() {
   const [deviceCheckTab, setDeviceCheckTab] = useState<DeviceCheckTab>('microphone');
   const [prepContext, setPrepContext] = useState<PreMeetingContext | null>(null);
   const [askInput, setAskInput] = useState('');
+  const [liveTitle, setLiveTitle] = useState('');
   const [detailAskInput, setDetailAskInput] = useState('');
   const [isAsking, setIsAsking] = useState(false);
   const [askError, setAskError] = useState<string | null>(null);
@@ -998,11 +1023,31 @@ export default function MeetingCopilotApp() {
         );
       }
     } catch {
+      // Keep whatever streamed before the drop and mark the answer as
+      // interrupted — the panel shows a Retry affordance instead of silently
+      // presenting a truncated answer as complete.
       setAskError('Ask AI is temporarily unavailable. Please retry.');
-      setAiAnswers((current) => current.filter((a) => a.id !== answerId));
+      setAiAnswers((current) =>
+        current.map((a) => (a.id === answerId ? { ...a, error: true } : a))
+      );
     } finally {
       setIsAsking(false);
     }
+  };
+
+  // Persist the live-session title when the user finishes editing it.
+  const commitLiveTitle = () => {
+    const meetingId = selectedMeetingId;
+    const title = liveTitle.trim();
+    if (!meetingId || !title) return;
+    void updateMeetingTitleApi(meetingId, title)
+      .then(() => {
+        void refetchMeetings();
+        void refetchDetail();
+      })
+      .catch(() => {
+        toast.error('Could not save the meeting title.');
+      });
   };
 
   const startRecording = () => {
@@ -1059,11 +1104,11 @@ export default function MeetingCopilotApp() {
       // have a durable home. Audio streams into it; on stop it is processed.
       let liveMeetingId = '';
       try {
-        const meeting = await createLiveMeetingApi(
-          `Live session · ${new Date().toLocaleString()}`
-        );
+        const defaultTitle = `Live session · ${new Date().toLocaleString()}`;
+        const meeting = await createLiveMeetingApi(defaultTitle);
         liveMeetingId = meeting.id;
         setSelectedMeetingId(meeting.id);
+        setLiveTitle(meeting.title || defaultTitle);
       } catch {
         setAskError('Could not start a meeting on the server. Check your connection and retry.');
         setView('dashboard');
@@ -1100,24 +1145,24 @@ export default function MeetingCopilotApp() {
 
   const stopRecording = () => {
     const meetingId = selectedMeetingId;
-    stopLive();
+    // `stopLive()` resolves after the recorder flushes its final chunk, so the
+    // uploaded blob is guaranteed complete (no timing guess).
+    const stopped = stopLive();
 
     const finalize = () => {
       setIsRecording(false);
       setIsRecordingPaused(false);
       if (meetingId) {
-        // Upload the recorded audio (best-effort) shortly after stop so the
-        // final chunk lands; playback stays on the demo player if it fails.
-        globalThis.setTimeout(() => {
+        void stopped.then(() => {
           const blob = takeRecording();
           if (blob && blob.size > 0) {
             void uploadMeetingAudioApi(meetingId, blob)
               .then(() => void refetchDetail())
               .catch(() => {
-                /* audio storage unavailable — playback stays demo */
+                /* audio storage unavailable — playback stays empty state */
               });
           }
-        }, 600);
+        });
         // Trigger post-meeting processing (summary/action items) and refresh.
         void completeMeetingApi(meetingId)
           .then(() => {
@@ -1257,6 +1302,9 @@ export default function MeetingCopilotApp() {
                 elapsedSeconds={elapsedSeconds}
                 isRecording={isRecording}
                 isPaused={isRecordingPaused}
+                title={liveTitle}
+                onTitleChange={setLiveTitle}
+                onTitleCommit={commitLiveTitle}
                 transcript={liveTranscript}
                 interimLine={interimLine}
                 askInput={askInput}
@@ -1330,6 +1378,7 @@ export default function MeetingCopilotApp() {
         <FloatingWidget
           isRecording={isRecording}
           elapsedSeconds={elapsedSeconds}
+          meetingTitle={liveTitle || selectedMeeting?.title || ''}
           onPauseResume={pauseResumeRecording}
           onStop={stopRecording}
           onAsk={() => {

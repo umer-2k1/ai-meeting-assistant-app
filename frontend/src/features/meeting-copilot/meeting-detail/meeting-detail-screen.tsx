@@ -1,17 +1,12 @@
 import { useEffect, useState } from 'react';
 
 import {
-  IconBug,
   IconCopy,
   IconInfoCircle,
   IconLink,
   IconRefresh,
   IconSparkles,
-  IconStar,
-  IconStarFilled,
-  IconTag,
-  IconTrash,
-  IconUsers
+  IconTrash
 } from '@tabler/icons-react';
 import { toast } from 'sonner';
 
@@ -157,7 +152,6 @@ export default function MeetingDetailScreen({
   onDeleted,
   onReprocess
 }: MeetingDetailScreenProps) {
-  const [isFavorite, setIsFavorite] = useState(meeting.isFavorite ?? false);
   const [myNotes, setMyNotes] = useState(meeting.notes);
   const [existingNoteId, setExistingNoteId] = useState<string | null>(
     meeting.meetingNotes?.[0]?.id ?? null
@@ -171,8 +165,7 @@ export default function MeetingDetailScreen({
   useEffect(() => {
     setMyNotes(meeting.notes);
     setExistingNoteId(meeting.meetingNotes?.[0]?.id ?? null);
-    setIsFavorite(meeting.isFavorite ?? false);
-  }, [meeting.id, meeting.notes, meeting.meetingNotes, meeting.isFavorite]);
+  }, [meeting.id, meeting.notes, meeting.meetingNotes]);
 
   const displayDate = meeting.displayDate ?? meeting.startedAt;
   const audioSeconds = meeting.audioDurationSeconds ?? 60;
@@ -255,26 +248,6 @@ export default function MeetingDetailScreen({
           </div>
 
           <div className='flex shrink-0 items-center gap-1'>
-            <Button type='button' size='icon' variant='ghost' className='size-9' aria-label='Report issue'>
-              <IconBug className='size-4' />
-            </Button>
-            <Button
-              type='button'
-              size='icon'
-              variant='ghost'
-              className='size-9'
-              aria-label={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
-              onClick={() => {
-                setIsFavorite((v) => !v);
-                toast.success(isFavorite ? 'Removed from favorites' : 'Added to favorites');
-              }}
-            >
-              {isFavorite ? (
-                <IconStarFilled className='size-4 text-amber-400' />
-              ) : (
-                <IconStar className='size-4' />
-              )}
-            </Button>
             <Button
               type='button'
               size='icon'
@@ -332,10 +305,6 @@ export default function MeetingDetailScreen({
               #{tag}
             </Badge>
           ))}
-          <Button type='button' size='sm' variant='ghost' className='h-7 rounded-full text-muted-foreground'>
-            <IconTag className='mr-1 size-3.5' />
-            Add tag
-          </Button>
         </div>
       </div>
 
@@ -489,20 +458,6 @@ export default function MeetingDetailScreen({
                     >
                       <IconRefresh className={cn('mr-1 size-3.5', isReprocessing && 'animate-spin')} />
                       Reanalyse
-                    </Button>
-                    <Button
-                      type='button'
-                      size='sm'
-                      variant='outline'
-                      className={cn('h-8 rounded-full text-xs', COPILOT_BTN_OUTLINE)}
-                      onClick={() =>
-                        toast.info('Manage speakers', {
-                          description: 'Rename speakers and merge profiles in a future release.'
-                        })
-                      }
-                    >
-                      <IconUsers className='mr-1 size-3.5' />
-                      Manage Speakers
                     </Button>
                     <Button
                       type='button'

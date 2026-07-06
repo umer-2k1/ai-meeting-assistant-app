@@ -22,6 +22,8 @@ export type AiAnswer = {
   question: string;
   answer: string;
   timestamp: string;
+  /** Set when the answer stream was interrupted; partial text is kept. */
+  error?: boolean;
 };
 
 export type ActionItem = {

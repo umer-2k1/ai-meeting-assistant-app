@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { IconBrandSlack, IconMail, IconShare2 } from '@tabler/icons-react';
 import { toast } from 'sonner';
 
@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { getIntegrationStatus } from '@/lib/integrations-api';
 import { cn } from '@/lib/utils';
 
 import { COPILOT_BTN_OUTLINE } from '../copilot-styles';
@@ -40,6 +41,17 @@ export default function MeetingShareDialog({
   const [selectedChannel, setSelectedChannel] = useState('');
   const [postingSlack, setPostingSlack] = useState(false);
   const [loadingChannels, setLoadingChannels] = useState(false);
+  // null = status unknown (still loading) — don't block sending on it.
+  const [gmailConnected, setGmailConnected] = useState<boolean | null>(null);
+
+  // Check integration availability up front so the user learns "Gmail isn't
+  // connected" when the dialog opens, not after a failed send.
+  useEffect(() => {
+    if (!open) return;
+    void getIntegrationStatus()
+      .then((status) => setGmailConnected(Boolean(status.gmail?.connected)))
+      .catch(() => setGmailConnected(null));
+  }, [open]);
 
   const loadChannels = async () => {
     if (channels || loadingChannels) return;
@@ -129,13 +141,19 @@ export default function MeetingShareDialog({
               onChange={(e) => setRecipients(e.currentTarget.value)}
               placeholder='alice@example.com, bob@example.com'
             />
-            <p className='text-xs text-muted-foreground'>
-              Sent from your connected Gmail account.
-            </p>
+            {gmailConnected === false ? (
+              <p className='text-xs text-destructive'>
+                Gmail is not connected. Connect it in Settings → Integrations to email reports.
+              </p>
+            ) : (
+              <p className='text-xs text-muted-foreground'>
+                Sent from your connected Gmail account.
+              </p>
+            )}
             <Button
               type='button'
               className='w-full bg-primary text-primary-foreground'
-              disabled={sendingEmail}
+              disabled={sendingEmail || gmailConnected === false}
               onClick={() => void sendEmail()}
             >
               {sendingEmail ? 'Sending…' : 'Send email'}

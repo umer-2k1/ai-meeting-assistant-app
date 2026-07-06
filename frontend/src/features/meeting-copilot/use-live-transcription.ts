@@ -32,8 +32,11 @@ export interface UseLiveTranscription {
   error: string | null;
   /** Begin capturing + streaming for the given meeting. */
   start: (meetingId: string, opts?: { captureSystemAudio?: boolean }) => Promise<void>;
-  /** Stop capture + close the stream. */
-  stop: () => void;
+  /**
+   * Stop capture + close the stream. Resolves once the recorder has flushed
+   * its final chunk, so `takeRecording()` afterwards returns the full audio.
+   */
+  stop: () => Promise<void>;
   /** Take the accumulated recording as a Blob (and clear it). Null if none. */
   takeRecording: () => Blob | null;
 }
@@ -70,8 +73,26 @@ export function useLiveTranscription(): UseLiveTranscription {
     wsRef.current = null;
   }, []);
 
-  const stop = useCallback(() => {
+  const stop = useCallback(async () => {
+    // The final `dataavailable` fires before the recorder's `stop` event, so
+    // waiting on `stop` guarantees `chunksRef` holds the complete recording.
+    const recorder = recorderRef.current;
+    const flushed =
+      recorder && recorder.state !== 'inactive'
+        ? new Promise<void>((resolve) => {
+            const safety = globalThis.setTimeout(resolve, 2000);
+            recorder.addEventListener(
+              'stop',
+              () => {
+                globalThis.clearTimeout(safety);
+                resolve();
+              },
+              { once: true }
+            );
+          })
+        : Promise.resolve();
     cleanup();
+    await flushed;
     setInterimLine(null);
     setStatus('idle');
   }, [cleanup]);

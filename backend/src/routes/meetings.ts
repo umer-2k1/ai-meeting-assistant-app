@@ -342,6 +342,33 @@ router.post('/:id/ask', requireAuth, async (req, res) => {
 });
 
 /**
+ * PATCH /api/meetings/:id
+ * Update meeting metadata (currently title only; verifies ownership).
+ */
+router.patch('/:id', requireAuth, async (req, res) => {
+  try {
+    const meetingId = getRouteParam(req.params.id);
+    if (!(await findOwnedMeeting(meetingId, req.user!.id))) {
+      return res.status(404).json({ error: 'Meeting not found' });
+    }
+
+    const title = typeof req.body?.title === 'string' ? req.body.title.trim() : '';
+    if (!title || title.length > 200) {
+      return res.status(400).json({ error: 'Title must be 1-200 characters' });
+    }
+
+    const meeting = await prisma.meeting.update({
+      where: { id: meetingId },
+      data: { title },
+    });
+    res.json({ meeting: serializeMeetingForApi(meeting) });
+  } catch (error) {
+    console.error('Update meeting error:', error);
+    res.status(500).json({ error: 'Failed to update meeting' });
+  }
+});
+
+/**
  * DELETE /api/meetings/:id
  * Delete a meeting and all related data (verifies ownership).
  */

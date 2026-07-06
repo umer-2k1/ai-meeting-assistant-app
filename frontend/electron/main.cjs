@@ -52,6 +52,75 @@ let widgetDragState = null;
 let widgetResizeState = null;
 let widgetExpandedSize = { ...WIDGET_SIZES.expanded };
 
+// ---- Widget position persistence (survives app restarts) ----
+
+function widgetPrefsPath() {
+  return path.join(app.getPath('userData'), 'widget-prefs.json');
+}
+
+/** @type {{ x: number; y: number } | null} */
+let savedWidgetPosition = null;
+/** @type {NodeJS.Timeout | null} */
+let widgetPrefsSaveTimer = null;
+
+function loadWidgetPrefs() {
+  try {
+    const raw = fs.readFileSync(widgetPrefsPath(), 'utf8');
+    const prefs = JSON.parse(raw);
+    if (
+      prefs &&
+      typeof prefs.x === 'number' &&
+      typeof prefs.y === 'number' &&
+      Number.isFinite(prefs.x) &&
+      Number.isFinite(prefs.y)
+    ) {
+      savedWidgetPosition = { x: Math.round(prefs.x), y: Math.round(prefs.y) };
+    }
+    if (prefs && prefs.expandedSize) {
+      const { width, height } = prefs.expandedSize;
+      if (typeof width === 'number' && typeof height === 'number') {
+        widgetExpandedSize = { width: Math.round(width), height: Math.round(height) };
+      }
+    }
+  } catch {
+    // No prefs yet (first run) or unreadable file — defaults apply.
+  }
+}
+
+/** Debounced write — drag/resize fire per mouse-move. */
+function saveWidgetPrefs() {
+  if (widgetPrefsSaveTimer) clearTimeout(widgetPrefsSaveTimer);
+  widgetPrefsSaveTimer = setTimeout(() => {
+    widgetPrefsSaveTimer = null;
+    try {
+      fs.writeFileSync(
+        widgetPrefsPath(),
+        JSON.stringify({ ...savedWidgetPosition, expandedSize: widgetExpandedSize })
+      );
+    } catch (error) {
+      console.warn('[desktop] Failed to save widget prefs', error);
+    }
+  }, 400);
+}
+
+/**
+ * Apply the saved widget position if it is still (mostly) on a visible
+ * display; otherwise fall back to the default bottom-right anchor.
+ */
+function applySavedWidgetPosition() {
+  if (!savedWidgetPosition || !widgetWindow || widgetWindow.isDestroyed()) return false;
+
+  const { x, y } = savedWidgetPosition;
+  const bounds = widgetWindow.getBounds();
+  const display = screen.getDisplayMatching({ x, y, width: bounds.width, height: bounds.height });
+  const area = display.workArea;
+  const clampedX = Math.min(Math.max(x, area.x), area.x + area.width - bounds.width);
+  const clampedY = Math.min(Math.max(y, area.y), area.y + area.height - bounds.height);
+  widgetWindow.setPosition(Math.round(clampedX), Math.round(clampedY));
+  widgetUserPlaced = true;
+  return true;
+}
+
 const recordingState = {
   isRecording: false,
   isPaused: false,
@@ -231,7 +300,7 @@ function syncWidgetVisibility() {
   ensureWidgetWindow();
   if (!widgetWindow || widgetWindow.isDestroyed()) return;
 
-  if (!widgetUserPlaced) {
+  if (!widgetUserPlaced && !applySavedWidgetPosition()) {
     positionWidgetBottomRight();
   }
 
@@ -543,7 +612,7 @@ function createWidgetWindow() {
   // window before first paint is what left a blank/empty overlay on screen.
   widgetWindow.once('ready-to-show', () => {
     widgetContentReady = true;
-    if (!widgetUserPlaced) {
+    if (!widgetUserPlaced && !applySavedWidgetPosition()) {
       positionWidgetBottomRight();
     }
     if (recordingState.isRecording) {
@@ -794,6 +863,11 @@ function registerIpcHandlers() {
 
   ipcMain.handle('desktop:widget:drag-end', () => {
     widgetDragState = null;
+    if (widgetWindow && !widgetWindow.isDestroyed()) {
+      const [x, y] = widgetWindow.getPosition();
+      savedWidgetPosition = { x, y };
+      saveWidgetPrefs();
+    }
     return { ok: true };
   });
 
@@ -843,6 +917,11 @@ function registerIpcHandlers() {
 
   ipcMain.handle('desktop:widget:resize-end', () => {
     widgetResizeState = null;
+    if (widgetWindow && !widgetWindow.isDestroyed()) {
+      const [x, y] = widgetWindow.getPosition();
+      savedWidgetPosition = { x, y };
+      saveWidgetPrefs();
+    }
     return { ok: true };
   });
 
@@ -899,6 +978,7 @@ if (!gotSingleInstanceLock) {
 }
 
 app.whenReady().then(() => {
+  loadWidgetPrefs();
   configureMediaSessionPermissions();
   registerIpcHandlers();
   registerDeepLinking();
