@@ -43,7 +43,7 @@ export async function generateMeetingSummary(
   transcript: string,
   options?: { length?: 'brief' | 'balanced' | 'detailed' }
 ): Promise<z.infer<typeof summarySchema>> {
-  const llm = createGroqLLM({ temperature: 0.5, json: true });
+  const llm = createGroqLLM({ temperature: 0.4, json: true });
 
   const lengthHint =
     options?.length === 'brief'
@@ -58,7 +58,7 @@ export async function generateMeetingSummary(
 You are an expert AI meeting assistant. Read the meeting transcript carefully and produce a rich, accurate briefing. Never invent facts not present in the transcript. Write in clear, professional prose.
 
 Produce:
-1. summary: {lengthHint}.
+1. summary: {lengthHint}. Separate paragraphs with \\n.
 2. keyPoints: {pointCount} specific, self-contained bullet points covering the substantive discussion — topics, arguments, data mentioned, agreements, and open questions. Each bullet is a full, informative sentence, not a fragment.
 3. decisions: every explicit decision or commitment made (empty array if none).
 4. risks: risks, blockers, concerns, or dependencies raised (empty array if none).
@@ -66,7 +66,7 @@ Produce:
 Transcript:
 {transcript}
 
-Respond ONLY with a JSON object of this exact shape:
+Respond ONLY with a single valid JSON object of this exact shape. All string values MUST be wrapped in double quotes and any line breaks inside a string MUST be written as \\n:
 {{
   "summary": "...",
   "keyPoints": ["...", "..."],
@@ -76,11 +76,33 @@ Respond ONLY with a JSON object of this exact shape:
 `);
 
   const chain = prompt.pipe(llm).pipe(new StringOutputParser());
-  return invokeJson(
-    () => chain.invoke({ transcript, lengthHint, pointCount }),
-    summarySchema,
-    'meeting summary'
-  );
+  try {
+    return await invokeJson(
+      () => chain.invoke({ transcript, lengthHint, pointCount }),
+      summarySchema,
+      'meeting summary'
+    );
+  } catch (error) {
+    // The structured call still produced invalid JSON (Groq's JSON mode is
+    // best-effort and longer summaries break it more often). Rather than fail
+    // the whole meeting, degrade gracefully: get the summary as plain text
+    // (no JSON to break) and return it with empty structured lists.
+    console.warn('[ai] summary JSON failed, falling back to plain-text summary:', error);
+    const plainLlm = createGroqLLM({ temperature: 0.4 });
+    const plainPrompt = ChatPromptTemplate.fromTemplate(`
+You are an expert AI meeting assistant. Write {lengthHint} of the following meeting transcript. Use plain prose (no headings, no JSON, no markdown). Never invent facts not present in the transcript.
+
+Transcript:
+{transcript}
+`);
+    const summary = (
+      await plainPrompt.pipe(plainLlm).pipe(new StringOutputParser()).invoke({
+        transcript,
+        lengthHint,
+      })
+    ).trim();
+    return { summary, keyPoints: [], decisions: [], risks: [] };
+  }
 }
 
 /**

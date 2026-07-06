@@ -29,9 +29,52 @@ export function extractJsonBlock(raw: string): string {
   return end > start ? s.slice(start, end + 1) : s;
 }
 
+/**
+ * Escape raw control characters (newlines/tabs/CRs) that appear *inside* JSON
+ * string values. LLMs asked for multi-paragraph text routinely emit literal
+ * newlines inside a string, which is invalid JSON — this repairs that without
+ * touching structural whitespace, preserving paragraph breaks as \n.
+ */
+function escapeControlCharsInStrings(input: string): string {
+  let out = '';
+  let inString = false;
+  let escaped = false;
+  for (const ch of input) {
+    if (escaped) {
+      out += ch;
+      escaped = false;
+      continue;
+    }
+    if (ch === '\\') {
+      out += ch;
+      escaped = true;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      out += ch;
+      continue;
+    }
+    if (inString) {
+      if (ch === '\n') { out += '\\n'; continue; }
+      if (ch === '\r') { out += '\\r'; continue; }
+      if (ch === '\t') { out += '\\t'; continue; }
+    }
+    out += ch;
+  }
+  return out;
+}
+
 /** Parse + validate LLM JSON output against a schema (throws on failure). */
 export function parseLlmJson<S extends z.ZodTypeAny>(raw: string, schema: S): z.infer<S> {
-  const parsed = JSON.parse(extractJsonBlock(raw));
+  const block = extractJsonBlock(raw);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(block);
+  } catch {
+    // Retry after repairing raw control chars inside string values.
+    parsed = JSON.parse(escapeControlCharsInStrings(block));
+  }
   return schema.parse(parsed) as z.infer<S>;
 }
 
