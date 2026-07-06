@@ -251,6 +251,10 @@ export async function createLiveMeetingApi(title: string): Promise<ApiMeeting> {
   return res.meeting;
 }
 
+export async function deleteNoteApi(noteId: string): Promise<void> {
+  await apiRequest(`/api/meetings/notes/${noteId}`, { method: 'DELETE' });
+}
+
 /** Rename a meeting (used by the live-recording title field). */
 export async function updateMeetingTitleApi(id: string, title: string): Promise<void> {
   await apiRequest(`/api/meetings/${id}`, {

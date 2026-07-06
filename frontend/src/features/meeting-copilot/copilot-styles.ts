@@ -1,6 +1,6 @@
 /** Shared Tailwind class strings — respond to light/dark via design tokens */
 export const COPILOT_SURFACE =
-  'rounded-2xl border border-border bg-card text-card-foreground shadow-sm backdrop-blur-sm dark:bg-[linear-gradient(140deg,rgba(30,41,59,0.92),rgba(15,23,42,0.9))] dark:shadow-[0_14px_40px_rgba(2,6,23,0.45)]';
+  'rounded-2xl border border-border bg-card text-card-foreground shadow-sm backdrop-blur-sm dark:bg-[image:var(--copilot-surface-gradient)] dark:shadow-[0_14px_40px_rgba(2,6,23,0.45)]';
 
 export const COPILOT_INPUT =
   'border-border bg-background text-foreground placeholder:text-muted-foreground focus-visible:border-primary';

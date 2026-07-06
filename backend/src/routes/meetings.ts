@@ -19,7 +19,6 @@ import {
   deleteNote,
 } from '../services/meeting.js';
 import { processMeeting, reprocessMeeting } from '../services/processing.js';
-import { answerMeetingQuestion } from '../services/ai.js';
 import { transcribeAudioBuffer } from '../services/transcribe-file.js';
 import { isCloudinaryConfigured } from '../services/cloudinary.js';
 import { buildMeetingMarkdown, buildMeetingPdf } from '../services/export.js';
@@ -284,60 +283,6 @@ router.post('/:id/reprocess', requireAuth, async (req, res) => {
   } catch (error) {
     console.error('Reprocess meeting error:', error);
     res.status(500).json({ error: 'Failed to reprocess meeting' });
-  }
-});
-
-/**
- * POST /api/meetings/:id/ask
- * Ask AI question about meeting
- */
-router.post('/:id/ask', requireAuth, async (req, res) => {
-  try {
-    const meetingId = getRouteParam(req.params.id);
-    const { question } = req.body;
-
-    if (!question) {
-      return res.status(400).json({ error: 'Question is required' });
-    }
-
-    const meeting = await getMeetingWithDetails(meetingId, req.user!.id);
-
-    if (!meeting) {
-      return res.status(404).json({ error: 'Meeting not found' });
-    }
-
-    // Prepare context
-    const transcriptText = meeting.transcript
-      .map((line) => `[${line.timestamp}] ${line.speaker}: ${line.text}`)
-      .join('\n');
-
-    const actionItemsText = meeting.actionItems
-      .map((item) => `- ${item.task} (${item.assignee || 'Unassigned'})`)
-      .join('\n');
-
-    const answer = await answerMeetingQuestion(question, {
-      transcript: transcriptText,
-      summary: meeting.aiSummary || undefined,
-      actionItems: actionItemsText,
-    });
-
-    // Save to chat history
-    const { default: prisma } = await import('../lib/prisma.js');
-    await prisma.aIChatMessage.create({
-      data: {
-        meetingId: meeting.id,
-        userId: req.user!.id,
-        question,
-        answer: answer.answer,
-        contextType: 'transcript',
-        model: 'groq',
-      },
-    });
-
-    res.json(answer);
-  } catch (error) {
-    console.error('Ask AI error:', error);
-    res.status(500).json({ error: 'Failed to answer question' });
   }
 });
 

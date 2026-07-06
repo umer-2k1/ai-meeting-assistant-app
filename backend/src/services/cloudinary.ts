@@ -123,25 +123,3 @@ export async function deleteAudio(publicId: string): Promise<void> {
     throw new Error('Failed to delete audio from Cloudinary');
   }
 }
-
-/**
- * Upload local file and delete after upload
- */
-export async function uploadAndCleanup(
-  filePath: string,
-  options: {
-    publicId?: string;
-    folder?: string;
-  } = {}
-): Promise<UploadResult> {
-  const result = await uploadAudio(filePath, options);
-
-  // Delete local file after successful upload
-  try {
-    fs.unlinkSync(filePath);
-  } catch (error) {
-    console.warn('Failed to delete local file:', error);
-  }
-
-  return result;
-}

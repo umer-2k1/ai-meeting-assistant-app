@@ -35,6 +35,7 @@ import { COPILOT_BTN_OUTLINE, COPILOT_INPUT, COPILOT_SURFACE } from '../copilot-
 import {
   createNoteApi,
   deleteMeetingApi,
+  deleteNoteApi,
   reprocessMeetingApi,
   updateNoteApi
 } from '../meetings-api';
@@ -193,6 +194,21 @@ export default function MeetingDetailScreen({
       toast.success('Notes saved');
     } catch {
       toast.error('Failed to save notes');
+    } finally {
+      setIsSavingNotes(false);
+    }
+  };
+
+  const deleteNotes = async () => {
+    if (!existingNoteId) return;
+    setIsSavingNotes(true);
+    try {
+      await deleteNoteApi(existingNoteId);
+      setExistingNoteId(null);
+      setMyNotes('');
+      toast.success('Note deleted');
+    } catch {
+      toast.error('Failed to delete note');
     } finally {
       setIsSavingNotes(false);
     }
@@ -432,7 +448,19 @@ export default function MeetingDetailScreen({
                 minHeight='240px'
                 paneScroll
               />
-              <div className='mt-3 flex justify-end'>
+              <div className='mt-3 flex justify-end gap-2'>
+                {existingNoteId && (
+                  <Button
+                    type='button'
+                    size='sm'
+                    variant='outline'
+                    className={cn(COPILOT_BTN_OUTLINE, 'text-destructive hover:text-destructive')}
+                    disabled={isSavingNotes}
+                    onClick={() => void deleteNotes()}
+                  >
+                    Delete note
+                  </Button>
+                )}
                 <Button
                   type='button'
                   size='sm'

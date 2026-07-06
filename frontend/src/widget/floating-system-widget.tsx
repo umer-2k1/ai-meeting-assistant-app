@@ -250,7 +250,7 @@ export default function FloatingSystemWidget() {
                 void stopRecording();
               }}
             >
-              <span className='inline-flex size-2.5 rounded-[2px] bg-[#EF4444]' />
+              <span className='inline-flex size-2.5 rounded-[2px] bg-red-500' />
             </button>
 
             <button
@@ -284,7 +284,7 @@ export default function FloatingSystemWidget() {
             <BrandMark size={30} animated={isLive} />
             <span className='font-mono text-sm font-semibold text-foreground'>{timerLabel}</span>
             {isLive && (
-              <span className='rounded-full bg-[#EF4444]/20 px-2 py-0.5 text-[11px] font-medium text-[#FCA5A5]'>
+              <span className='rounded-full bg-red-500/20 px-2 py-0.5 text-[11px] font-medium text-red-300'>
                 LIVE
               </span>
             )}

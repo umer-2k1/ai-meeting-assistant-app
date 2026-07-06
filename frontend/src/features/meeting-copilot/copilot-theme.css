@@ -1,6 +1,8 @@
 /* Meeting Copilot — theme-aware surfaces (light = white canvas, dark = deep navy) */
 
 :root {
+  /* Card surface: flat in light mode; deep-navy gradient in dark mode. */
+  --copilot-surface-gradient: none;
   --copilot-glow-primary: rgb(59 130 246 / 0.12);
   --copilot-glow-secondary: rgb(37 99 235 / 0.08);
   --copilot-nav-hover: oklch(0.955 0.016 256);
@@ -11,6 +13,7 @@
 }
 
 .dark {
+  --copilot-surface-gradient: linear-gradient(140deg, rgb(30 41 59 / 0.92), rgb(15 23 42 / 0.9));
   --copilot-glow-primary: rgb(37 99 235 / 0.28);
   --copilot-glow-secondary: rgb(59 130 246 / 0.16);
   --copilot-nav-hover: oklch(0.29 0.04 258);

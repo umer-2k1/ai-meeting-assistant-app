@@ -254,7 +254,7 @@ function AppSidebar({
 }
 
 const STATUS_BADGE: Record<Meeting['status'], { label: string; className: string }> = {
-  live: { label: 'Live', className: 'bg-[#EF4444] text-white border-transparent' },
+  live: { label: 'Live', className: 'bg-red-500 text-white border-transparent' },
   processing: { label: 'Processing', className: 'bg-amber-500/15 text-amber-600 border-amber-500/40' },
   scheduled: { label: 'Upcoming', className: 'bg-blue-500/10 text-blue-600 border-blue-500/40' },
   completed: { label: 'Completed', className: 'border-border text-muted-foreground' },
@@ -439,7 +439,7 @@ function DashboardScreen({
                 }}
                 className={cn(
                   SURFACE,
-                  'cursor-pointer transition-all hover:-translate-y-0.5 hover:border-[#3B82F6]/60'
+                  'cursor-pointer transition-all hover:-translate-y-0.5 hover:border-primary/60'
                 )}
               >
                 <CardHeader className='space-y-3'>
@@ -624,7 +624,7 @@ function LiveScreen({
           <p className='text-xs font-semibold tracking-[0.15em] text-muted-foreground uppercase'>
             Live Transcript
           </p>
-          <div aria-live='polite' className='max-h-[420px] space-y-3 overflow-y-auto pr-2'>
+          <div aria-live='polite' className='max-h-[max(280px,50dvh)] space-y-3 overflow-y-auto pr-2'>
             {transcript.length === 0 && !interimLine && (
               <p className='text-sm text-muted-foreground'>
                 {isRecording ? 'Listening…' : 'Transcript will appear here once recording starts.'}
@@ -677,7 +677,13 @@ function LiveScreen({
                 }}
                 className={COPILOT_INPUT}
               />
-              <Button size='icon' type='submit' disabled={isAsking} className='bg-primary text-primary-foreground'>
+              <Button
+                size='icon'
+                type='submit'
+                disabled={isAsking}
+                aria-label='Ask AI'
+                className='bg-primary text-primary-foreground'
+              >
                 <IconArrowUp className='size-4' />
               </Button>
             </div>
@@ -686,7 +692,7 @@ function LiveScreen({
                 <button
                   key={prompt}
                   type='button'
-                  className='rounded-full border border-border bg-muted/70 px-3 py-1 text-xs text-foreground/80 hover:border-[#3B82F6]'
+                  className='rounded-full border border-border bg-muted/70 px-3 py-1 text-xs text-foreground/80 hover:border-primary'
                   onClick={async () => {
                     await onAskAi(prompt);
                   }}
@@ -696,13 +702,13 @@ function LiveScreen({
               ))}
             </div>
             {isAsking && (
-              <p className='inline-flex items-center gap-1 text-xs text-[#06B6D4]'>
-                <span className='inline-block size-2 animate-pulse rounded-full bg-[#06B6D4]' />
+              <p className='inline-flex items-center gap-1 text-xs text-cyan-600 dark:text-cyan-400'>
+                <span className='inline-block size-2 animate-pulse rounded-full bg-cyan-500' />
                 AI is analyzing the meeting context...
               </p>
             )}
             {askError && (
-              <p className='inline-flex items-center gap-1 text-xs text-[#F59E0B]'>
+              <p className='inline-flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400'>
                 <IconInfoCircle className='size-3.5' />
                 {askError}
               </p>
@@ -728,7 +734,7 @@ function LiveScreen({
               here, kept separate from the live transcript.
             </p>
           ) : (
-            <div className='max-h-[460px] space-y-3 overflow-y-auto overscroll-contain pr-1'>
+            <div className='max-h-[max(320px,60dvh)] space-y-3 overflow-y-auto overscroll-contain pr-1'>
               {aiAnswers.map((answer) => (
                 <div key={answer.id} className='space-y-1.5'>
                   <div className='ml-auto w-fit max-w-[90%] rounded-2xl rounded-br-sm bg-primary px-3 py-1.5 text-sm text-primary-foreground'>
@@ -1249,7 +1255,7 @@ export default function MeetingCopilotApp() {
     <div className='relative flex h-dvh flex-col overflow-hidden bg-background text-foreground'>
       <div className='pointer-events-none absolute -top-24 -left-24 size-80 rounded-full bg-[var(--copilot-glow-primary)] blur-3xl' />
       <div className='pointer-events-none absolute top-20 right-0 size-[26rem] rounded-full bg-[var(--copilot-glow-secondary)] blur-3xl' />
-      <div className='pointer-events-none absolute bottom-0 left-1/3 size-[30rem] rounded-full bg-cyan-500/10 blur-3xl dark:bg-[#06B6D4]/12' />
+      <div className='pointer-events-none absolute bottom-0 left-1/3 size-[30rem] rounded-full bg-cyan-500/10 blur-3xl dark:bg-cyan-500/15' />
       <div className='relative z-10 mx-auto flex h-full min-h-0 w-full max-w-[1800px]'>
         <AppSidebar
           activeView={view}
@@ -1271,7 +1277,7 @@ export default function MeetingCopilotApp() {
                 <p className='text-xs text-muted-foreground'>{pageMeta.description}</p>
               </div>
               <div className='flex items-center gap-3'>
-                <Badge variant='outline' className='border-cyan-500/50 bg-cyan-500/10 text-cyan-700 dark:text-[#67e8f9]'>
+                <Badge variant='outline' className='border-cyan-500/50 bg-cyan-500/10 text-cyan-700 dark:text-cyan-300'>
                   <IconBolt className='mr-1 size-3.5' />
                   Live AI
                 </Badge>
