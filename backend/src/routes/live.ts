@@ -5,6 +5,7 @@ import {
   createMeeting,
   addTranscriptLine,
   getMeetingWithDetails,
+  findOwnedMeeting,
 } from '../services/meeting.js';
 import { answerMeetingQuestionStream } from '../services/ai-stream.js';
 import { searchTranscripts, generateEmbedding } from '../services/embeddings.js';
@@ -59,6 +60,9 @@ router.post('/meetings', requireAuth, async (req, res) => {
 router.post('/meetings/:id/transcript', requireAuth, async (req, res) => {
   try {
     const meetingId = getRouteParam(req.params.id);
+    if (!(await findOwnedMeeting(meetingId, req.user!.id))) {
+      return res.status(404).json({ error: 'Meeting not found' });
+    }
     const validated = validateOrThrow(createTranscriptLineSchema, {
       ...req.body,
       meetingId,
@@ -154,28 +158,37 @@ router.post('/meetings/:id/ask', requireAuth, async (req, res) => {
             res.write(`data: ${JSON.stringify({ token })}\n\n`);
           },
           onComplete: async (fullAnswer, metadata) => {
-            // Save to database
-            const { default: prisma } = await import('../lib/prisma.js');
-            await prisma.aIChatMessage.create({
-              data: {
-                meetingId: meeting.id,
-                userId: req.user!.id,
-                question: validated.question,
-                answer: fullAnswer,
-                contextType: 'transcript',
-                contextSnippet: transcriptContext.substring(0, 500),
-                model: 'groq',
-                tokensUsed: metadata?.tokensUsed,
-                responseTime: metadata?.responseTime,
-              },
-            });
+            // Save to database — a persistence failure must not swallow the
+            // `done` frame, or the client hangs on a completed answer.
+            try {
+              const { default: prisma } = await import('../lib/prisma.js');
+              await prisma.aIChatMessage.create({
+                data: {
+                  meetingId: meeting.id,
+                  userId: req.user!.id,
+                  question: validated.question,
+                  answer: fullAnswer,
+                  contextType: 'transcript',
+                  contextSnippet: transcriptContext.substring(0, 500),
+                  model: 'groq',
+                  tokensUsed: metadata?.tokensUsed,
+                  responseTime: metadata?.responseTime,
+                },
+              });
+            } catch (dbError) {
+              console.error('Failed to persist chat message:', dbError);
+            }
 
-            res.write(`data: ${JSON.stringify({ done: true, timestamp: metadata?.timestamp })}\n\n`);
-            res.end();
+            if (!res.writableEnded) {
+              res.write(`data: ${JSON.stringify({ done: true, timestamp: metadata?.timestamp })}\n\n`);
+              res.end();
+            }
           },
           onError: (error) => {
-            res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
-            res.end();
+            if (!res.writableEnded) {
+              res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
+              res.end();
+            }
           },
         }
       );
@@ -218,6 +231,15 @@ router.post('/meetings/:id/ask', requireAuth, async (req, res) => {
     }
   } catch (error) {
     console.error('Ask AI error:', error);
+    // If SSE headers are already out, a JSON status response would corrupt the
+    // stream — emit a final SSE error frame instead.
+    if (res.headersSent) {
+      if (!res.writableEnded) {
+        res.write(`data: ${JSON.stringify({ error: 'Failed to answer question' })}\n\n`);
+        res.end();
+      }
+      return;
+    }
     res.status(500).json({ error: 'Failed to answer question' });
   }
 });

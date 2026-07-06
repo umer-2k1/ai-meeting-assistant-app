@@ -1,7 +1,18 @@
 import prisma from '../lib/prisma.js';
-import { uploadAndCleanup, uploadAudioBuffer } from './cloudinary.js';
+import { uploadAudioBuffer } from './cloudinary.js';
 import { parseStringList } from '../lib/json-list.js';
 import type { Meeting, TranscriptLine } from '@prisma/client';
+
+/**
+ * Return the meeting id when it exists and belongs to the user, else null.
+ * Routes use this as the ownership gate before mutating meeting sub-resources.
+ */
+export async function findOwnedMeeting(meetingId: string, userId: string) {
+  return prisma.meeting.findFirst({
+    where: { id: meetingId, userId },
+    select: { id: true },
+  });
+}
 
 /**
  * Create a new meeting record
@@ -157,35 +168,6 @@ export async function addTranscriptLine(
 }
 
 /**
- * Update meeting with recording audio URL
- */
-export async function updateMeetingAudio(
-  meetingId: string,
-  audioPath: string
-) {
-  try {
-    // Upload to Cloudinary
-    const uploadResult = await uploadAndCleanup(audioPath, {
-      publicId: `meeting-${meetingId}`,
-      folder: 'meeting-recordings',
-    });
-
-    // Update meeting record
-    return prisma.meeting.update({
-      where: { id: meetingId },
-      data: {
-        audioUrl: uploadResult.secureUrl,
-        audioDuration: uploadResult.duration,
-        recordingEnded: new Date(),
-      },
-    });
-  } catch (error) {
-    console.error('Failed to update meeting audio:', error);
-    throw error;
-  }
-}
-
-/**
  * Store a recorded/imported audio blob (from multer memoryStorage) on a meeting.
  * Uploads to Cloudinary and sets audioUrl/audioDuration so the detail player
  * plays real audio instead of the demo fallback.
@@ -206,33 +188,39 @@ export async function updateMeetingAudioBuffer(meetingId: string, buffer: Buffer
 }
 
 /**
- * Complete a meeting (mark as PROCESSING)
+ * Complete a meeting (mark as PROCESSING).
+ *
+ * Race-safe against `finalizeAbandonedMeeting` (fired on WebSocket close): the
+ * LIVE→PROCESSING transition is atomic (`updateMany` guarded on
+ * `status: 'LIVE'`), so exactly one caller "claims" the meeting and triggers
+ * processing. `claimed: false` means someone else already finalized it.
  */
-export async function completeMeeting(meetingId: string) {
-  const meeting = await prisma.meeting.findUnique({
-    where: { id: meetingId },
-    include: {
-      transcript: true,
-    },
+export async function completeMeeting(meetingId: string, userId: string) {
+  const meeting = await prisma.meeting.findFirst({
+    where: { id: meetingId, userId },
   });
 
   if (!meeting) {
     throw new Error('Meeting not found');
   }
 
-  // Calculate duration
-  const duration = meeting.recordingEnded && meeting.recordingStarted
-    ? Math.floor((meeting.recordingEnded.getTime() - meeting.recordingStarted.getTime()) / 1000)
+  const recordingEnded = meeting.recordingEnded || new Date();
+  const duration = meeting.recordingStarted
+    ? Math.floor((recordingEnded.getTime() - meeting.recordingStarted.getTime()) / 1000)
     : null;
 
-  return prisma.meeting.update({
-    where: { id: meetingId },
+  const result = await prisma.meeting.updateMany({
+    where: { id: meetingId, status: 'LIVE' },
     data: {
       status: 'PROCESSING',
-      endTime: meeting.recordingEnded || new Date(),
+      endTime: recordingEnded,
+      recordingEnded,
       duration,
     },
   });
+
+  const updated = await prisma.meeting.findUnique({ where: { id: meetingId } });
+  return { meeting: updated!, claimed: result.count === 1 };
 }
 
 /**

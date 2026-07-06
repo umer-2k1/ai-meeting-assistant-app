@@ -6,7 +6,7 @@
  * Used by both the REST transcript endpoint and the live WebSocket pipeline.
  */
 import prisma from '../lib/prisma.js';
-import { embedTranscriptChunk } from './embeddings.js';
+import { embedTranscriptChunk, EMBEDDING_DIMENSION } from './embeddings.js';
 import { storeTranscriptEmbedding } from './vector-store.js';
 
 export interface EmbeddableLine {
@@ -42,7 +42,7 @@ export async function embedTranscriptLine(line: EmbeddableLine): Promise<void> {
       qdrantId: pointId,
       collectionName: 'transcripts',
       model: 'gemini',
-      dimension: 768,
+      dimension: EMBEDDING_DIMENSION,
     },
   });
 }

@@ -27,9 +27,22 @@ const REQUIRED_VARS: RequiredVar[] = [
   { name: 'CLOUDINARY_API_SECRET', hint: 'Cloudinary API secret' },
 ];
 
+/**
+ * Vars that have localhost defaults for development but MUST be set explicitly
+ * in production — OAuth redirects and deep links silently break otherwise.
+ */
+const PRODUCTION_REQUIRED_VARS: RequiredVar[] = [
+  { name: 'FRONTEND_URL', hint: 'public URL of the frontend (OAuth redirect target)' },
+  { name: 'GOOGLE_REDIRECT_URI', hint: 'public login OAuth callback, e.g. https://api.example.com/auth/google/callback' },
+];
+
 /** Returns the list of missing required env vars (empty when all present). */
 export function getMissingEnvVars(): RequiredVar[] {
-  return REQUIRED_VARS.filter(({ name }) => {
+  const required =
+    process.env.NODE_ENV === 'production'
+      ? [...REQUIRED_VARS, ...PRODUCTION_REQUIRED_VARS]
+      : REQUIRED_VARS;
+  return required.filter(({ name }) => {
     const value = process.env[name];
     return !value || value.trim().length === 0;
   });

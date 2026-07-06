@@ -42,6 +42,9 @@ export const createMeetingSchema = z.object({
 
 export const updateMeetingSchema = createMeetingSchema.partial();
 
+/** Single share-email recipient (used to validate share requests). */
+export const emailRecipientSchema = z.string().email();
+
 export const meetingSchema = z.object({
   id: z.string().cuid(),
   title: z.string(),

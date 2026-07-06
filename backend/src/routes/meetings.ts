@@ -5,9 +5,9 @@ import prisma from '../lib/prisma.js';
 import {
   createMeeting,
   addTranscriptLine,
-  updateMeetingAudio,
   updateMeetingAudioBuffer,
   completeMeeting,
+  findOwnedMeeting,
   getMeetingWithDetails,
   getUserMeetings,
   serializeMeetingForApi,
@@ -25,6 +25,7 @@ import { isCloudinaryConfigured } from '../services/cloudinary.js';
 import { buildMeetingMarkdown, buildMeetingPdf } from '../services/export.js';
 import { shareMeetingByEmail, shareMeetingToSlack } from '../services/share.js';
 import { getRouteParam } from '../lib/params.js';
+import { emailRecipientSchema } from '../lib/schemas.js';
 
 /** In-memory upload for recorded/imported audio (uploaded on to Cloudinary). */
 const audioUpload = multer({
@@ -169,7 +170,13 @@ router.post('/import', requireAuth, audioUpload.single('audio'), async (req, res
               processingError: err instanceof Error ? err.message : 'Import failed',
             },
           })
-          .catch(() => {});
+          .catch((statusErr) => {
+            // Worst case: the meeting is stuck in PROCESSING — make it loud.
+            console.error(
+              `[import] CRITICAL: failed to mark meeting ${meeting.id} as FAILED (stuck in PROCESSING):`,
+              statusErr
+            );
+          });
       }
     })();
   } catch (error) {
@@ -185,6 +192,9 @@ router.post('/import', requireAuth, audioUpload.single('audio'), async (req, res
 router.post('/:id/transcript', requireAuth, async (req, res) => {
   try {
     const meetingId = getRouteParam(req.params.id);
+    if (!(await findOwnedMeeting(meetingId, req.user!.id))) {
+      return res.status(404).json({ error: 'Meeting not found' });
+    }
     const { speaker, text, timestamp, timestampSeconds, confidence, highlighted } = req.body;
 
     if (!speaker || !text || !timestamp || timestampSeconds === undefined) {
@@ -214,25 +224,23 @@ router.post('/:id/transcript', requireAuth, async (req, res) => {
 router.post('/:id/complete', requireAuth, async (req, res) => {
   try {
     const meetingId = getRouteParam(req.params.id);
-    const { audioPath } = req.body;
 
-    // Update meeting status
-    const meeting = await completeMeeting(meetingId);
+    const { meeting, claimed } = await completeMeeting(meetingId, req.user!.id);
 
-    // Upload audio if provided
-    if (audioPath) {
-      await updateMeetingAudio(meetingId, audioPath);
+    // Trigger async processing only when this call won the LIVE→PROCESSING
+    // claim; otherwise the abandoned-session finalizer already owns it.
+    if (claimed) {
+      processMeeting(meetingId).catch((error) => {
+        console.error('Background processing error:', error);
+      });
     }
 
-    // Trigger async processing
-    processMeeting(meetingId).catch((error) => {
-      console.error('Background processing error:', error);
-    });
-
-    res.json({ meeting, processing: true });
+    res.json({ meeting, processing: claimed });
   } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to complete meeting';
+    const status = message.includes('not found') ? 404 : 500;
     console.error('Complete meeting error:', error);
-    res.status(500).json({ error: 'Failed to complete meeting' });
+    res.status(status).json({ error: status === 404 ? 'Meeting not found' : 'Failed to complete meeting' });
   }
 });
 
@@ -393,11 +401,15 @@ router.get('/:id/export.pdf', requireAuth, async (req, res) => {
 router.post('/:id/share/email', requireAuth, async (req, res) => {
   try {
     const meetingId = getRouteParam(req.params.id);
-    const recipients = Array.isArray(req.body?.recipients)
+    const recipients: string[] = Array.isArray(req.body?.recipients)
       ? req.body.recipients.map((r: unknown) => String(r).trim()).filter(Boolean)
       : [];
     if (recipients.length === 0) {
       return res.status(400).json({ error: 'At least one recipient is required' });
+    }
+    const invalid = recipients.filter((r) => !emailRecipientSchema.safeParse(r).success);
+    if (invalid.length > 0) {
+      return res.status(400).json({ error: `Invalid email address: ${invalid.join(', ')}` });
     }
 
     const meeting = await getMeetingWithDetails(meetingId, req.user!.id);
