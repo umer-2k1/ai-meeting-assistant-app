@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
+  IconMusicOff,
   IconPlayerPause,
   IconPlayerPlay,
   IconPlayerSkipBack,
@@ -112,26 +113,6 @@ export default function MeetingAudioPlayer({
     }
   }, [playbackRate]);
 
-  /** Demo playback when no file URL — advances currentTime so the slider fill matches elapsed time. */
-  useEffect(() => {
-    if (audioUrl || !isPlaying) return;
-
-    const tickMs = 100;
-    const id = window.setInterval(() => {
-      setCurrentTime((prev) => {
-        const max = effectiveDurationRef.current;
-        const next = prev + tickMs / 1000;
-        if (next >= max - 1e-3) {
-          window.setTimeout(() => setIsPlaying(false), 0);
-          return max;
-        }
-        return next;
-      });
-    }, tickMs);
-
-    return () => clearInterval(id);
-  }, [audioUrl, isPlaying]);
-
   const togglePlay = async () => {
     const audio = audioRef.current;
 
@@ -168,6 +149,31 @@ export default function MeetingAudioPlayer({
   const rangeMax = Math.max(0.01, effectiveDuration);
   const rangeValue = clampTime(currentTime, rangeMax);
 
+  // No saved recording — show a clean, honest empty state instead of a fake
+  // "demo" player. (Meetings created before audio capture, imported without a
+  // stored file, or seed data have a transcript but no audio to play.)
+  if (!audioUrl) {
+    return (
+      <div
+        className={cn(
+          'flex items-center gap-3 rounded-xl border border-border/70 bg-muted/30 px-4 py-3',
+          className
+        )}
+      >
+        <span className='inline-flex size-9 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground'>
+          <IconMusicOff className='size-4' />
+        </span>
+        <div className='min-w-0'>
+          <p className='text-sm font-medium text-foreground'>No recording available</p>
+          <p className='text-xs text-muted-foreground'>
+            This meeting has a transcript but no saved audio. New recordings and imported
+            audio are stored for playback.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       className={cn(
@@ -175,15 +181,7 @@ export default function MeetingAudioPlayer({
         className
       )}
     >
-      {audioUrl ? (
-        <audio
-          key={audioUrl}
-          ref={audioRef}
-          src={audioUrl}
-          preload='metadata'
-          playsInline
-        />
-      ) : null}
+      <audio key={audioUrl} ref={audioRef} src={audioUrl} preload='metadata' playsInline />
 
       <Button
         type='button'
@@ -249,12 +247,6 @@ export default function MeetingAudioPlayer({
         </Button>
       </div>
 
-      {!audioUrl && (
-        <p className='w-full text-xs text-muted-foreground'>
-          Demo playback — attach <code className='text-foreground/80'>audioUrl</code> on the meeting for
-          real audio. Slider fill matches elapsed time against the meeting duration.
-        </p>
-      )}
     </div>
   );
 }
