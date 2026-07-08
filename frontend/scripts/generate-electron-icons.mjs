@@ -1,51 +1,55 @@
-import { existsSync, mkdirSync, rmSync } from 'node:fs';
-import { execSync } from 'node:child_process';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+const require = createRequire(import.meta.url);
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const iconsDir = path.join(root, 'electron', 'icons');
 const sourceWebp = path.join(root, 'public', 'favicon', 'favicon-512.webp');
-const outputPng = path.join(iconsDir, 'icon.png');
-const iconset = path.join(iconsDir, 'icon.iconset');
-const icnsOut = path.join(iconsDir, 'icon.icns');
+const outputPng = path.join(iconsDir, 'icon.png'); // Linux + nativeImage fallback
+const icnsOut = path.join(iconsDir, 'icon.icns'); // macOS app bundle
+const icoOut = path.join(iconsDir, 'icon.ico'); // Windows app + taskbar
 
 if (!existsSync(sourceWebp)) {
   console.warn('[icons] Source favicon not found:', sourceWebp);
   process.exit(0);
 }
 
-mkdirSync(iconsDir, { recursive: true });
-
-if (process.platform !== 'darwin') {
-  console.warn('[icons] macOS (sips + iconutil) required to generate icons. Commit icon.icns/icon.png manually on other platforms.');
+// Both are cross-platform (sharp ships prebuilt binaries for win/mac/linux;
+// png2icons is pure JS), so icons build identically on every OS — no sips/iconutil.
+let sharp;
+let png2icons;
+try {
+  sharp = require('sharp');
+  png2icons = require('png2icons');
+} catch {
+  console.warn(
+    '[icons] Missing deps. Install them (from frontend/): pnpm add -D sharp png2icons'
+  );
   process.exit(0);
 }
 
-// 1. Base 512px PNG from the brand favicon.
-execSync(`sips -s format png "${sourceWebp}" --out "${outputPng}"`, { stdio: 'inherit' });
+mkdirSync(iconsDir, { recursive: true });
 
-// 2. Rebuild the .iconset at every size macOS wants.
-rmSync(iconset, { recursive: true, force: true });
-mkdirSync(iconset, { recursive: true });
-const specs = [
-  [16, 'icon_16x16.png'],
-  [32, 'icon_16x16@2x.png'],
-  [32, 'icon_32x32.png'],
-  [64, 'icon_32x32@2x.png'],
-  [128, 'icon_128x128.png'],
-  [256, 'icon_128x128@2x.png'],
-  [256, 'icon_256x256.png'],
-  [512, 'icon_256x256@2x.png'],
-  [512, 'icon_512x512.png'],
-  [1024, 'icon_512x512@2x.png'],
-];
-for (const [size, name] of specs) {
-  execSync(`sips -z ${size} ${size} "${outputPng}" --out "${path.join(iconset, name)}"`, {
-    stdio: 'ignore',
-  });
-}
+const transparent = { r: 0, g: 0, b: 0, alpha: 0 };
 
-// 3. Compile the .icns used by the macOS dock + app bundle.
-execSync(`iconutil -c icns "${iconset}" -o "${icnsOut}"`, { stdio: 'inherit' });
-console.log('[icons] Generated', icnsOut);
+// 1. Decode the brand webp into a 1024px PNG master — the size .icns @2x needs.
+const master = await sharp(sourceWebp)
+  .resize(1024, 1024, { fit: 'contain', background: transparent })
+  .png()
+  .toBuffer();
+
+// 2. Linux / fallback raster at 512.
+await sharp(master).resize(512, 512, { fit: 'contain', background: transparent }).png().toFile(outputPng);
+
+// 3. macOS .icns and Windows .ico, packed from the master in pure JS.
+const icns = png2icons.createICNS(master, png2icons.BICUBIC, 0);
+if (icns) writeFileSync(icnsOut, icns);
+
+// usePNG=true → 256px entries are PNG-compressed, the format modern Windows requires.
+const ico = png2icons.createICO(master, png2icons.BICUBIC, 0, /* usePNG */ true);
+if (ico) writeFileSync(icoOut, ico);
+
+console.log('[icons] Generated', [outputPng, icnsOut, icoOut].map((p) => path.basename(p)).join(', '));
