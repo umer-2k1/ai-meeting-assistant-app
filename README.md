@@ -2,11 +2,12 @@
 
 **Production-ready AI-powered meeting assistant with real-time transcription, intelligent insights, and seamless integrations.**
 
-> Built with Electron, React, Node.js, SQLite, Deepgram, Groq, Google Gemini, and Qdrant.
+> Built with Electron, React, Node.js, SQLite, Deepgram, Groq, and Google Gemini.
 
 > ⚡ **New here? Start with [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md)** — a
-> from-scratch local setup guide (Node 22 + pnpm, Qdrant via Docker, required API
-> keys, and the run commands). The app now uses **SQLite** (no Postgres needed).
+> from-scratch local setup guide (Node 22 + pnpm, required API keys, and the run
+> commands). The app uses **SQLite** for both its relational data **and** its
+> vector store — no Postgres and no separate vector database needed.
 >
 > 📐 **How it works end-to-end:** [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) —
 > module map, the data model, and every request/data flow (auth, calendar, live
@@ -39,7 +40,7 @@
   - Action item extraction with priorities
 
 - **Semantic Search:**
-  - Find similar past meetings (Gemini + Qdrant)
+  - Find similar past meetings (Gemini embeddings + SQLite vector search)
   - Search transcript moments
   - Live transcript search during meetings
 
@@ -91,7 +92,7 @@
 - ✅ Live Transcription with Diarization
 - ✅ AI Summary Generation (Groq + Streaming)
 - ✅ Action Item Extraction
-- ✅ Semantic Search (Gemini + Qdrant)
+- ✅ Semantic Search (Gemini embeddings + SQLite vector search)
 - ✅ File Storage (Cloudinary)
 - ✅ Post-Meeting Processing Pipeline
 - ✅ Protected API Endpoints
@@ -116,15 +117,15 @@
 
 ### Prerequisites
 - Node.js ≥22.13
-- PostgreSQL
-- Qdrant (Docker recommended)
+- pnpm 10.x
+- No database server needed — the app uses embedded **SQLite** for both its
+  relational data and its vector store.
 - API Keys:
   - Google OAuth credentials
   - Deepgram API key
   - Groq API key
   - Google Gemini API key
   - Cloudinary account
-  - Qdrant API key (if using cloud)
 
 ### Installation
 
@@ -141,22 +142,19 @@ cp frontend/.env.example frontend/.env
 
 # Edit .env files with your API keys
 
-# 3. Start PostgreSQL + Qdrant (Docker)
-docker-compose up -d
-
-# 4. Initialize database
+# 3. Initialize database (SQLite — created on disk, no server to start)
 cd backend
 pnpm db:push
 pnpm db:seed
 
-# 5. Start backend
+# 4. Start backend
 pnpm dev
 
-# 6. Start frontend (new terminal)
+# 5. Start frontend (new terminal)
 cd ../frontend
 pnpm dev
 
-# 7. Start Electron desktop (new terminal)
+# 6. Start Electron desktop (new terminal)
 cd frontend
 pnpm desktop:dev
 ```
@@ -174,7 +172,6 @@ Add these to your `.env` files:
 | **Groq** | LLM Inference | [Groq Console](https://console.groq.com) |
 | **Google Gemini** | Embeddings | [Google AI Studio](https://aistudio.google.com/apikey) |
 | **Cloudinary** | Audio Storage | [Cloudinary](https://cloudinary.com) |
-| **Qdrant** | Vector Search | Local or [Qdrant Cloud](https://cloud.qdrant.io) |
 
 ---
 
@@ -209,14 +206,13 @@ Add these to your `.env` files:
 ### AI Layer
 - **LLM:** Groq (llama-3.3-70b-versatile) + **SSE Streaming** ⭐
 - **Orchestration:** LangChain + LangGraph
-- **Embeddings:** Google Gemini (text-embedding-004)
-- **Vector DB:** Qdrant + **Live RAG** ⭐
+- **Embeddings:** Google Gemini (gemini-embedding-001)
+- **Vector Store:** SQLite (cosine similarity) + **Live RAG** ⭐
 - **STT:** Deepgram Nova-2
 
 ### Infrastructure
 - **Storage:** Cloudinary
-- **Database:** PostgreSQL
-- **Vector Store:** Qdrant
+- **Database:** SQLite (relational data + vectors)
 
 ---
 
@@ -287,7 +283,7 @@ ai-meeting-assistant-app/
 ### Searching Past Meetings
 
 ```typescript
-// Semantic search powered by Qdrant
+// Semantic search powered by SQLite vector search
 await api.post('/api/meetings/search', {
   query: "What was discussed about pricing?"
 });
@@ -321,13 +317,8 @@ pnpm test:desktop-ipc
 - Test: `curl -H "Authorization: Token YOUR_KEY" https://api.deepgram.com/v1/projects`
 
 ### "Database connection error"
-- Ensure PostgreSQL is running
-- Check `DATABASE_URL` format
-- Try: `docker ps | grep postgres`
-
-### "Qdrant not found"
-- Start Qdrant: `docker run -p 6333:6333 qdrant/qdrant`
-- Or use cloud URL in `QDRANT_URL`
+- The database is SQLite — check `DATABASE_URL` (default `file:./dev.db`)
+- Run `pnpm db:push` in `backend/` to create/sync the schema
 
 ### "Microphone access denied"
 - macOS: System Settings → Privacy & Security → Microphone
@@ -340,7 +331,7 @@ pnpm test:desktop-ipc
 - **Transcription Latency:** <500ms (Deepgram)
 - **LLM Response:** 2-5s (Groq)
 - **Embedding Generation:** ~100ms/text (Gemini)
-- **Vector Search:** <100ms (Qdrant)
+- **Vector Search:** <10ms (in-process cosine similarity over SQLite)
 - **Audio Upload:** Depends on file size
 
 ---
@@ -365,12 +356,13 @@ Recently delivered (see [`docs/PRODUCTION_HARDENING_IMPLEMENTATION.md`](docs/PRO
 - [x] Live transcription (Deepgram) + RAG-grounded AI chat
 - [x] Markdown/PDF export, Email (Gmail) & Slack sharing
 - [x] Attendee enrichment (Serper, optional)
+- [x] Local-first vector store — embeddings moved from Qdrant into SQLite (no external vector DB)
 
 Follow-ups still open:
 
 - [ ] Encrypt stored OAuth tokens at rest
 - [ ] Structured request logging (pino) + automated tests / CI
-- [ ] Optional local-first vector store / file storage (drop Qdrant + Cloudinary setup)
+- [ ] Optional local-first file storage (drop the Cloudinary setup)
 
 ---
 
@@ -383,15 +375,12 @@ Follow-ups still open:
 ---
 
 ## Start Services
-# Terminal 1: PostgreSQL + Qdrant (if using Docker)
-docker-compose up -d
-
-# Terminal 2: Initialize Database
+# Terminal 1: Initialize Database (SQLite — no server to start)
 cd backend
 pnpm db:push
 pnpm db:seed
 
-# Terminal 3: Start Backend
+# Terminal 2: Start Backend
 cd backend
 pnpm dev
 

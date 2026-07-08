@@ -117,10 +117,10 @@ router.post('/meetings/:id/ask', requireAuth, async (req, res) => {
         text?: string;
       };
 
-      // Get relevant context via vector search (best-effort — if Qdrant/Gemini
-      // is unavailable we fall back to the full transcript below). The circuit
-      // breaker skips the whole block (incl. the embedding call) once Qdrant has
-      // proven unreachable this session, so we don't waste work or spam logs.
+      // Get relevant context via vector search (best-effort — if the embedding
+      // call fails, e.g. Gemini is down, we fall back to the full transcript
+      // below). Vectors live in local SQLite, so the store itself is always
+      // available; isVectorStoreAvailable() is kept as a stable seam.
       let transcriptContext = '';
       if (isVectorStoreAvailable()) {
         try {

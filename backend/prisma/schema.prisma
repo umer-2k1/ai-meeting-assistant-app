@@ -322,9 +322,21 @@ model VectorEmbedding {
   entityType      String    // "meeting", "transcript_line", "summary"
   entityId        String
 
-  // Qdrant metadata (qdrantId is a UUID point id)
-  qdrantId        String    @unique
-  collectionName  String
+  // Vector store metadata (pointId is a UUID point id, kept stable across the
+  // Meeting.embeddingId / TranscriptLine.embeddingId pointers).
+  pointId         String    @unique
+  collectionName  String    // "meetings" | "transcripts"
+
+  // The embedding itself lives in SQLite (no external vector DB): the vector is
+  // a little-endian Float32 BLOB, `payload` is the JSON metadata callers read
+  // back on search hits (speaker/text/timestamp/title/summary/tags).
+  vector          Bytes
+  payload         String    @default("{}")
+
+  // Indexed filter columns — searches narrow to a tiny candidate set in SQL
+  // before brute-force cosine similarity runs in JS.
+  userId          String?
+  meetingId       String?
 
   // Embedding metadata
   model           String    @default("gemini")
@@ -334,7 +346,9 @@ model VectorEmbedding {
   createdAt       DateTime  @default(now())
 
   @@index([entityType, entityId])
-  @@index([qdrantId])
+  @@index([pointId])
+  @@index([collectionName, meetingId])
+  @@index([collectionName, userId])
 }
 
 // ========================================

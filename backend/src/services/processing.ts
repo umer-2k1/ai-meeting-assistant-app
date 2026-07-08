@@ -8,8 +8,6 @@ import {
   renderSummaryHtml,
 } from './ai.js';
 import {
-  EMBEDDING_MODEL,
-  EMBEDDING_DIMENSION,
   embedTranscriptChunk,
   embedMeetingSummary,
 } from './embeddings.js';
@@ -40,9 +38,9 @@ function loadMeeting(meetingId: string) {
  * Critical path: generate the summary + action items and mark COMPLETED. This is
  * what the user sees and it depends only on the transcript + the summary LLM.
  *
- * Vector indexing (Gemini embeddings + Qdrant) is **best-effort**: it powers RAG
- * chat but a dead Qdrant cluster or a retired embedding model must NOT fail the
- * meeting. RAG already falls back to the full transcript when vectors are absent.
+ * Vector indexing (Gemini embeddings, stored in SQLite) is **best-effort**: it
+ * powers RAG chat but a Gemini outage or a retired embedding model must NOT fail
+ * the meeting. RAG already falls back to the full transcript when vectors are absent.
  */
 export async function processMeeting(meetingId: string) {
   console.log(`[Processing] Starting post-meeting processing for ${meetingId}`);
@@ -228,21 +226,10 @@ async function indexMeetingVectors(
     tags: meeting.tags.map((t) => t.name),
   });
 
+  // storeMeetingEmbedding already persisted the VectorEmbedding row; just point
+  // the meeting at it.
   await prisma.meeting
     .update({ where: { id: meeting.id }, data: { embeddingId: meetingPointId } })
-    .catch(() => {});
-
-  await prisma.vectorEmbedding
-    .create({
-      data: {
-        entityType: 'meeting',
-        entityId: meeting.id,
-        qdrantId: meetingPointId,
-        collectionName: 'meetings',
-        model: EMBEDDING_MODEL,
-        dimension: EMBEDDING_DIMENSION,
-      },
-    })
     .catch(() => {});
 
   // Transcript-line embeddings, in chunks. A failure on one line is logged and
@@ -268,20 +255,10 @@ async function indexMeetingVectors(
             timestamp: line.timestamp,
           });
 
+          // storeTranscriptEmbedding already persisted the VectorEmbedding row.
           await prisma.transcriptLine
             .update({ where: { id: line.id }, data: { embeddingId: pointId } })
             .catch(() => {});
-
-          await prisma.vectorEmbedding.create({
-            data: {
-              entityType: 'transcript_line',
-              entityId: line.id,
-              qdrantId: pointId,
-              collectionName: 'transcripts',
-              model: EMBEDDING_MODEL,
-              dimension: EMBEDDING_DIMENSION,
-            },
-          });
         } catch (error) {
           console.warn(
             `[Processing] Skipped embedding for transcript line ${line.id}:`,

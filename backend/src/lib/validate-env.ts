@@ -21,7 +21,6 @@ const REQUIRED_VARS: RequiredVar[] = [
   { name: 'GROQ_API_KEY', hint: 'Groq LLM API key (summaries, action items, chat)' },
   { name: 'GOOGLE_GEMINI_API_KEY', hint: 'Gemini embeddings API key (RAG)' },
   { name: 'DEEPGRAM_API_KEY', hint: 'Deepgram API key (live transcription)' },
-  { name: 'QDRANT_URL', hint: 'Qdrant vector DB URL, e.g. http://localhost:6333' },
   { name: 'CLOUDINARY_CLOUD_NAME', hint: 'Cloudinary cloud name (audio/exports)' },
   { name: 'CLOUDINARY_API_KEY', hint: 'Cloudinary API key' },
   { name: 'CLOUDINARY_API_SECRET', hint: 'Cloudinary API secret' },

@@ -24,12 +24,12 @@ function names so you can navigate the code. For setup see
    MediaRecorder → WS                 │  lib/ prisma, jwt, ws-auth, enums     │
                                       └───────────────┬───────────────────────┘
                                                       │
-     ┌───────────────┬──────────────┬────────────────┼─────────────┬─────────────┐
-     ▼               ▼              ▼                 ▼             ▼             ▼
-  SQLite         Deepgram         Groq            Gemini        Qdrant       Cloudinary
- (Prisma)       (live STT)   (LLM: summary/     (embeddings)  (vectors/RAG)  (audio/exports)
-                              actions/chat)
-                                                  Google Calendar / Gmail · Slack · Serper
+     ┌───────────────┬──────────────┬────────────────┼──────────────────────────┐
+     ▼               ▼              ▼                 ▼                          ▼
+  SQLite         Deepgram         Groq            Gemini                    Cloudinary
+ (Prisma:       (live STT)   (LLM: summary/     (embeddings)              (audio/exports)
+  data +                     actions/chat)
+  vectors/RAG)                                    Google Calendar / Gmail · Slack · Serper
 ```
 
 **Backend** — Express 5 REST + a raw `ws` WebSocket for live audio. Entry:
@@ -56,7 +56,7 @@ User ─┬─< Meeting ─┬─< TranscriptLine
       │            └─< AIChatMessage
       ├─< Integration           (Google Calendar / Gmail OAuth tokens)
       └─< MeetingNote / AIChatMessage
-VectorEmbedding   (mirror of Qdrant points: entityId ↔ qdrantId UUID)
+VectorEmbedding   (the vector store: entityId ↔ pointId UUID, Float32 BLOB + JSON payload)
 IntegrationLog    (audit of email/slack/export shares)
 ```
 
@@ -125,7 +125,7 @@ sequenceDiagram
     DG-->>WS: interim transcript  → broadcast {type:"transcript", isFinal:false}
     DG-->>WS: final transcript
     WS->>DB: addTranscriptLine() (speaker="Speaker N", timestampSeconds)
-    WS->>WS: embedTranscriptLineInBackground() (Gemini→Qdrant, UUID point id)
+    WS->>WS: embedTranscriptLineInBackground() (Gemini→SQLite vector store, UUID point id)
     WS-->>R: {type:"transcript", isFinal:true, line}
 ```
 
@@ -141,16 +141,18 @@ close WS + `POST /api/meetings/:id/complete`.
    (`lib/llm-json.ts`); bad output → status `FAILED` with `processingError`.
 2. write `Meeting` (list fields JSON-serialized) + `createMany` action items.
 3. embed summary + each transcript line (`embeddings.ts`, Gemini
-   `text-embedding-004`) → store in Qdrant (`vector-store.ts`, **UUID** point ids)
-   → mirror to `VectorEmbedding`; set `Meeting.status = COMPLETED`.
+   `gemini-embedding-001`) → store in the SQLite vector store (`vector-store.ts`
+   writes the `VectorEmbedding` row: **UUID** point id, Float32 BLOB + JSON
+   payload); set `Meeting.status = COMPLETED`.
 
 ### 3.6 RAG chat (streaming)
 
 `askAi` → `meetings-api.ts streamMeetingAnswer` →
 `POST /api/live/meetings/:id/ask` (SSE, `routes/live.ts`):
-embed the question (Gemini) → `searchTranscripts` in Qdrant (**best-effort**;
-falls back to the full transcript if Qdrant/Gemini is down) → stream Groq tokens
-via `ai-stream.ts answerMeetingQuestionStream` → persist `AIChatMessage`.
+embed the question (Gemini) → `searchTranscripts` (SQL filter by meeting +
+in-process cosine ranking, **best-effort**; falls back to the full transcript if
+the Gemini embedding call fails) → stream Groq tokens via
+`ai-stream.ts answerMeetingQuestionStream` → persist `AIChatMessage`.
 
 The Live/Detail "Ask AI" box consumes the token stream and appends into the
 answer in place.
@@ -215,8 +217,10 @@ clients (Claude Desktop/Cursor). The same tools back the in-app agentic
   feature and report "not configured" (never fabricate).
 - **LLM calls that must return JSON:** use `createGroqLLM({ json: true })` +
   `invokeJson(..., schema)` from `lib/llm-json.ts`.
-- **Vectors:** never use a cuid as a Qdrant point id — `vector-store.ts` returns a
-  UUID; persist it on the entity's `embeddingId` + `VectorEmbedding`.
+- **Vectors:** `vector-store.ts` is the sole writer of `VectorEmbedding` rows and
+  returns a UUID point id — persist it on the entity's `embeddingId`. Don't add a
+  separate `VectorEmbedding.create` in callers (it duplicates the row and violates
+  the unique `pointId`).
 - **Frontend data:** map API responses to the UI `Meeting` type in
   `meetings-api.ts` rather than changing the UI components' expected shape.
 

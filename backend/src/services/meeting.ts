@@ -322,7 +322,7 @@ export function serializeMeetingForApi<
 
 /**
  * Delete a meeting (and, via cascade, its transcript/action items/notes/etc.).
- * Verifies ownership. Also best-effort removes its vectors from Qdrant.
+ * Verifies ownership. Also best-effort removes its vectors from the store.
  */
 export async function deleteMeeting(meetingId: string, userId: string) {
   const meeting = await prisma.meeting.findFirst({
@@ -345,7 +345,7 @@ export async function deleteMeeting(meetingId: string, userId: string) {
 }
 
 /**
- * Search a user's meetings. Uses semantic (Qdrant) search when available and
+ * Search a user's meetings. Uses semantic (SQLite vector) search when available and
  * merges with a SQL title/summary match so results are returned even before any
  * embeddings exist. Returns full meeting rows (with attendees/tags/counts).
  */
@@ -364,7 +364,7 @@ export async function searchMeetings(userId: string, query: string, limit = 20) 
     }
   };
 
-  // 1. Semantic search (best-effort; skipped if Qdrant/Gemini unavailable).
+  // 1. Semantic search (best-effort; skipped if the Gemini embedding call fails).
   try {
     const { generateEmbedding } = await import('./embeddings.js');
     const { searchSimilarMeetings } = await import('./vector-store.js');

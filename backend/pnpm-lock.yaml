@@ -23,18 +23,12 @@ importers:
       '@langchain/groq':
         specifier: ^1.2.1
         version: 1.2.1(@langchain/core@1.1.48(openai@5.12.2(ws@8.21.0)(zod@3.25.76))(ws@8.21.0))
-      '@langchain/qdrant':
-        specifier: ^1.0.3
-        version: 1.0.3(@langchain/core@1.1.48(openai@5.12.2(ws@8.21.0)(zod@3.25.76))(ws@8.21.0))(typescript@5.9.3)
       '@modelcontextprotocol/sdk':
         specifier: ^1.29.0
         version: 1.29.0(@cfworker/json-schema@4.1.1)(zod@3.25.76)
       '@prisma/client':
         specifier: ^6.3.0
         version: 6.19.3(prisma@6.19.3(typescript@5.9.3))(typescript@5.9.3)
-      '@qdrant/js-client-rest':
-        specifier: ^1.12.0
-        version: 1.18.0(typescript@5.9.3)
       bcryptjs:
         specifier: ^2.4.3
         version: 2.4.3
@@ -767,12 +761,6 @@ packages:
     engines: {node: '>=18'}
     peerDependencies:
       '@langchain/core': '>=0.3.68 <0.4.0'
-
-  '@langchain/qdrant@1.0.3':
-    resolution: {integrity: sha512-b8EqhGpltjUvFfzk+NM03jfB20+HAWKylQU+k68BUkIvaW38F7cLoz90cJWWHrg9Ritv+bL5y2hchDm365z7bA==}
-    engines: {node: '>=20'}
-    peerDependencies:
-      '@langchain/core': ^1.1.47
 
   '@langchain/textsplitters@0.1.0':
     resolution: {integrity: sha512-djI4uw9rlkAb5iMhtLED+xJebDdAG935AdP4eRTB02R7OB/act55Bj9wsskhZsvuyQRpO4O1wQOp85s6T6GWmw==}
@@ -2605,13 +2593,6 @@ snapshots:
     transitivePeerDependencies:
       - ws
 
-  '@langchain/qdrant@1.0.3(@langchain/core@1.1.48(openai@5.12.2(ws@8.21.0)(zod@3.25.76))(ws@8.21.0))(typescript@5.9.3)':
-    dependencies:
-      '@langchain/core': 1.1.48(openai@5.12.2(ws@8.21.0)(zod@3.25.76))(ws@8.21.0)
-      '@qdrant/js-client-rest': 1.18.0(typescript@5.9.3)
-    transitivePeerDependencies:
-      - typescript
-
   '@langchain/textsplitters@0.1.0(@langchain/core@1.1.48(openai@5.12.2(ws@8.21.0)(zod@3.25.76))(ws@8.21.0))':
     dependencies:
       '@langchain/core': 1.1.48(openai@5.12.2(ws@8.21.0)(zod@3.25.76))(ws@8.21.0)
@@ -2721,8 +2702,10 @@ snapshots:
       '@qdrant/openapi-typescript-fetch': 1.2.6
       typescript: 5.9.3
       undici: 6.26.0
+    optional: true
 
-  '@qdrant/openapi-typescript-fetch@1.2.6': {}
+  '@qdrant/openapi-typescript-fetch@1.2.6':
+    optional: true
 
   '@standard-schema/spec@1.1.0': {}
 
@@ -4116,7 +4099,8 @@ snapshots:
 
   undici-types@7.16.0: {}
 
-  undici@6.26.0: {}
+  undici@6.26.0:
+    optional: true
 
   unicode-properties@1.4.1:
     dependencies:

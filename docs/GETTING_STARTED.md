@@ -1,8 +1,9 @@
 # Getting Started — Local Setup
 
 A from-scratch guide to run the AI Meeting Copilot on your machine. It reflects
-the current stack: **SQLite** (relational DB), **Qdrant** (vectors, via Docker),
-and cloud APIs for AI / transcription / storage.
+the current stack: **SQLite** (relational DB **and** vector store — embeddings
+are stored in SQLite, no separate vector database) and cloud APIs for AI /
+transcription / storage.
 
 > The backend **fails fast**: it refuses to start until all required keys are
 > present and prints exactly which ones are missing. This guide lists them.
@@ -15,7 +16,6 @@ and cloud APIs for AI / transcription / storage.
 |------|---------|-------|
 | Node.js | **22.x** | `node -v` |
 | pnpm | **10.x** | `npm i -g pnpm` |
-| Docker | any recent | for Qdrant (`docker compose up -d`) |
 | Git | any | |
 
 Desktop app (optional) also needs the platform build tools Electron requires.
@@ -24,15 +24,15 @@ back to mic-only.
 
 ---
 
-## 2. Clone & start Qdrant
+## 2. Clone
 
 ```bash
 git clone <your-fork-url> ai-meeting-assistant-app
 cd ai-meeting-assistant-app
-
-# Start the vector database (Qdrant) in the background.
-docker compose up -d          # exposes Qdrant on http://localhost:6333
 ```
+
+No external services to start — embeddings live in the same SQLite database as
+the rest of the app data.
 
 ---
 
@@ -49,7 +49,6 @@ Create accounts and copy the keys — you'll paste them into `backend/.env` next
 | `GOOGLE_GEMINI_API_KEY` | https://aistudio.google.com/apikey — embeddings (RAG) |
 | `DEEPGRAM_API_KEY` | https://console.deepgram.com — live transcription |
 | `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET` | https://cloudinary.com — audio/export storage |
-| `QDRANT_URL` | `http://localhost:6333` (from step 2) |
 | `JWT_SECRET`, `SESSION_SECRET` | Any long random strings — `openssl rand -hex 32` |
 | `DATABASE_URL` | Leave as `file:./dev.db` (SQLite) |
 
@@ -67,7 +66,6 @@ Add your Google account as a **test user** on the OAuth consent screen.
 |-----|---------|
 | `SLACK_BOT_TOKEN` | Sharing meeting reports to Slack channels |
 | `SERPER_API_KEY` | Attendee web enrichment (LinkedIn/bio) in the pre-meeting brief |
-| `QDRANT_API_KEY` | Only if your Qdrant requires auth (local Docker doesn't) |
 
 ---
 
@@ -143,7 +141,7 @@ On first run, grant **Microphone** and **System Audio Recording** permissions
 | Symptom | Fix |
 |---------|-----|
 | Backend won't start, lists missing vars | Fill them in `backend/.env`. |
-| Search/AI chat works but returns no semantic hits | Ensure Qdrant is running: `docker compose ps`, `docker compose up -d`. Chat falls back to the full transcript if Qdrant is down. |
+| Search/AI chat works but returns no semantic hits | Semantic hits only exist for meetings processed *after* they were recorded; older meetings fall back to keyword search (title/summary) and chat falls back to the full transcript. Embeddings also need `GOOGLE_GEMINI_API_KEY` to be set. |
 | Google sign-in hangs / redirect error | Confirm both redirect URIs are added to the OAuth client and your account is a test user. |
 | Live transcript stays empty | System-audio capture needs the **desktop app** on macOS 14.2+/Windows; the web app is mic-only. Check mic permission under Device Check. |
 | Email share returns "Connect Gmail" | Connect Gmail in Settings → Integrations first. |
@@ -158,8 +156,7 @@ On first run, grant **Microphone** and **System Audio Recording** permissions
 |---------|-----|
 | Frontend (Vite) | http://localhost:3000 |
 | Backend (Express + WS) | http://localhost:3001 |
-| Qdrant | http://localhost:6333 |
-| SQLite DB | `backend/prisma/dev.db` |
+| SQLite DB (data + vectors) | `backend/prisma/dev.db` |
 
 For a deeper description of the architecture and what each phase implemented, see
 [`docs/PRODUCTION_HARDENING_IMPLEMENTATION.md`](./PRODUCTION_HARDENING_IMPLEMENTATION.md).

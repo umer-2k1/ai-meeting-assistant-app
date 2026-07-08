@@ -16,6 +16,7 @@ import {
   IconLoader2,
   IconMicrophone,
   IconLogout,
+  IconMusic,
   IconPlayerPause,
   IconPlayerStop,
   IconSearch,
@@ -28,6 +29,14 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import ThemeToggle from '@/components/ui/theme-toggle';
 import { cn } from '@/lib/utils';
@@ -262,6 +271,139 @@ const STATUS_BADGE: Record<Meeting['status'], { label: string; className: string
   archived: { label: 'Archived', className: 'border-border text-muted-foreground' }
 };
 
+/** Extensions accepted by the audio importer — kept in sync with the file input's
+ * `accept` and used for both the displayed hint and drag-drop validation. */
+const IMPORT_AUDIO_EXTENSIONS = ['mp3', 'wav', 'm4a', 'aac', 'ogg', 'webm'] as const;
+const IMPORT_AUDIO_ACCEPT = `audio/*,${IMPORT_AUDIO_EXTENSIONS.map((e) => `.${e}`).join(',')}`;
+
+/** True when a File looks like an importable audio clip (by MIME or extension). */
+function isAudioFile(file: File): boolean {
+  if (file.type.startsWith('audio/')) return true;
+  const ext = file.name.split('.').pop()?.toLowerCase();
+  return !!ext && (IMPORT_AUDIO_EXTENSIONS as readonly string[]).includes(ext);
+}
+
+/**
+ * "Import Audio" trigger that opens a drag & drop dialog instead of jumping
+ * straight to the OS file picker. Files can be dropped onto the zone or chosen
+ * via "Browse files". Styled from the shared copilot design tokens.
+ */
+function ImportAudioDialog({ onImportAudio }: { onImportAudio: (file: File) => void }) {
+  const [open, setOpen] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  const accept = (file: File | undefined) => {
+    if (!file) return;
+    if (!isAudioFile(file)) {
+      toast.error('Unsupported file. Please choose an audio file.');
+      return;
+    }
+    onImportAudio(file);
+    setOpen(false);
+  };
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (!next) setIsDragging(false);
+      }}
+    >
+      <DialogTrigger asChild>
+        <Button variant='outline' className={COPILOT_BTN_OUTLINE}>
+          <IconUpload className='mr-1.5 size-4' />
+          Import Audio
+        </Button>
+      </DialogTrigger>
+      <DialogContent className='sm:max-w-lg'>
+        <DialogHeader>
+          <DialogTitle>Import Audio</DialogTitle>
+          <DialogDescription>
+            Drop an audio file to transcribe and analyze it as a new meeting.
+          </DialogDescription>
+        </DialogHeader>
+
+        <input
+          ref={inputRef}
+          type='file'
+          accept={IMPORT_AUDIO_ACCEPT}
+          className='hidden'
+          onChange={(e) => {
+            const file = e.currentTarget.files?.[0];
+            e.currentTarget.value = '';
+            accept(file);
+          }}
+        />
+
+        <div
+          role='button'
+          tabIndex={0}
+          aria-label='Drag and drop an audio file, or activate to browse'
+          onClick={() => inputRef.current?.click()}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              inputRef.current?.click();
+            }
+          }}
+          onDragOver={(e) => {
+            e.preventDefault();
+            setIsDragging(true);
+          }}
+          onDragLeave={(e) => {
+            e.preventDefault();
+            setIsDragging(false);
+          }}
+          onDrop={(e) => {
+            e.preventDefault();
+            setIsDragging(false);
+            accept(e.dataTransfer.files?.[0]);
+          }}
+          className={cn(
+            'flex cursor-pointer flex-col items-center gap-3 rounded-xl border-2 border-dashed px-6 py-10 text-center transition-colors',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
+            isDragging
+              ? 'border-primary bg-primary/5'
+              : 'border-border bg-muted/30 hover:border-primary/60 hover:bg-muted/50'
+          )}
+        >
+          {/* Children ignore pointer events so dragging over them doesn't fire dragleave. */}
+          <div className='pointer-events-none flex flex-col items-center gap-3'>
+            <span
+              className={cn(
+                'flex size-12 items-center justify-center rounded-full transition-colors',
+                isDragging ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground'
+              )}
+            >
+              <IconMusic className='size-6' />
+            </span>
+            <div className='space-y-1'>
+              <p className='text-base font-semibold text-foreground'>
+                {isDragging ? 'Drop to import' : 'Drag & drop your audio file'}
+              </p>
+              <p className='text-xs text-muted-foreground'>
+                {IMPORT_AUDIO_EXTENSIONS.map((e) => e.toUpperCase()).join(', ')}
+              </p>
+            </div>
+          </div>
+
+          <span className='pointer-events-none text-xs text-muted-foreground'>or</span>
+
+          <Button
+            type='button'
+            className='pointer-events-none bg-primary text-white hover:bg-primary/90'
+            tabIndex={-1}
+          >
+            Browse files
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function DashboardScreen({
   filteredMeetings,
   allMeetings,
@@ -287,7 +429,6 @@ function DashboardScreen({
   error: string | null;
   onRetry: () => void;
 }) {
-  const importInputRef = useRef<HTMLInputElement | null>(null);
   const completedCount = allMeetings.filter((m) => m.status === 'completed').length;
   const actionItemTotal = allMeetings.reduce((sum, m) => sum + (m.actionItemCount ?? 0), 0);
   const liveOrProcessing = allMeetings.filter(
@@ -343,25 +484,7 @@ function DashboardScreen({
           <IconMicrophone className='mr-1.5 size-4' />
           Start New Recording
         </Button>
-        <input
-          ref={importInputRef}
-          type='file'
-          accept='audio/*,.mp3,.wav,.m4a,.webm,.ogg'
-          className='hidden'
-          onChange={(e) => {
-            const file = e.currentTarget.files?.[0];
-            e.currentTarget.value = '';
-            if (file) onImportAudio(file);
-          }}
-        />
-        <Button
-          variant='outline'
-          className={COPILOT_BTN_OUTLINE}
-          onClick={() => importInputRef.current?.click()}
-        >
-          <IconUpload className='mr-1.5 size-4' />
-          Import Audio
-        </Button>
+        <ImportAudioDialog onImportAudio={onImportAudio} />
       </div>
 
       <div className='space-y-3'>
