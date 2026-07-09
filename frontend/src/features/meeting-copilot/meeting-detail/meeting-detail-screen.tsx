@@ -47,6 +47,9 @@ import { getTagClassName } from './tag-styles';
 
 type View = 'dashboard' | 'live' | 'detail' | 'calendar' | 'device-check' | 'settings';
 
+const DETAIL_TAB_TRIGGER =
+  'cursor-pointer rounded-none border-0 border-b-2 border-transparent px-3 pb-3 after:hidden data-[state=active]:border-b-primary data-[state=active]:bg-transparent focus-visible:border-transparent focus-visible:ring-0 focus-visible:outline-none';
+
 function priorityVariant(priority: 'high' | 'medium' | 'low') {
   if (priority === 'high') return 'destructive' as const;
   if (priority === 'medium') return 'secondary' as const;
@@ -395,34 +398,19 @@ export default function MeetingDetailScreen({
               variant='line'
               className='mb-4 h-auto w-full shrink-0 flex-wrap justify-start gap-1 border-b border-border/60 bg-transparent p-0 pb-0'
             >
-              <TabsTrigger
-                value='summary'
-                className='rounded-none border-b-2 border-transparent px-3 pb-3 data-[state=active]:border-primary data-[state=active]:bg-transparent'
-              >
+              <TabsTrigger value='summary' className={DETAIL_TAB_TRIGGER}>
                 Summary
               </TabsTrigger>
-              <TabsTrigger
-                value='notes'
-                className='rounded-none border-b-2 border-transparent px-3 pb-3 data-[state=active]:border-primary data-[state=active]:bg-transparent'
-              >
+              <TabsTrigger value='notes' className={DETAIL_TAB_TRIGGER}>
                 My Notes
               </TabsTrigger>
-              <TabsTrigger
-                value='transcript'
-                className='rounded-none border-b-2 border-transparent px-3 pb-3 data-[state=active]:border-primary data-[state=active]:bg-transparent'
-              >
+              <TabsTrigger value='transcript' className={DETAIL_TAB_TRIGGER}>
                 Transcript
               </TabsTrigger>
-              <TabsTrigger
-                value='actions'
-                className='rounded-none border-b-2 border-transparent px-3 pb-3 data-[state=active]:border-primary data-[state=active]:bg-transparent'
-              >
+              <TabsTrigger value='actions' className={DETAIL_TAB_TRIGGER}>
                 Actions ({actionCount})
               </TabsTrigger>
-              <TabsTrigger
-                value='chat'
-                className='rounded-none border-b-2 border-transparent px-3 pb-3 data-[state=active]:border-primary data-[state=active]:bg-transparent'
-              >
+              <TabsTrigger value='chat' className={DETAIL_TAB_TRIGGER}>
                 <IconSparkles className='mr-1.5 size-3.5' />
                 AI Chat
               </TabsTrigger>
