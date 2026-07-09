@@ -111,8 +111,17 @@ function esc(s: string): string {
     .replace(/>/g, '&gt;');
 }
 
-/** Render a compact HTML email body for a meeting report. */
-export function buildMeetingEmailHtml(m: ExportMeeting): string {
+/**
+ * Render a compact HTML email body for a meeting report.
+ *
+ * `opts.audioUrl` adds a "Recording" download link; `opts.attachmentNote`
+ * describes any attached files (PDF/transcript) — both are used by the automatic
+ * post-meeting email and safely omitted when not provided.
+ */
+export function buildMeetingEmailHtml(
+  m: ExportMeeting,
+  opts?: { audioUrl?: string | null; attachmentNote?: string | null }
+): string {
   const section = (title: string, items: string[]) =>
     items.length
       ? `<h3 style="margin:16px 0 6px;color:#1E3A8A">${esc(title)}</h3><ul style="margin:0;padding-left:18px">${items
@@ -127,6 +136,16 @@ export function buildMeetingEmailHtml(m: ExportMeeting): string {
     return `${a.task}${bits ? ` — ${bits}` : ''}`;
   });
 
+  const recording = opts?.audioUrl
+    ? `<h3 style="margin:16px 0 6px;color:#1E3A8A">Recording</h3><p style="margin:0"><a href="${esc(
+        opts.audioUrl
+      )}" style="color:#1E3A8A">Download the audio recording</a></p>`
+    : '';
+
+  const attachments = opts?.attachmentNote
+    ? `<p style="color:#666;font-size:13px;margin:16px 0 0">${esc(opts.attachmentNote)}</p>`
+    : '';
+
   return `
   <div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:640px;color:#222">
     <h2 style="margin:0 0 4px">${esc(m.title)}</h2>
@@ -137,6 +156,8 @@ export function buildMeetingEmailHtml(m: ExportMeeting): string {
     ${section('Decisions', m.keyDecisions ?? [])}
     ${section('Risks & Blockers', m.risks ?? [])}
     ${section('Action Items', actions)}
+    ${recording}
+    ${attachments}
     <p style="color:#999;font-size:12px;margin-top:20px">Sent via AI Meeting Copilot</p>
   </div>`;
 }
@@ -159,68 +180,163 @@ export function buildMeetingSlackText(m: ExportMeeting): string {
   return parts.join('\n').trim();
 }
 
-/** Render a meeting as a PDF report (returns the file bytes). */
+/**
+ * Render a meeting as a PDF report (returns the file bytes).
+ *
+ * Layout goals: generous margins and line spacing, a clear typographic hierarchy
+ * (title → section headings with an accent rule → readable body/bullets), and
+ * comfortable whitespace between sections so the document reads like a report
+ * rather than a dense wall of text.
+ */
 export function buildMeetingPdf(m: ExportMeeting): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ margin: 50, size: 'A4' });
+    const doc = new PDFDocument({
+      size: 'A4',
+      // Wider margins frame the content and stop lines running edge-to-edge.
+      margins: { top: 64, bottom: 64, left: 64, right: 64 },
+      bufferPages: true,
+    });
     const chunks: Buffer[] = [];
     doc.on('data', (c: Buffer) => chunks.push(c));
     doc.on('end', () => resolve(Buffer.concat(chunks)));
     doc.on('error', reject);
 
-    const h1 = (t: string) => doc.moveDown(0.5).fontSize(18).fillColor('#111').text(t);
-    const h2 = (t: string) => doc.moveDown(0.6).fontSize(13).fillColor('#1E3A8A').text(t);
-    const body = (t: string) => doc.fontSize(10.5).fillColor('#222').text(t);
+    const INK = '#1f2937'; // slate-800 — softer than pure black, easier to read
+    const MUTED = '#6b7280'; // slate-500
+    const ACCENT = '#1E3A8A'; // brand indigo
+    const RULE = '#e5e7eb'; // slate-200
 
-    h1(m.title);
-    doc.fontSize(9).fillColor('#666').text(
-      `${fmtDate(m.startTime)}  •  ${fmtDuration(m.duration)}${m.platform ? `  •  ${m.platform}` : ''}`
-    );
+    const left = doc.page.margins.left;
+    const contentWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+    const pageBottom = () => doc.page.height - doc.page.margins.bottom;
 
+    /** Add a page break if less than `min` vertical space remains (avoids orphaned headings). */
+    const ensureSpace = (min: number) => {
+      if (doc.y + min > pageBottom()) doc.addPage();
+    };
+
+    const rule = (color = RULE, width = 1) => {
+      const y = doc.y;
+      doc.save().moveTo(left, y).lineTo(left + contentWidth, y).lineWidth(width).strokeColor(color).stroke().restore();
+    };
+
+    const heading = (t: string) => {
+      ensureSpace(64);
+      doc.moveDown(1.1);
+      doc.font('Helvetica-Bold').fontSize(13).fillColor(ACCENT).text(t.toUpperCase(), { characterSpacing: 0.6 });
+      doc.moveDown(0.25);
+      rule();
+      doc.moveDown(0.55);
+    };
+
+    const paragraph = (t: string) =>
+      doc.font('Helvetica').fontSize(11).fillColor(INK).text(t, {
+        align: 'left',
+        lineGap: 4,
+        paragraphGap: 6,
+      });
+
+    const bullets = (items: string[]) =>
+      doc.font('Helvetica').fontSize(11).fillColor(INK).list(items, {
+        bulletRadius: 1.6,
+        textIndent: 14,
+        bulletIndent: 2,
+        lineGap: 3,
+        paragraphGap: 7,
+      });
+
+    // ---- Header ----
+    doc.font('Helvetica-Bold').fontSize(24).fillColor(INK).text(m.title, { lineGap: 2 });
+    doc.moveDown(0.35);
+    const metaBits = [fmtDate(m.startTime), fmtDuration(m.duration), m.platform || null]
+      .filter(Boolean)
+      .join('   •   ');
+    doc.font('Helvetica').fontSize(10).fillColor(MUTED).text(metaBits);
+    if (m.tags?.length) {
+      doc.moveDown(0.2);
+      doc.font('Helvetica').fontSize(10).fillColor(ACCENT).text(m.tags.map((t) => `#${t.name}`).join('   '));
+    }
+    doc.moveDown(0.6);
+    rule(ACCENT, 1.5);
+
+    // ---- Attendees ----
     if (m.attendees?.length) {
-      h2('Attendees');
-      for (const a of m.attendees) {
-        const meta = [a.role, a.email].filter(Boolean).join(', ');
-        body(`• ${a.name}${meta ? ` (${meta})` : ''}`);
-      }
+      heading('Attendees');
+      bullets(
+        m.attendees.map((a) => {
+          const meta = [a.role, a.email].filter(Boolean).join(', ');
+          return `${a.name}${meta ? ` (${meta})` : ''}`;
+        })
+      );
     }
 
-    h2('Summary');
-    body(m.aiSummary?.trim() || 'No summary generated.');
+    // ---- Summary ----
+    heading('Summary');
+    paragraph(m.aiSummary?.trim() || 'No summary generated.');
 
     if (m.highlights?.length) {
-      h2('Key Points');
-      m.highlights.forEach((x) => body(`• ${x}`));
+      heading('Key Points');
+      bullets(m.highlights);
     }
     if (m.keyDecisions?.length) {
-      h2('Decisions');
-      m.keyDecisions.forEach((x) => body(`• ${x}`));
+      heading('Decisions');
+      bullets(m.keyDecisions);
     }
     if (m.risks?.length) {
-      h2('Risks & Blockers');
-      m.risks.forEach((x) => body(`• ${x}`));
+      heading('Risks & Blockers');
+      bullets(m.risks);
     }
+
+    // ---- Action Items (checkbox glyph + hanging indent) ----
     if (m.actionItems?.length) {
-      h2('Action Items');
+      heading('Action Items');
       for (const item of m.actionItems) {
+        ensureSpace(28);
         const bits = [item.assignee, item.priority, item.dueDate ? `due ${fmtDate(item.dueDate)}` : null]
           .filter(Boolean)
-          .join(', ');
-        body(`☐ ${item.task}${bits ? ` — ${bits}` : ''}`);
-      }
-    }
-    if (m.transcript?.length) {
-      h2('Transcript');
-      for (const line of m.transcript) {
-        doc.fontSize(10.5).fillColor('#1E3A8A').text(`[${line.timestamp}] ${line.speaker}: `, {
-          continued: true,
+          .join('  ·  ');
+        const startY = doc.y;
+        doc.font('Helvetica').fontSize(12).fillColor(ACCENT).text('☐', left, startY, { width: 16 });
+        doc.font('Helvetica').fontSize(11).fillColor(INK).text(item.task, left + 20, startY, {
+          width: contentWidth - 20,
+          lineGap: 3,
         });
-        doc.fillColor('#222').text(line.text);
+        if (bits) {
+          doc.font('Helvetica').fontSize(9.5).fillColor(MUTED).text(bits, left + 20, doc.y, {
+            width: contentWidth - 20,
+          });
+        }
+        doc.moveDown(0.6);
       }
     }
+
+    // ---- Transcript ----
+    if (m.transcript?.length) {
+      heading('Transcript');
+      for (const line of m.transcript) {
+        ensureSpace(40);
+        doc
+          .font('Helvetica-Bold')
+          .fontSize(9.5)
+          .fillColor(ACCENT)
+          .text(`${line.speaker}`, { continued: true })
+          .font('Helvetica')
+          .fontSize(9.5)
+          .fillColor(MUTED)
+          .text(`   ${line.timestamp}`);
+        doc.moveDown(0.15);
+        doc.font('Helvetica').fontSize(10.5).fillColor(INK).text(line.text, { lineGap: 3 });
+        doc.moveDown(0.55);
+      }
+    }
+
+    // ---- Notes ----
     if (m.notes?.length) {
-      h2('Notes');
-      m.notes.forEach((n) => body(n.content));
+      heading('Notes');
+      for (const note of m.notes) {
+        paragraph(note.content);
+        doc.moveDown(0.3);
+      }
     }
 
     doc.end();

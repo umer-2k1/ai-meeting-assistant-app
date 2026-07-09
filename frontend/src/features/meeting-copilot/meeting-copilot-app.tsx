@@ -102,6 +102,9 @@ const QUICK_ASK_PROMPTS = [
 
 const SURFACE = COPILOT_SURFACE;
 
+/** Stable id so the "Processing…" toast can be updated/dismissed in place. */
+const FINALIZE_TOAST_ID = 'meeting-finalizing';
+
 const PAGE_META: Record<View, { title: string; description: string }> = {
   dashboard: {
     title: 'Dashboard',
@@ -737,7 +740,7 @@ function LiveScreen({
               <IconPlayerPause className='mr-1.5 size-4' />
               {isPaused ? 'Resume' : 'Pause'}
             </Button>
-            <Button variant='destructive' onClick={onStop}>
+            <Button variant='destructive' onClick={() => onStop()}>
               <IconPlayerStop className='mr-1.5 size-4' />
               Stop
             </Button>
@@ -931,7 +934,7 @@ function FloatingWidget({
           <IconPlayerPause className='mr-1.5 size-3.5' />
           Pause
         </Button>
-        <Button size='sm' variant='destructive' onClick={onStop}>
+        <Button size='sm' variant='destructive' onClick={() => onStop()}>
           <IconPlayerStop className='mr-1.5 size-3.5' />
           Stop
         </Button>
@@ -951,6 +954,9 @@ export default function MeetingCopilotApp() {
   const [isSearching, setIsSearching] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [isRecordingPaused, setIsRecordingPaused] = useState(false);
+  // True from the moment a recording is stopped until its meeting finishes
+  // processing (or fails). Drives the non-blocking "Processing…" indicator.
+  const [isFinalizing, setIsFinalizing] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [runtimeMode, setRuntimeMode] = useState<RuntimeMode>('web');
   const [desktopPlatform, setDesktopPlatform] = useState<string | null>(null);
@@ -1009,6 +1015,25 @@ export default function MeetingCopilotApp() {
       globalThis.clearTimeout(timer);
     };
   }, [selectedMeetingDetail?.status, refetchDetail, refetchMeetings]);
+
+  // Clear the "Processing…" indicator once the finalized meeting reaches a
+  // terminal state (or after a safety cap, so a stuck backend never pins the
+  // toast open forever).
+  useEffect(() => {
+    if (!isFinalizing) return;
+    const status = selectedMeetingDetail?.status;
+    if (status === 'completed' || status === 'failed') {
+      setIsFinalizing(false);
+      if (status === 'completed') toast.success('Meeting processed', { id: FINALIZE_TOAST_ID });
+      else toast.error('Processing failed — open the meeting to retry', { id: FINALIZE_TOAST_ID });
+      return;
+    }
+    const safety = globalThis.setTimeout(() => {
+      setIsFinalizing(false);
+      toast.dismiss(FINALIZE_TOAST_ID);
+    }, 120_000);
+    return () => globalThis.clearTimeout(safety);
+  }, [isFinalizing, selectedMeetingDetail?.status]);
 
   useEffect(() => {
     const desktopApi = globalThis.window.desktop;
@@ -1302,6 +1327,10 @@ export default function MeetingCopilotApp() {
   // meeting's detail; leaving the live view via the sidebar passes the clicked
   // destination instead so the user lands where they intended.
   const stopRecording = (nextView: View = 'detail') => {
+    // Defensive: this is wired to button `onClick` in a couple of places, so a
+    // stray event object (or any non-View) must never reach `setView` — doing so
+    // used to blank the whole app (PAGE_META[view] undefined → render crash).
+    const destination: View = typeof nextView === 'string' ? nextView : 'detail';
     const meetingId = selectedMeetingId;
     // `stopLive()` resolves after the recorder flushes its final chunk, so the
     // uploaded blob is guaranteed complete (no timing guess).
@@ -1311,6 +1340,11 @@ export default function MeetingCopilotApp() {
       setIsRecording(false);
       setIsRecordingPaused(false);
       if (meetingId) {
+        // Give the user immediate, non-blocking feedback that the meeting is
+        // being processed (summary/action items) — the detail screen also shows
+        // an inline processing banner once its status refresh lands.
+        setIsFinalizing(true);
+        toast.loading('Processing your meeting…', { id: FINALIZE_TOAST_ID });
         void stopped.then(() => {
           const blob = takeRecording();
           if (blob && blob.size > 0) {
@@ -1330,7 +1364,7 @@ export default function MeetingCopilotApp() {
           .catch(() => {
             // Processing failures surface on the detail screen via status.
           });
-        setView(nextView);
+        setView(destination);
       } else {
         setView('dashboard');
       }

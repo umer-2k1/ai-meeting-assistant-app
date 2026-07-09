@@ -621,6 +621,48 @@ function createWidgetWindow() {
     emit('recording:state', { ...recordingState });
   });
 
+  // If the widget's HTML fails to load (dev server not up yet, transient error)
+  // we'd otherwise be left with a blank/black transparent window. Keep it hidden
+  // and retry the load a few times so it recovers instead of stranding an empty
+  // overlay on screen.
+  let widgetLoadRetries = 0;
+  widgetWindow.webContents.on('did-fail-load', (_e, errorCode, errorDescription, validatedURL) => {
+    // -3 (ERR_ABORTED) fires on normal navigations/HMR — not a real failure.
+    if (errorCode === -3) return;
+    console.warn(
+      `[desktop] Widget failed to load (${errorCode} ${errorDescription}) ${validatedURL || ''}`
+    );
+    if (!widgetWindow || widgetWindow.isDestroyed()) return;
+    widgetContentReady = false;
+    // Never leave a broken/empty frame visible while we retry.
+    widgetWindow.hide();
+    if (widgetLoadRetries < 5) {
+      widgetLoadRetries += 1;
+      setTimeout(() => {
+        if (widgetWindow && !widgetWindow.isDestroyed()) loadWidgetContent(widgetWindow);
+      }, 500 * widgetLoadRetries);
+    }
+  });
+
+  widgetWindow.webContents.on('did-finish-load', () => {
+    widgetLoadRetries = 0;
+  });
+
+  // A crashed renderer leaves an empty overlay too — recreate the widget so it
+  // comes back (only while we still need it).
+  widgetWindow.webContents.on('render-process-gone', (_e, details) => {
+    console.warn('[desktop] Widget renderer gone:', details?.reason);
+    if (widgetWindow && !widgetWindow.isDestroyed()) {
+      widgetWindow.destroy();
+    }
+    widgetWindow = null;
+    widgetExpanded = false;
+    widgetContentReady = false;
+    if (recordingState.isRecording) {
+      ensureWidgetWindow();
+    }
+  });
+
   widgetWindow.on('closed', () => {
     widgetWindow = null;
     widgetExpanded = false;

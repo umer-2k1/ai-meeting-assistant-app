@@ -16,6 +16,7 @@ import {
   storeMeetingEmbedding,
   storeTranscriptEmbedding,
 } from './vector-store.js';
+import { autoEmailMeetingSummary } from './share.js';
 
 type MeetingWithTranscript = NonNullable<
   Awaited<ReturnType<typeof loadMeeting>>
@@ -171,6 +172,16 @@ export async function processMeeting(meetingId: string) {
           },
         })
         .catch(() => {});
+    });
+
+    // 8. Auto-email the summary (owner + attendees) when Gmail is connected.
+    //    Best-effort: a mail failure must never fail the meeting. Idempotent, so
+    //    reprocessing an already-emailed meeting won't send a duplicate.
+    await autoEmailMeetingSummary(meetingId).catch((error) => {
+      console.warn(
+        '[Processing] Auto-email skipped (best-effort):',
+        error instanceof Error ? error.message : error
+      );
     });
 
     return {

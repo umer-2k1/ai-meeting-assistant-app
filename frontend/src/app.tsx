@@ -1,4 +1,5 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { AppErrorBoundary } from './components/app-error-boundary';
 import RootProvider from './components/providers/root';
 import { AuthProvider } from './contexts/auth-context';
 import { PreferencesProvider } from './contexts/preferences-context';
@@ -10,6 +11,7 @@ import AuthErrorScreen from './features/auth/auth-error-screen';
 
 function App() {
   return (
+    <AppErrorBoundary>
     <RootProvider>
       <AuthProvider>
         <PreferencesProvider>
@@ -45,6 +47,7 @@ function App() {
         </PreferencesProvider>
       </AuthProvider>
     </RootProvider>
+    </AppErrorBoundary>
   );
 }
 
