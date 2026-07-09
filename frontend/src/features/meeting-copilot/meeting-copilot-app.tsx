@@ -1044,6 +1044,19 @@ export default function MeetingCopilotApp() {
     };
   }, []);
 
+  // Closing the tab/app must end the recording. `pagehide` fires on real
+  // navigation-away/close (not on tab switches). We close the WebSocket so the
+  // backend's WS-close finalizer runs; the server-side idle watchdog is the
+  // backstop. A Bearer-authed `/complete` fetch can't reliably run during
+  // unload, so we intentionally don't attempt one here.
+  useEffect(() => {
+    const handlePageHide = () => {
+      if (isRecording) void stopLive();
+    };
+    globalThis.window.addEventListener('pagehide', handlePageHide);
+    return () => globalThis.window.removeEventListener('pagehide', handlePageHide);
+  }, [isRecording, stopLive]);
+
   useEffect(() => {
     if (!isRecording || isRecordingPaused || runtimeMode === 'desktop') return;
 
@@ -1285,7 +1298,10 @@ export default function MeetingCopilotApp() {
     })();
   };
 
-  const stopRecording = () => {
+  // `nextView` is where to land after stopping. Defaults to the finished
+  // meeting's detail; leaving the live view via the sidebar passes the clicked
+  // destination instead so the user lands where they intended.
+  const stopRecording = (nextView: View = 'detail') => {
     const meetingId = selectedMeetingId;
     // `stopLive()` resolves after the recorder flushes its final chunk, so the
     // uploaded blob is guaranteed complete (no timing guess).
@@ -1314,7 +1330,7 @@ export default function MeetingCopilotApp() {
           .catch(() => {
             // Processing failures surface on the detail screen via status.
           });
-        setView('detail');
+        setView(nextView);
       } else {
         setView('dashboard');
       }
@@ -1336,6 +1352,18 @@ export default function MeetingCopilotApp() {
     }
 
     finalize();
+  };
+
+  // Navigating away from a live recording (e.g. clicking "Dashboard" in the
+  // sidebar) ends the session — stop the recorder, finalize the meeting, and
+  // land on the requested view. Without this the recording keeps running in the
+  // background and the meeting is stranded at LIVE.
+  const handleNavigate = (target: View) => {
+    if (view === 'live' && isRecording && target !== 'live') {
+      stopRecording(target);
+      return;
+    }
+    setView(target);
   };
 
   const handleImportAudio = (file: File) => {
@@ -1382,7 +1410,7 @@ export default function MeetingCopilotApp() {
       <div className='relative z-10 mx-auto flex h-full min-h-0 w-full max-w-[1800px]'>
         <AppSidebar
           activeView={view}
-          onNavigate={setView}
+          onNavigate={handleNavigate}
           onStartRecording={startRecording}
           recentMeetings={meetingList}
           selectedMeeting={selectedMeeting}

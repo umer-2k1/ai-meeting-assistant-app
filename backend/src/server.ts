@@ -23,7 +23,11 @@ import {
 import { validateEnvOrExit } from './lib/validate-env.js';
 import prisma from './lib/prisma.js';
 import { answerWithTools } from './services/ai-agent.js';
-import { sweepOrphanedLiveMeetings, finalizeAbandonedMeeting } from './services/meeting.js';
+import {
+  sweepOrphanedLiveMeetings,
+  finalizeAbandonedMeeting,
+  findIdleLiveMeetings,
+} from './services/meeting.js';
 import { processMeeting } from './services/processing.js';
 import { authorizeStreamUpgrade, WS_SUBPROTOCOL } from './lib/ws-auth.js';
 import {
@@ -246,6 +250,38 @@ function attachLiveTranscriptionWs(server: http.Server) {
   });
 }
 
+// How long a LIVE meeting can go without transcript activity before the watchdog
+// finalizes it, and how often the watchdog checks. The WS-close finalizer and
+// startup sweep don't cover a session left open in a background tab (socket stays
+// open, /complete never fires) — this guarantees such meetings can't stick at LIVE.
+const LIVE_IDLE_TIMEOUT_MS = Number(process.env.LIVE_IDLE_TIMEOUT_MS ?? 3 * 60_000);
+const LIVE_WATCHDOG_INTERVAL_MS = Number(process.env.LIVE_WATCHDOG_INTERVAL_MS ?? 60_000);
+
+/**
+ * Periodically finalize idle LIVE meetings. Reuses the same atomic, idempotent
+ * finalizer the WS-close path uses, so it races safely with `/complete`.
+ */
+function startLiveMeetingWatchdog() {
+  const timer = setInterval(() => {
+    void findIdleLiveMeetings(LIVE_IDLE_TIMEOUT_MS)
+      .then(async (meetingIds) => {
+        for (const meetingId of meetingIds) {
+          const { process: shouldProcess } = await finalizeAbandonedMeeting(meetingId);
+          if (shouldProcess) {
+            console.log(`[watchdog] finalizing idle LIVE meeting ${meetingId}`);
+            void processMeeting(meetingId).catch((error) =>
+              console.error(`[watchdog] processing failed for ${meetingId}:`, error)
+            );
+          }
+        }
+      })
+      .catch((error) => console.error('[watchdog] idle sweep failed:', error));
+  }, LIVE_WATCHDOG_INTERVAL_MS);
+  // Don't keep the event loop alive just for the watchdog.
+  timer.unref();
+  return timer;
+}
+
 // ========================================
 // Server Start
 // ========================================
@@ -282,6 +318,10 @@ async function startServer() {
   } catch (error) {
     console.error('[startup] Orphaned-meeting sweep failed:', error);
   }
+
+  // Catch sessions abandoned with the tab still open (WS never closes) — these
+  // are invisible to the WS-close finalizer and the boot-time sweep.
+  startLiveMeetingWatchdog();
 
   const server = http.createServer(app);
   attachLiveTranscriptionWs(server);

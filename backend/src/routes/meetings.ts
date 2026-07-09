@@ -156,7 +156,14 @@ router.post('/import', requireAuth, audioUpload.single('audio'), async (req, res
           await addTranscriptLine(meeting.id, line);
         }
         if (isCloudinaryConfigured()) {
-          await updateMeetingAudioBuffer(meeting.id, audioBuffer).catch(() => {});
+          await updateMeetingAudioBuffer(meeting.id, audioBuffer).catch((audioErr) => {
+            // Don't fail the import over audio storage, but don't hide it either:
+            // a swallowed error here is why imported meetings had no playable audio.
+            console.error(
+              `[import] audio upload failed for meeting ${meeting.id}:`,
+              audioErr instanceof Error ? audioErr.message : audioErr
+            );
+          });
         }
         await processMeeting(meeting.id);
       } catch (err) {

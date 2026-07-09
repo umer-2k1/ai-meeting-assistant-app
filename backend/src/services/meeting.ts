@@ -81,6 +81,43 @@ export async function sweepOrphanedLiveMeetings(): Promise<string[]> {
 }
 
 /**
+ * Find LIVE meetings that have gone idle — no transcript activity for at least
+ * `thresholdMs`. These are sessions the user walked away from with the tab still
+ * open: the WebSocket never closed, so the WS-close finalizer never fired and
+ * `/complete` was never called. The watchdog (server.ts) finalizes them so a
+ * meeting can never get stuck LIVE forever.
+ *
+ * "Last activity" is the newest transcript line; with no lines yet it falls back
+ * to `recordingStarted` (then `createdAt`), so a brand-new session isn't reaped
+ * before anyone has spoken.
+ */
+export async function findIdleLiveMeetings(thresholdMs: number): Promise<string[]> {
+  const liveMeetings = await prisma.meeting.findMany({
+    where: { status: 'LIVE' },
+    select: { id: true, recordingStarted: true, createdAt: true },
+  });
+  if (liveMeetings.length === 0) return [];
+
+  const latest = await prisma.transcriptLine.groupBy({
+    by: ['meetingId'],
+    where: { meetingId: { in: liveMeetings.map((m) => m.id) } },
+    _max: { createdAt: true },
+  });
+  const lastLineAt = new Map<string, number>();
+  for (const g of latest) {
+    if (g._max.createdAt) lastLineAt.set(g.meetingId, g._max.createdAt.getTime());
+  }
+
+  const cutoff = Date.now() - thresholdMs;
+  const idle: string[] = [];
+  for (const m of liveMeetings) {
+    const lastActivity = lastLineAt.get(m.id) ?? (m.recordingStarted ?? m.createdAt).getTime();
+    if (lastActivity <= cutoff) idle.push(m.id);
+  }
+  return idle;
+}
+
+/**
  * Finalize a single LIVE meeting whose WebSocket closed without an explicit
  * `/complete` (app closed, crashed, or navigated away mid-recording).
  *
