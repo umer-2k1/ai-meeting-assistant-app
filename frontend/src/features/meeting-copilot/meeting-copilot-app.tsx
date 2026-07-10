@@ -205,17 +205,35 @@ function AppSidebar({
           {recentMeetings.length === 0 ? (
             <p className='px-2 py-1.5 text-xs text-muted-foreground'>No meetings yet</p>
           ) : (
-            visibleRecent.map((meeting) => (
-              <button
-                key={meeting.id}
-                type='button'
-                onClick={() => onOpenMeeting(meeting.id)}
-                title={meeting.title}
-                className='block w-full truncate rounded-lg border border-transparent px-2 py-1.5 text-left text-xs text-muted-foreground hover:border-primary/40 hover:bg-muted/60'
-              >
-                {meeting.title}
-              </button>
-            ))
+            visibleRecent.map((meeting) => {
+              const isActive = activeView === 'detail' && meeting.id === selectedMeeting?.id;
+              return (
+                <button
+                  key={meeting.id}
+                  type='button'
+                  onClick={() => onOpenMeeting(meeting.id)}
+                  title={meeting.title}
+                  aria-current={isActive ? 'true' : undefined}
+                  className={cn(
+                    'flex w-full items-center gap-2 rounded-lg border px-2 py-1.5 text-left text-xs transition-all duration-200',
+                    isActive
+                      ? 'border-primary/40 bg-primary/10 font-medium text-foreground shadow-sm'
+                      : 'border-transparent text-muted-foreground hover:border-primary/40 hover:bg-muted/60'
+                  )}
+                >
+                  <span
+                    aria-hidden='true'
+                    className={cn(
+                      'size-1.5 shrink-0 rounded-full transition-all duration-200',
+                      isActive
+                        ? 'bg-primary shadow-[0_0_0_3px_var(--copilot-accent-muted)]'
+                        : 'bg-muted-foreground/30'
+                    )}
+                  />
+                  <span className='min-w-0 truncate'>{meeting.title}</span>
+                </button>
+              );
+            })
           )}
         </div>
         {recentMeetings.length > 5 && (
@@ -1159,10 +1177,16 @@ export default function MeetingCopilotApp() {
     };
   }, [view, runtimeMode]);
 
-  const selectedMeeting = useMemo(
-    () => selectedMeetingDetail ?? meetingList.find((m) => m.id === selectedMeetingId) ?? null,
-    [selectedMeetingDetail, meetingList, selectedMeetingId]
-  );
+  const selectedMeeting = useMemo(() => {
+    // Prefer the full detail only when it matches the current selection.
+    // Otherwise fall back to the list row so switching meetings updates the UI
+    // instantly, rather than briefly showing the previously-open meeting's
+    // detail while its replacement is still refetching (which read as "lag").
+    if (selectedMeetingDetail && selectedMeetingDetail.id === selectedMeetingId) {
+      return selectedMeetingDetail;
+    }
+    return meetingList.find((m) => m.id === selectedMeetingId) ?? null;
+  }, [selectedMeetingDetail, meetingList, selectedMeetingId]);
 
   const filteredMeetings = searchText.trim() ? searchResults ?? [] : meetingList;
 

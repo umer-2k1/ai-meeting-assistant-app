@@ -346,14 +346,26 @@ export async function downloadMeetingExport(
   if (!response.ok) throw new Error(`Export failed (HTTP ${response.status})`);
 
   const blob = await response.blob();
+  triggerBlobDownload(blob, `${filename}.${format}`);
+}
+
+/**
+ * Save a Blob to the user's device via a synthetic `<a download>` click.
+ *
+ * The object URL is revoked on a delay rather than synchronously: while a
+ * browser/OS "Save as…" dialog is open the blob hasn't been read yet, and
+ * revoking immediately can cancel the pending download (the file never lands on
+ * disk). A one-minute delay comfortably outlives the save without leaking.
+ */
+export function triggerBlobDownload(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `${filename}.${format}`;
+  a.download = filename;
   document.body.appendChild(a);
   a.click();
   a.remove();
-  URL.revokeObjectURL(url);
+  globalThis.setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
 /** Share a meeting report by email (via the user's connected Gmail). */

@@ -745,17 +745,35 @@ function AccountTab() {
   return (
     <div className='space-y-4'>
       <SettingsSection title='Account' description='Your signed-in profile and session controls.'>
-        <SettingsRow label='Name' description='Shown in the sidebar and profile menu.'>
-          <Input value={user?.name ?? ''} readOnly className='w-full max-w-md' />
-        </SettingsRow>
-        <SettingsRow label='Email' description='Email cannot be changed.'>
+        <div className='space-y-1.5 border-b border-border/60 py-4'>
+          <label htmlFor='account-name' className='text-sm font-semibold text-foreground'>
+            Name
+          </label>
+          <p className='text-sm leading-relaxed text-muted-foreground'>
+            Shown in the sidebar and profile menu.
+          </p>
           <Input
+            id='account-name'
+            value={user?.name ?? ''}
+            readOnly
+            title={user?.name ?? ''}
+            className='mt-1 h-9 w-full'
+          />
+        </div>
+        <div className='space-y-1.5 border-b border-border/60 py-4'>
+          <label htmlFor='account-email' className='text-sm font-semibold text-foreground'>
+            Email
+          </label>
+          <p className='text-sm leading-relaxed text-muted-foreground'>Email cannot be changed.</p>
+          <Input
+            id='account-email'
+            type='email'
             value={user?.email ?? ''}
             readOnly
             title={user?.email ?? ''}
-            className='w-full max-w-md text-ellipsis'
+            className='mt-1 h-9 w-full'
           />
-        </SettingsRow>
+        </div>
         <SettingsRow label='Session' description='Sign out of this device.'>
           <Button
             size='sm'

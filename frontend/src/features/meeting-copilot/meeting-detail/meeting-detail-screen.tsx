@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import {
+  IconCheck,
   IconCopy,
   IconInfoCircle,
   IconLink,
@@ -96,6 +97,25 @@ function transcriptToPlainText(m: Meeting): string {
     .join('\n\n');
 }
 
+/** Flatten the meeting summary (executive recap + decisions + action items)
+ * into clean plain text for the "Copy summary" action. */
+function summaryToPlainText(m: Meeting): string {
+  const parts: string[] = [m.title, '', 'Executive summary', m.aiSummary || 'No summary generated yet.'];
+  if (m.decisions.length > 0) {
+    parts.push('', 'Key decisions', ...m.decisions.map((d) => `• ${d}`));
+  }
+  if (m.actionItems.length > 0) {
+    parts.push(
+      '',
+      'Action items',
+      ...m.actionItems.map(
+        (a) => `• @${a.assignee} — ${a.task}${a.due ? ` (due ${a.due})` : ''}`
+      )
+    );
+  }
+  return parts.join('\n');
+}
+
 /**
  * Copy text with a resilient fallback. The async clipboard API rejects in some
  * Electron/insecure contexts; fall back to a hidden textarea + execCommand so a
@@ -164,6 +184,8 @@ export default function MeetingDetailScreen({
   const [isDeleting, setIsDeleting] = useState(false);
   const [isReprocessing, setIsReprocessing] = useState(false);
   const [completedActions, setCompletedActions] = useState<Record<string, boolean>>({});
+  const [summaryCopied, setSummaryCopied] = useState(false);
+  const rootRef = useRef<HTMLElement>(null);
 
   // Re-sync local editable state when a different meeting is loaded.
   useEffect(() => {
@@ -171,10 +193,40 @@ export default function MeetingDetailScreen({
     setExistingNoteId(meeting.meetingNotes?.[0]?.id ?? null);
   }, [meeting.id, meeting.notes, meeting.meetingNotes]);
 
+  // Gentle fade/rise whenever the user switches to a different meeting. Driven
+  // by the Web Animations API on the persistent node (rather than a React
+  // remount) so switching never rebuilds the editor/audio player — that rebuild
+  // was the source of the jerky, laggy feel. Runs before paint to avoid a flash
+  // of the final frame, and respects reduced-motion preferences.
+  useLayoutEffect(() => {
+    setSummaryCopied(false);
+    const el = rootRef.current;
+    if (!el) return;
+    if (globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+    const animation = el.animate(
+      [
+        { opacity: 0, transform: 'translateY(8px)' },
+        { opacity: 1, transform: 'translateY(0)' }
+      ],
+      { duration: 240, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' }
+    );
+    return () => animation.cancel();
+  }, [meeting.id]);
+
   const displayDate = meeting.displayDate ?? meeting.startedAt;
   const audioSeconds = meeting.audioDurationSeconds ?? 60;
   const actionCount = meeting.actionItems.length;
   const speakerCount = new Set(meeting.transcript.map((l) => l.speaker)).size;
+
+  const copySummary = async () => {
+    if (await copyTextToClipboard(summaryToPlainText(meeting))) {
+      setSummaryCopied(true);
+      toast.success('Summary copied to clipboard');
+      globalThis.setTimeout(() => setSummaryCopied(false), 2000);
+    } else {
+      toast.error('Could not copy summary');
+    }
+  };
 
   const copyLink = async () => {
     const url = `${window.location.origin}/meetings/${meeting.id}`;
@@ -244,7 +296,10 @@ export default function MeetingDetailScreen({
   };
 
   return (
-    <section className='mx-auto flex w-full max-w-4xl min-h-0 min-w-0 flex-1 flex-col gap-5'>
+    <section
+      ref={rootRef}
+      className='mx-auto flex w-full max-w-4xl min-h-0 min-w-0 flex-1 flex-col gap-5'
+    >
       {/* Header */}
       <div className='shrink-0 space-y-4'>
         <button
@@ -258,7 +313,7 @@ export default function MeetingDetailScreen({
         <div className='flex flex-wrap items-start justify-between gap-4'>
           <div className='min-w-0 flex-1 space-y-2'>
             <h1 className='text-2xl font-semibold tracking-tight text-foreground'>
-              <TypewriterText text={meeting.title} />
+              <TypewriterText key={meeting.id} text={meeting.title} />
             </h1>
             <p className='text-sm text-muted-foreground'>
               {displayDate} · {meeting.duration}
@@ -417,6 +472,33 @@ export default function MeetingDetailScreen({
             </TabsList>
 
             <TabsContent value='summary' className={cn(TAB_PANE, 'overflow-y-auto overscroll-contain')}>
+              <div className='sticky top-0 z-10 -mt-1 flex justify-end pb-1'>
+                <Button
+                  type='button'
+                  size='sm'
+                  variant='outline'
+                  aria-label='Copy summary to clipboard'
+                  className={cn(
+                    'h-8 rounded-full text-xs backdrop-blur-sm transition-colors',
+                    summaryCopied
+                      ? 'border-primary/50 bg-primary/10 text-primary'
+                      : COPILOT_BTN_OUTLINE
+                  )}
+                  onClick={() => void copySummary()}
+                >
+                  {summaryCopied ? (
+                    <>
+                      <IconCheck className='mr-1 size-3.5' />
+                      Copied!
+                    </>
+                  ) : (
+                    <>
+                      <IconCopy className='mr-1 size-3.5' />
+                      Copy summary
+                    </>
+                  )}
+                </Button>
+              </div>
               <RichTextEditor
                 content={buildSummaryHtml(meeting)}
                 editable={false}
@@ -565,7 +647,7 @@ export default function MeetingDetailScreen({
               ))}
             </TabsContent>
 
-            <TabsContent value='chat' className={cn(TAB_PANE, 'overflow-hidden')}>
+            <TabsContent value='chat' className={cn(TAB_PANE, 'overflow-hidden px-1 pt-1')}>
               <form
                 className='flex shrink-0 gap-2'
                 onSubmit={async (event) => {

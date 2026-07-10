@@ -37,6 +37,13 @@ function fmtDate(value?: Date | string | null): string {
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleString();
 }
 
+/** Date-only formatting (no time) — used for due dates where the time is noise. */
+function fmtDay(value?: Date | string | null): string {
+  if (!value) return '';
+  const d = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString();
+}
+
 function fmtDuration(seconds?: number | null): string {
   if (!seconds || seconds <= 0) return '—';
   const h = Math.floor(seconds / 3600);
@@ -292,11 +299,18 @@ export function buildMeetingPdf(m: ExportMeeting): Promise<Buffer> {
       heading('Action Items');
       for (const item of m.actionItems) {
         ensureSpace(28);
-        const bits = [item.assignee, item.priority, item.dueDate ? `due ${fmtDate(item.dueDate)}` : null]
+        const bits = [item.assignee, item.priority, item.dueDate ? `due ${fmtDay(item.dueDate)}` : null]
           .filter(Boolean)
           .join('  ·  ');
         const startY = doc.y;
-        doc.font('Helvetica').fontSize(12).fillColor(ACCENT).text('☐', left, startY, { width: 16 });
+        // Draw a real checkbox — the ☐ glyph isn't in PDFKit's default font.
+        doc
+          .save()
+          .lineWidth(1)
+          .strokeColor(ACCENT)
+          .rect(left + 1, startY + 2, 9, 9)
+          .stroke()
+          .restore();
         doc.font('Helvetica').fontSize(11).fillColor(INK).text(item.task, left + 20, startY, {
           width: contentWidth - 20,
           lineGap: 3,
