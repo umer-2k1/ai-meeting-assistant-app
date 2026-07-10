@@ -25,6 +25,9 @@ import { buildMeetingMarkdown, buildMeetingPdf } from '../services/export.js';
 import { shareMeetingByEmail, shareMeetingToSlack } from '../services/share.js';
 import { getRouteParam } from '../lib/params.js';
 import { emailRecipientSchema } from '../lib/schemas.js';
+import { createLogger, humanBytes, shortId } from '../lib/logger.js';
+
+const log = createLogger('meetings');
 
 /** In-memory upload for recorded/imported audio (uploaded on to Cloudinary). */
 const audioUpload = multer({
@@ -140,6 +143,7 @@ router.post('/import', requireAuth, audioUpload.single('audio'), async (req, res
       (req.file.originalname || '').replace(/\.[^.]+$/, '').trim().slice(0, 80) ||
       'Imported audio';
 
+    log.step(`import received "${req.file.originalname}" (${req.file.mimetype}, ${humanBytes(req.file.size)})`);
     const meeting = await createMeeting({ userId, title, startTime: new Date() });
     await prisma.meeting.update({
       where: { id: meeting.id },
@@ -147,11 +151,14 @@ router.post('/import', requireAuth, audioUpload.single('audio'), async (req, res
     });
 
     // Respond now; transcription + processing continue in the background.
+    log.ok(`import meeting ${shortId(meeting.id)} created (PROCESSING); transcribing in background`);
     res.json({ meeting });
 
     void (async () => {
       try {
+        log.step(`import ${shortId(meeting.id)}: transcribing audio…`);
         const lines = await transcribeAudioBuffer(audioBuffer);
+        log.ok(`import ${shortId(meeting.id)}: transcribed ${lines.length} line(s)`);
         for (const line of lines) {
           await addTranscriptLine(meeting.id, line);
         }
@@ -159,15 +166,17 @@ router.post('/import', requireAuth, audioUpload.single('audio'), async (req, res
           await updateMeetingAudioBuffer(meeting.id, audioBuffer).catch((audioErr) => {
             // Don't fail the import over audio storage, but don't hide it either:
             // a swallowed error here is why imported meetings had no playable audio.
-            console.error(
-              `[import] audio upload failed for meeting ${meeting.id}:`,
+            log.error(
+              `import ${shortId(meeting.id)}: audio storage failed`,
               audioErr instanceof Error ? audioErr.message : audioErr
             );
           });
+        } else {
+          log.warn(`import ${shortId(meeting.id)}: Cloudinary not configured — no audio stored`);
         }
         await processMeeting(meeting.id);
       } catch (err) {
-        console.error('[import] failed:', err);
+        log.error(`import ${shortId(meeting.id)} failed`, err instanceof Error ? err.message : err);
         await prisma.meeting
           .update({
             where: { id: meeting.id },
@@ -178,15 +187,15 @@ router.post('/import', requireAuth, audioUpload.single('audio'), async (req, res
           })
           .catch((statusErr) => {
             // Worst case: the meeting is stuck in PROCESSING — make it loud.
-            console.error(
-              `[import] CRITICAL: failed to mark meeting ${meeting.id} as FAILED (stuck in PROCESSING):`,
+            log.error(
+              `import ${shortId(meeting.id)}: CRITICAL — could not mark FAILED (stuck in PROCESSING)`,
               statusErr
             );
           });
       }
     })();
   } catch (error) {
-    console.error('Import audio error:', error);
+    log.error('import request failed', error instanceof Error ? error.message : error);
     res.status(500).json({ error: 'Failed to import audio' });
   }
 });
@@ -228,24 +237,27 @@ router.post('/:id/transcript', requireAuth, async (req, res) => {
  * Complete meeting and trigger processing
  */
 router.post('/:id/complete', requireAuth, async (req, res) => {
+  const meetingId = getRouteParam(req.params.id);
   try {
-    const meetingId = getRouteParam(req.params.id);
-
+    log.step(`complete requested for meeting ${shortId(meetingId)}`);
     const { meeting, claimed } = await completeMeeting(meetingId, req.user!.id);
 
     // Trigger async processing only when this call won the LIVE→PROCESSING
     // claim; otherwise the abandoned-session finalizer already owns it.
     if (claimed) {
+      log.ok(`claimed meeting ${shortId(meetingId)} → PROCESSING; starting background processing`);
       processMeeting(meetingId).catch((error) => {
-        console.error('Background processing error:', error);
+        log.error(`background processing failed for ${shortId(meetingId)}`, error instanceof Error ? error.message : error);
       });
+    } else {
+      log.info(`meeting ${shortId(meetingId)} already finalized elsewhere (status ${meeting.status}) — not re-processing`);
     }
 
     res.json({ meeting, processing: claimed });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to complete meeting';
     const status = message.includes('not found') ? 404 : 500;
-    console.error('Complete meeting error:', error);
+    log.error(`complete failed for meeting ${shortId(meetingId)}`, message);
     res.status(status).json({ error: status === 404 ? 'Meeting not found' : 'Failed to complete meeting' });
   }
 });
@@ -256,24 +268,44 @@ router.post('/:id/complete', requireAuth, async (req, res) => {
  * detail page plays real audio. No-op (200) if Cloudinary isn't configured.
  */
 router.post('/:id/audio', requireAuth, audioUpload.single('audio'), async (req, res) => {
+  const meetingId = getRouteParam(req.params.id);
   try {
-    const meetingId = getRouteParam(req.params.id);
+    log.step(
+      `audio upload received for meeting ${shortId(meetingId)} ` +
+        `(${req.file?.originalname ?? 'no file'}, ${req.file?.mimetype ?? '—'}, ${humanBytes(req.file?.size)})`
+    );
+
     const owned = await prisma.meeting.findFirst({
       where: { id: meetingId, userId: req.user!.id },
       select: { id: true },
     });
-    if (!owned) return res.status(404).json({ error: 'Meeting not found' });
-    if (!req.file) return res.status(400).json({ error: 'No audio file provided' });
+    if (!owned) {
+      log.warn(`audio upload rejected — meeting ${shortId(meetingId)} not found for this user`);
+      return res.status(404).json({ error: 'Meeting not found' });
+    }
+    if (!req.file) {
+      log.warn(`audio upload rejected — no "audio" file field in request`);
+      return res.status(400).json({ error: 'No audio file provided' });
+    }
+    if (req.file.size === 0) {
+      log.warn(`audio upload rejected — received an empty (0-byte) blob`);
+      return res.status(400).json({ error: 'Empty audio file' });
+    }
 
     if (!isCloudinaryConfigured()) {
       // Audio storage not configured — succeed quietly, playback stays demo.
+      log.warn('Cloudinary not configured — skipping storage (playback stays demo)');
       return res.json({ audioUrl: null, stored: false });
     }
 
     const meeting = await updateMeetingAudioBuffer(meetingId, req.file.buffer);
+    log.ok(`audio stored for meeting ${shortId(meetingId)} → ${meeting.audioUrl}`);
     res.json({ audioUrl: meeting.audioUrl, stored: true });
   } catch (error) {
-    console.error('Upload meeting audio error:', error);
+    log.error(
+      `audio upload failed for meeting ${shortId(meetingId)}`,
+      error instanceof Error ? error.message : error
+    );
     res.status(500).json({ error: 'Failed to upload audio' });
   }
 });

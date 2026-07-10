@@ -9,6 +9,9 @@
 import { createClient, LiveTranscriptionEvents } from '@deepgram/sdk';
 import { addTranscriptLine } from './meeting.js';
 import { embedTranscriptLineInBackground } from './transcript-embedding.js';
+import { createLogger, shortId } from '../lib/logger.js';
+
+const log = createLogger('transcribe');
 
 export interface LiveTranscriptLine {
   id?: string;
@@ -62,8 +65,13 @@ export function createLiveTranscriptionSession(
 ): LiveTranscriptionSession {
   const { meetingId, emit } = options;
   const deepgram = createClient(process.env.DEEPGRAM_API_KEY!);
+  const mid = shortId(meetingId);
+  log.step(`opening Deepgram session for meeting ${mid}`);
 
   let ready = false;
+  // Count persisted final lines so the session close can report how much was
+  // captured (a 0 here on a "working" recording points straight at the mic/WS).
+  let linesCommitted = 0;
   const pending: Buffer[] = [];
   let keepAlive: ReturnType<typeof setInterval> | null = null;
   let closed = false;
@@ -104,6 +112,9 @@ export function createLiveTranscriptionSession(
 
     void addTranscriptLine(meetingId, { speaker, text, timestamp, timestampSeconds })
       .then((saved) => {
+        linesCommitted += 1;
+        const preview = saved.text.length > 60 ? `${saved.text.slice(0, 60)}…` : saved.text;
+        log.info(`line #${linesCommitted} [${saved.timestamp} ${saved.speaker}] "${preview}" (${mid})`);
         embedTranscriptLineInBackground({
           id: saved.id,
           meetingId,
@@ -124,7 +135,7 @@ export function createLiveTranscriptionSession(
         });
       })
       .catch((error) => {
-        console.error('[live-transcription] failed to persist line:', error);
+        log.error(`failed to persist transcript line (${mid})`, error instanceof Error ? error.message : error);
       });
   };
 
@@ -153,6 +164,7 @@ export function createLiveTranscriptionSession(
 
     connection.on(LiveTranscriptionEvents.Open, () => {
       ready = true;
+      log.ok(`Deepgram connected — streaming audio (${mid})`);
       reconnectAttempts = 0;
       // Replay the container header on reconnects so Deepgram can decode the
       // stream, then flush audio buffered while the socket was down.
@@ -228,7 +240,7 @@ export function createLiveTranscriptionSession(
     });
 
     connection.on(LiveTranscriptionEvents.Error, (error: unknown) => {
-      console.error('[live-transcription] Deepgram error:', error);
+      log.error(`Deepgram error (${mid})`, error instanceof Error ? error.message : error);
       // Close fires next and drives the reconnect; nothing to emit yet.
     });
 
@@ -253,8 +265,8 @@ export function createLiveTranscriptionSession(
       }
       reconnectAttempts += 1;
       const delay = RECONNECT_BASE_DELAY_MS * 2 ** (reconnectAttempts - 1);
-      console.warn(
-        `[live-transcription] connection dropped; reconnect ${reconnectAttempts}/${RECONNECT_MAX_ATTEMPTS} in ${delay}ms`
+      log.warn(
+        `connection dropped; reconnect ${reconnectAttempts}/${RECONNECT_MAX_ATTEMPTS} in ${delay}ms (${mid})`
       );
       reconnectTimer = setTimeout(() => {
         reconnectTimer = null;
@@ -275,7 +287,7 @@ export function createLiveTranscriptionSession(
         try {
           activeConnection.send(toArrayBuffer(chunk));
         } catch (error) {
-          console.error('[live-transcription] send failed:', error);
+          log.error(`audio send to Deepgram failed (${mid})`, error instanceof Error ? error.message : error);
         }
       } else {
         pending.push(chunk);
@@ -284,6 +296,7 @@ export function createLiveTranscriptionSession(
     close() {
       if (closed) return;
       closed = true;
+      log.info(`session closed for meeting ${mid} — ${linesCommitted} transcript line(s) captured`);
       if (keepAlive) clearInterval(keepAlive);
       if (reconnectTimer) clearTimeout(reconnectTimer);
       try {

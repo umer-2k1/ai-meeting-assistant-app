@@ -17,6 +17,9 @@ import {
   storeTranscriptEmbedding,
 } from './vector-store.js';
 import { autoEmailMeetingSummary } from './share.js';
+import { createLogger, shortId } from '../lib/logger.js';
+
+const log = createLogger('processing');
 
 type MeetingWithTranscript = NonNullable<
   Awaited<ReturnType<typeof loadMeeting>>
@@ -44,7 +47,9 @@ function loadMeeting(meetingId: string) {
  * the meeting. RAG already falls back to the full transcript when vectors are absent.
  */
 export async function processMeeting(meetingId: string) {
-  console.log(`[Processing] Starting post-meeting processing for ${meetingId}`);
+  const mid = shortId(meetingId);
+  log.step(`starting post-meeting processing for ${mid}`);
+  const startedAt = Date.now();
 
   let meeting: MeetingWithTranscript;
   let summaryResult: Awaited<ReturnType<typeof generateMeetingSummary>>;
@@ -63,7 +68,7 @@ export async function processMeeting(meetingId: string) {
       .join('\n\n');
 
     if (!transcriptText) {
-      console.warn('[Processing] No transcript to process — completing empty meeting');
+      log.warn(`no transcript to process — completing empty meeting (${mid})`);
       await prisma.meeting.update({
         where: { id: meetingId },
         data: { status: 'COMPLETED', processingError: null },
@@ -79,13 +84,13 @@ export async function processMeeting(meetingId: string) {
     const prefs = parsePreferences(owner?.preferences);
 
     // 3. Generate AI summary and extract decisions/risks
-    console.log('[Processing] Generating AI summary...');
+    log.step(`generating AI summary (${meeting.transcript.length} transcript lines, ${mid})`);
     summaryResult = await generateMeetingSummary(transcriptText, {
       length: prefs.summaryLength,
     });
 
     // 4. Extract action items
-    console.log('[Processing] Extracting action items...');
+    log.step(`extracting action items (${mid})`);
     const actionItems = await extractActionItems(transcriptText, {
       sensitivity: prefs.actionSensitivity,
     });
@@ -107,7 +112,7 @@ export async function processMeeting(meetingId: string) {
 
     // 6. Create action items in database
     if (actionItems.length > 0) {
-      console.log(`[Processing] Creating ${actionItems.length} action items...`);
+      log.step(`saving ${actionItems.length} action item(s) (${mid})`);
       await prisma.actionItem.createMany({
         data: actionItems.map((item) => ({
           meetingId,
@@ -147,22 +152,16 @@ export async function processMeeting(meetingId: string) {
           .catch(() => {});
       }
     } catch (error) {
-      console.warn(
-        '[Processing] Title/tags generation skipped:',
-        error instanceof Error ? error.message : error
-      );
+      log.warn(`title/tags generation skipped (${mid})`, error instanceof Error ? error.message : error);
     }
 
-    console.log(`[Processing] Successfully completed processing for ${meetingId}`);
+    log.ok(`processing complete for ${mid} in ${Date.now() - startedAt}ms → COMPLETED`);
 
     // 7. Best-effort vector indexing — never fails the meeting, but a persisted
     //    warning lets the UI say "semantic search unavailable for this meeting"
     //    instead of degrading silently.
     await indexMeetingVectors(meeting, summaryResult).catch(async (error) => {
-      console.warn(
-        '[Processing] Vector indexing skipped (best-effort):',
-        error instanceof Error ? error.message : error
-      );
+      log.warn(`vector indexing skipped (best-effort, ${mid})`, error instanceof Error ? error.message : error);
       await prisma.meeting
         .update({
           where: { id: meetingId },
@@ -177,11 +176,9 @@ export async function processMeeting(meetingId: string) {
     // 8. Auto-email the summary (owner + attendees) when Gmail is connected.
     //    Best-effort: a mail failure must never fail the meeting. Idempotent, so
     //    reprocessing an already-emailed meeting won't send a duplicate.
+    log.step(`auto-emailing summary if Gmail connected (${mid})`);
     await autoEmailMeetingSummary(meetingId).catch((error) => {
-      console.warn(
-        '[Processing] Auto-email skipped (best-effort):',
-        error instanceof Error ? error.message : error
-      );
+      log.warn(`auto-email skipped (best-effort, ${mid})`, error instanceof Error ? error.message : error);
     });
 
     return {
@@ -191,7 +188,7 @@ export async function processMeeting(meetingId: string) {
       actionItemsCount: actionItems.length,
     };
   } catch (error) {
-    console.error('[Processing] Error:', error);
+    log.error(`processing failed for ${mid} → FAILED`, error instanceof Error ? error.message : error);
 
     // Only summary/action-item/DB failures reach here — genuine failures worth
     // surfacing. Vector/embedding problems are handled above and never land here.
@@ -221,7 +218,7 @@ async function indexMeetingVectors(
   await ensureCollections();
 
   // Meeting-level embedding.
-  console.log('[Processing] Generating meeting embedding...');
+  log.info('generating meeting embedding (vector index)');
   const meetingEmbedding = await embedMeetingSummary({
     title: meeting.title,
     summary: summaryResult.summary,
@@ -245,7 +242,7 @@ async function indexMeetingVectors(
 
   // Transcript-line embeddings, in chunks. A failure on one line is logged and
   // skipped rather than aborting the batch.
-  console.log('[Processing] Generating transcript embeddings...');
+  log.info('generating transcript embeddings (vector index)');
   const BATCH_SIZE = 10;
   for (let i = 0; i < meeting.transcript.length; i += BATCH_SIZE) {
     const batch = meeting.transcript.slice(i, i + BATCH_SIZE);
@@ -271,15 +268,15 @@ async function indexMeetingVectors(
             .update({ where: { id: line.id }, data: { embeddingId: pointId } })
             .catch(() => {});
         } catch (error) {
-          console.warn(
-            `[Processing] Skipped embedding for transcript line ${line.id}:`,
+          log.warn(
+            `skipped embedding for transcript line ${shortId(line.id)}`,
             error instanceof Error ? error.message : error
           );
         }
       })
     );
 
-    console.log(`[Processing] Processed ${i + batch.length}/${meeting.transcript.length} transcript lines`);
+    log.info(`embedded ${i + batch.length}/${meeting.transcript.length} transcript lines`);
   }
 }
 

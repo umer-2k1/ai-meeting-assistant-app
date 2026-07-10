@@ -12,6 +12,9 @@ import { searchTranscripts, generateEmbedding } from '../services/embeddings.js'
 import { isVectorStoreAvailable } from '../services/vector-store.js';
 import { embedTranscriptLineInBackground } from '../services/transcript-embedding.js';
 import { getRouteParam } from '../lib/params.js';
+import { createLogger, shortId } from '../lib/logger.js';
+
+const log = createLogger('live');
 
 const router = express.Router();
 
@@ -46,9 +49,10 @@ router.post('/meetings', requireAuth, async (req, res) => {
       },
     });
 
+    log.ok(`live meeting ${shortId(meeting.id)} started — "${meeting.title}"`);
     res.json({ meeting });
   } catch (error) {
-    console.error('Start live meeting error:', error);
+    log.error('failed to start live meeting', error instanceof Error ? error.message : error);
     res.status(500).json({ error: 'Failed to start meeting' });
   }
 });

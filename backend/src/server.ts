@@ -34,6 +34,9 @@ import {
   createLiveTranscriptionSession,
   type TranscriptMessage,
 } from './services/live-transcription.js';
+import { createLogger, shortId } from './lib/logger.js';
+
+const wsLog = createLogger('ws');
 
 // Fail fast if required credentials are missing (before anything else runs).
 validateEnvOrExit();
@@ -204,6 +207,7 @@ function attachLiveTranscriptionWs(server: http.Server) {
   });
 
   wss.on('connection', (ws: WebSocket, _request: http.IncomingMessage, auth: { meetingId: string }) => {
+    wsLog.ok(`client connected — streaming audio for meeting ${shortId(auth.meetingId)}`);
     const emit = (message: TranscriptMessage) => {
       if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(message));
     };
@@ -225,6 +229,7 @@ function attachLiveTranscriptionWs(server: http.Server) {
     });
 
     const finalizeIfAbandoned = () => {
+      wsLog.info(`client disconnected for meeting ${shortId(auth.meetingId)} — closing transcription session`);
       session.close();
       // If the socket closed without an explicit /complete (app closed, crashed,
       // navigated away), finalize the meeting so it doesn't get stuck LIVE. The
@@ -236,12 +241,13 @@ function attachLiveTranscriptionWs(server: http.Server) {
         void finalizeAbandonedMeeting(meetingId)
           .then(({ process }) => {
             if (process) {
+              wsLog.step(`meeting ${shortId(meetingId)} ended without /complete — finalizing + processing`);
               void processMeeting(meetingId).catch((error) =>
-                console.error(`[ws-close] processing failed for ${meetingId}:`, error)
+                wsLog.error(`processing failed for ${shortId(meetingId)}`, error instanceof Error ? error.message : error)
               );
             }
           })
-          .catch((error) => console.error(`[ws-close] finalize failed for ${meetingId}:`, error));
+          .catch((error) => wsLog.error(`finalize failed for ${shortId(meetingId)}`, error instanceof Error ? error.message : error));
       }, 4000);
     };
 

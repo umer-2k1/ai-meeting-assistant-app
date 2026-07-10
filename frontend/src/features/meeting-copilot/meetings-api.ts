@@ -270,18 +270,37 @@ export async function completeMeetingApi(id: string): Promise<void> {
   });
 }
 
-/** Upload a recorded audio blob for a meeting (best-effort; playback stays demo on failure). */
-export async function uploadMeetingAudioApi(id: string, blob: Blob): Promise<void> {
+export interface AudioUploadResult {
+  /** Cloudinary URL when stored, else null. */
+  audioUrl: string | null;
+  /** False when the server accepted the request but did not persist audio
+   *  (e.g. Cloudinary not configured). */
+  stored: boolean;
+}
+
+/** Upload a recorded audio blob for a meeting. Returns whether it was stored.
+ *  Throws with the server's error detail on failure so callers can log it. */
+export async function uploadMeetingAudioApi(id: string, blob: Blob): Promise<AudioUploadResult> {
   const token = localStorage.getItem(TOKEN_KEY);
   const form = new FormData();
   const ext = blob.type.includes('ogg') ? 'ogg' : 'webm';
   form.append('audio', blob, `recording.${ext}`);
+  const sizeMb = (blob.size / (1024 * 1024)).toFixed(2);
+  console.info(`[audio] POST /meetings/${id}/audio — ${blob.type || 'unknown type'}, ${sizeMb} MB`);
   const response = await fetch(`${BACKEND_URL}/api/meetings/${id}/audio`, {
     method: 'POST',
     headers: token ? { Authorization: `Bearer ${token}` } : {},
     body: form,
   });
-  if (!response.ok) throw new Error(`Audio upload failed (HTTP ${response.status})`);
+  if (!response.ok) {
+    // Include the server body (the backend logs the real Cloudinary error too)
+    // so the failure reason is visible instead of a bare status code.
+    const detail = await response.text().catch(() => '');
+    throw new Error(`Audio upload failed (HTTP ${response.status})${detail ? `: ${detail}` : ''}`);
+  }
+  const data = (await response.json().catch(() => ({}))) as Partial<AudioUploadResult>;
+  console.info(`[audio] server response for meeting ${id}:`, data);
+  return { audioUrl: data.audioUrl ?? null, stored: Boolean(data.stored) };
 }
 
 /** Import an audio file as a new meeting (upload + transcribe + process). Returns the meeting id. */

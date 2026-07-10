@@ -1,5 +1,8 @@
 import { v2 as cloudinary } from 'cloudinary';
 import fs from 'node:fs';
+import { createLogger, humanBytes } from '../lib/logger.js';
+
+const log = createLogger('cloudinary');
 
 const CLOUDINARY_CLOUD_NAME = process.env.CLOUDINARY_CLOUD_NAME;
 const CLOUDINARY_API_KEY = process.env.CLOUDINARY_API_KEY;
@@ -40,21 +43,37 @@ export async function uploadAudioBuffer(
     throw new Error('Cloudinary not configured');
   }
 
+  const folder = options.folder || 'meeting-recordings';
+  log.step(
+    `uploading ${humanBytes(buffer.length)} → ${folder}/${options.publicId ?? '(auto)'} (transcode to mp3)`
+  );
+  const startedAt = Date.now();
+
   return new Promise<UploadResult>((resolve, reject) => {
     const stream = cloudinary.uploader.upload_stream(
       {
         resource_type: 'video', // audio uploads as 'video' in Cloudinary
         public_id: options.publicId,
-        folder: options.folder || 'meeting-recordings',
+        folder,
         format: 'mp3',
         audio_codec: 'mp3',
       },
       (error, result) => {
         if (error || !result) {
-          console.error('Cloudinary upload error:', error);
+          // Surface the real Cloudinary failure (http_code + message) so audio
+          // upload problems are diagnosable instead of a generic 500.
+          log.error(
+            `upload failed after ${Date.now() - startedAt}ms` +
+              (error?.http_code ? ` (http ${error.http_code})` : ''),
+            error?.message ?? error
+          );
           reject(error ?? new Error('Failed to upload audio to Cloudinary'));
           return;
         }
+        log.ok(
+          `stored in ${Date.now() - startedAt}ms → ${result.secure_url} ` +
+            `(${result.format}, ${result.duration ?? '?'}s, ${humanBytes(result.bytes)})`
+        );
         resolve({
           url: result.url,
           secureUrl: result.secure_url,
