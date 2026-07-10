@@ -1457,11 +1457,32 @@ export default function MeetingCopilotApp() {
         void stopped.then(() => {
           const blob = takeRecording();
           if (blob && blob.size > 0) {
+            const sizeMb = (blob.size / (1024 * 1024)).toFixed(2);
+            console.info(`[audio] captured ${sizeMb} MB for meeting ${meetingId}; uploading…`);
             void uploadMeetingAudioApi(meetingId, blob)
-              .then(() => void refetchDetail())
-              .catch(() => {
-                /* audio storage unavailable — playback stays empty state */
+              .then((result) => {
+                if (result.stored) {
+                  console.info(`[audio] stored for meeting ${meetingId}: ${result.audioUrl}`);
+                } else {
+                  // Request succeeded but nothing was persisted (e.g. Cloudinary
+                  // not configured) — say so instead of silently showing no audio.
+                  console.warn(`[audio] not stored for meeting ${meetingId} (audio storage not configured)`);
+                  toast.info('Recording saved, but audio playback is not configured on the server.');
+                }
+                void refetchDetail();
+              })
+              .catch((err) => {
+                // No longer swallowed: the upload genuinely failed. Log the
+                // server detail and tell the user so missing audio isn't a mystery.
+                console.error(`[audio] upload failed for meeting ${meetingId}:`, err);
+                toast.error('Could not save the recording audio — see the console/terminal for details.');
               });
+          } else {
+            // The recorder produced nothing — points at mic/capture, not upload.
+            console.warn(
+              `[audio] no audio captured for meeting ${meetingId} (blob=${blob ? `${blob.size} bytes` : 'null'}); nothing to upload`
+            );
+            toast.error('No audio was captured for this recording.');
           }
         });
         // Trigger post-meeting processing (summary/action items) and refresh.
