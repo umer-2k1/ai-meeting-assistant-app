@@ -298,7 +298,7 @@ export default function MeetingDetailScreen({
   return (
     <section
       ref={rootRef}
-      className='mx-auto flex w-full max-w-4xl min-h-0 min-w-0 flex-1 flex-col gap-5'
+      className='flex w-full min-h-0 min-w-0 flex-1 flex-col gap-5'
     >
       {/* Header */}
       <div className='shrink-0 space-y-4'>
@@ -472,14 +472,17 @@ export default function MeetingDetailScreen({
             </TabsList>
 
             <TabsContent value='summary' className={cn(TAB_PANE, 'overflow-y-auto overscroll-contain')}>
-              <div className='sticky top-0 z-10 -mt-1 flex justify-end pb-1'>
+              {/* Zero-height sticky wrapper: the button floats over the top-right
+                  of the summary and stays pinned while scrolling, without
+                  consuming any vertical space above the content. */}
+              <div className='pointer-events-none sticky top-0 z-10 flex h-0 justify-end pr-0.5'>
                 <Button
                   type='button'
                   size='sm'
                   variant='outline'
                   aria-label='Copy summary to clipboard'
                   className={cn(
-                    'h-8 rounded-full text-xs backdrop-blur-sm transition-colors',
+                    'pointer-events-auto h-7 rounded-full text-xs shadow-sm backdrop-blur-sm transition-colors',
                     summaryCopied
                       ? 'border-primary/50 bg-primary/10 text-primary'
                       : COPILOT_BTN_OUTLINE
@@ -494,7 +497,7 @@ export default function MeetingDetailScreen({
                   ) : (
                     <>
                       <IconCopy className='mr-1 size-3.5' />
-                      Copy summary
+                      Copy
                     </>
                   )}
                 </Button>

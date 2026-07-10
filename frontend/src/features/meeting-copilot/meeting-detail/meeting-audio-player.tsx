@@ -148,6 +148,7 @@ export default function MeetingAudioPlayer({
 
   const rangeMax = Math.max(0.01, effectiveDuration);
   const rangeValue = clampTime(currentTime, rangeMax);
+  const progress = rangeMax > 0 ? (rangeValue / rangeMax) * 100 : 0;
 
   // No saved recording — show a clean, honest empty state instead of a fake
   // "demo" player. (Meetings created before audio capture, imported without a
@@ -194,22 +195,46 @@ export default function MeetingAudioPlayer({
         {isPlaying ? <IconPlayerPause className='size-5' /> : <IconPlayerPlay className='size-5' />}
       </Button>
 
-      <div className='min-w-0 flex-1 space-y-1'>
-        <input
-          type='range'
-          min={0}
-          max={rangeMax}
-          step={0.01}
-          value={rangeValue}
-          onInput={(e) => seekSeconds(Number(e.currentTarget.value))}
-          onChange={(e) => seekSeconds(Number(e.currentTarget.value))}
-          className='h-1.5 w-full cursor-pointer appearance-none rounded-full bg-border accent-primary'
-          aria-label='Playback position'
-        />
-        <div className='flex justify-between text-xs text-muted-foreground tabular-nums'>
-          <span>{formatTime(currentTime)}</span>
-          <span>{formatTime(effectiveDuration)}</span>
+      {/* Current time · scrubber · total on one line so the bar shares a single
+          centerline with the play / speed / skip controls (times stacked below
+          made this column taller and pushed the bar above the buttons). */}
+      <div className='flex min-w-0 flex-1 items-center gap-2.5'>
+        <span className='shrink-0 text-xs text-muted-foreground tabular-nums'>
+          {formatTime(currentTime)}
+        </span>
+        {/* Layered scrubber: a transparent native range on top drives all
+            interaction (drag / click-to-seek / keyboard / touch / a11y), while
+            the visible track, played-fill, and handle underneath are painted
+            from React state so the played vs. remaining split is always clear. */}
+        <div className='group relative flex h-4 flex-1 items-center'>
+          <div className='h-1.5 w-full overflow-hidden rounded-full bg-border'>
+            <div
+              className='h-full rounded-full bg-primary'
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+          {/* Transparent range comes before the handle so Tailwind's `peer`
+              focus-visible variant can drive the handle's keyboard focus halo. */}
+          <input
+            type='range'
+            min={0}
+            max={rangeMax}
+            step={0.01}
+            value={rangeValue}
+            onInput={(e) => seekSeconds(Number(e.currentTarget.value))}
+            onChange={(e) => seekSeconds(Number(e.currentTarget.value))}
+            className='peer absolute inset-0 m-0 h-full w-full cursor-pointer appearance-none bg-transparent opacity-0'
+            aria-label='Playback position'
+          />
+          <span
+            aria-hidden='true'
+            className='pointer-events-none absolute top-1/2 size-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary shadow-sm transition-[width,height] duration-150 group-hover:size-3.5 peer-focus-visible:shadow-[0_0_0_3px_var(--copilot-accent-muted)]'
+            style={{ left: `${progress}%` }}
+          />
         </div>
+        <span className='shrink-0 text-xs text-muted-foreground tabular-nums'>
+          {formatTime(effectiveDuration)}
+        </span>
       </div>
 
       <Button

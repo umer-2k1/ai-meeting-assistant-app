@@ -333,28 +333,17 @@ function clearRecordingTimers() {
 
 async function startRecording() {
   try {
-    // Note: AudioRecordingService is deprecated and will throw an error
-    // Real recording should be implemented in the renderer process using
-    // getDisplayMedia(), MediaRecorder, and AudioContext
-    
-    console.warn(
-      '[Recording] Audio recording service is non-functional. ' +
-      'Recording must be implemented in the renderer process. ' +
-      'See use-system-audio-test.ts for the correct approach.'
-    );
-    
-    // For now, just track recording state without actual audio capture
-    const meetingId = `meeting-${Date.now()}`;
-    
+    // By design, the main process only TRACKS recording state (for the widget
+    // timer, tray, and global shortcut). The actual audio capture + streaming to
+    // Deepgram happens in the renderer (getUserMedia/getDisplayMedia →
+    // MediaRecorder → WebSocket). See use-live-transcription.ts. So there is no
+    // audio work to do here — just flip state on and start the timer.
     recordingState.isRecording = true;
     recordingState.isPaused = false;
     startRecordingTimers();
     emitRecordingStateAndSyncWidget();
-    
-    return {
-      ...recordingState,
-      warning: 'Audio recording is not yet implemented. Use Device Check → System Audio Test for testing.'
-    };
+
+    return { ...recordingState };
   } catch (error) {
     console.error('[Recording] Failed to start:', error);
     return {
@@ -368,18 +357,18 @@ function pauseResumeRecording() {
   if (!recordingState.isRecording) return { ...recordingState };
   
   recordingState.isPaused = !recordingState.isPaused;
-  
-  // AudioService is deprecated - no-op
-  // Real recording should be in renderer process
-  
+
+  // State-only: the renderer pauses/resumes the real MediaRecorder; here we just
+  // track the flag so the widget/tray/timer stay in sync.
+
   emitRecordingState();
   return { ...recordingState };
 }
 
 async function stopRecording() {
   try {
-    // AudioService is deprecated - just update state
-    
+    // State-only: the renderer stops the real MediaRecorder and finalizes the
+    // meeting. Here we just clear state so the widget/tray/timer reset.
     recordingState.isRecording = false;
     recordingState.isPaused = false;
     recordingState.elapsedSeconds = 0;
@@ -580,6 +569,12 @@ function workAreaMinY() {
 function createWidgetWindow() {
   if (isTestMode) return;
 
+  // Always create the widget in the compact state. Without this a stale
+  // `widgetExpanded` (left over from a previous window) could pair a large
+  // window with the compact pill — a giant transparent window that reads as a
+  // big black rectangle with the pill floating in its centre.
+  widgetExpanded = false;
+
   widgetWindow = new BrowserWindow({
     width: WIDGET_SIZES.compact.width,
     height: WIDGET_SIZES.compact.height,
@@ -619,48 +614,6 @@ function createWidgetWindow() {
       widgetWindow.showInactive();
     }
     emit('recording:state', { ...recordingState });
-  });
-
-  // If the widget's HTML fails to load (dev server not up yet, transient error)
-  // we'd otherwise be left with a blank/black transparent window. Keep it hidden
-  // and retry the load a few times so it recovers instead of stranding an empty
-  // overlay on screen.
-  let widgetLoadRetries = 0;
-  widgetWindow.webContents.on('did-fail-load', (_e, errorCode, errorDescription, validatedURL) => {
-    // -3 (ERR_ABORTED) fires on normal navigations/HMR — not a real failure.
-    if (errorCode === -3) return;
-    console.warn(
-      `[desktop] Widget failed to load (${errorCode} ${errorDescription}) ${validatedURL || ''}`
-    );
-    if (!widgetWindow || widgetWindow.isDestroyed()) return;
-    widgetContentReady = false;
-    // Never leave a broken/empty frame visible while we retry.
-    widgetWindow.hide();
-    if (widgetLoadRetries < 5) {
-      widgetLoadRetries += 1;
-      setTimeout(() => {
-        if (widgetWindow && !widgetWindow.isDestroyed()) loadWidgetContent(widgetWindow);
-      }, 500 * widgetLoadRetries);
-    }
-  });
-
-  widgetWindow.webContents.on('did-finish-load', () => {
-    widgetLoadRetries = 0;
-  });
-
-  // A crashed renderer leaves an empty overlay too — recreate the widget so it
-  // comes back (only while we still need it).
-  widgetWindow.webContents.on('render-process-gone', (_e, details) => {
-    console.warn('[desktop] Widget renderer gone:', details?.reason);
-    if (widgetWindow && !widgetWindow.isDestroyed()) {
-      widgetWindow.destroy();
-    }
-    widgetWindow = null;
-    widgetExpanded = false;
-    widgetContentReady = false;
-    if (recordingState.isRecording) {
-      ensureWidgetWindow();
-    }
   });
 
   widgetWindow.on('closed', () => {
