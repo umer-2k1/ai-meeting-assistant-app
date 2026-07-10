@@ -292,6 +292,60 @@ const STATUS_BADGE: Record<Meeting['status'], { label: string; className: string
   archived: { label: 'Archived', className: 'border-border text-muted-foreground' }
 };
 
+/**
+ * A meeting that just finished recording is still being finalized: the backend
+ * moves it LIVE → PROCESSING → COMPLETED while it generates the transcript,
+ * summary, action items, and stores the audio. Until it reaches a terminal
+ * state its detail page has nothing to show, so the dashboard renders it as a
+ * non-interactive "Processing…" card instead of a clickable (blank) meeting.
+ */
+function isMeetingProcessing(meeting: Meeting): boolean {
+  return meeting.status === 'processing' || meeting.status === 'live';
+}
+
+/**
+ * Dashboard card for a meeting that is still being processed. Mirrors the layout
+ * of a normal meeting card (title, time, duration) but is not clickable and
+ * shows a skeleton where the summary will land, so the user can see the
+ * recording is being worked on rather than mistaking it for a live/broken one.
+ */
+function ProcessingMeetingCard({ meeting }: { meeting: Meeting }) {
+  return (
+    <Card className={cn(SURFACE, 'cursor-default')} aria-busy='true'>
+      <CardHeader className='space-y-3'>
+        <div className='flex items-center justify-between gap-3'>
+          <CardTitle className='text-foreground'>{meeting.title || 'New recording'}</CardTitle>
+          <Badge
+            variant='outline'
+            className='shrink-0 border-amber-500/40 bg-amber-500/15 text-amber-600'
+          >
+            <IconLoader2 className='mr-1 size-3 animate-spin' />
+            Processing
+          </Badge>
+        </div>
+        <div className='flex flex-wrap items-center gap-3 text-xs text-muted-foreground'>
+          <span className='inline-flex items-center gap-1'>
+            <IconClock className='size-3.5' />
+            {meeting.startedAt}
+          </span>
+          {meeting.duration && meeting.duration !== '—' && <span>{meeting.duration}</span>}
+        </div>
+      </CardHeader>
+      <CardContent className='space-y-3'>
+        <p className='inline-flex items-center gap-2 text-sm text-muted-foreground'>
+          <IconLoader2 className='size-4 animate-spin text-primary' />
+          Processing recording… transcript, summary, and audio will appear here shortly.
+        </p>
+        <div className='space-y-2' aria-hidden='true'>
+          <Skeleton className='h-4 w-full' />
+          <Skeleton className='h-4 w-4/5' />
+          <Skeleton className='h-4 w-3/5' />
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 /** Extensions accepted by the audio importer — kept in sync with the file input's
  * `accept` and used for both the displayed hint and drag-drop validation. */
 const IMPORT_AUDIO_EXTENSIONS = ['mp3', 'wav', 'm4a', 'aac', 'ogg', 'webm'] as const;
@@ -568,6 +622,11 @@ function DashboardScreen({
           </Card>
         ) : (
           filteredMeetings.map((meeting) => {
+            // Still finalizing → show a non-clickable processing card instead of
+            // a clickable card that would open an empty detail page.
+            if (isMeetingProcessing(meeting)) {
+              return <ProcessingMeetingCard key={meeting.id} meeting={meeting} />;
+            }
             const badge = STATUS_BADGE[meeting.status];
             return (
               <Card
@@ -1008,13 +1067,24 @@ export default function MeetingCopilotApp() {
     error: liveError
   } = useLiveTranscription();
 
-  // Auto-refresh while the open meeting is still processing so the AI summary,
-  // title, and tags appear on their own (and the title types out) — no manual
-  // "Refresh to see results" needed. Delay backs off 3s → 10s so a slow
-  // processing job doesn't hammer the backend.
+  // True while any meeting in the list is still being finalized — drives the
+  // dashboard's background polling so a just-stopped recording flips from
+  // "Processing…" to a real, openable meeting on its own (no app reopen needed).
+  const hasProcessingMeetings = useMemo(
+    () => meetingList.some(isMeetingProcessing),
+    [meetingList]
+  );
+
+  // Auto-refresh while a meeting is still processing so the AI summary, title,
+  // tags, and audio appear on their own (and the title types out) — no manual
+  // "Refresh to see results" or app reopen needed. We poll whenever the open
+  // meeting OR any dashboard row is processing, so the list updates even when no
+  // detail is open. Delay backs off 3s → 10s so a slow job doesn't hammer the
+  // backend.
   useEffect(() => {
-    const status = selectedMeetingDetail?.status;
-    if (status !== 'processing' && status !== 'live') return;
+    const detailStatus = selectedMeetingDetail?.status;
+    const detailPending = detailStatus === 'processing' || detailStatus === 'live';
+    if (!detailPending && !hasProcessingMeetings) return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout>;
     let delay = 3000;
@@ -1032,7 +1102,7 @@ export default function MeetingCopilotApp() {
       cancelled = true;
       globalThis.clearTimeout(timer);
     };
-  }, [selectedMeetingDetail?.status, refetchDetail, refetchMeetings]);
+  }, [selectedMeetingDetail?.status, hasProcessingMeetings, refetchDetail, refetchMeetings]);
 
   // Clear the "Processing…" indicator once the finalized meeting reaches a
   // terminal state (or after a safety cap, so a stuck backend never pins the
@@ -1189,6 +1259,19 @@ export default function MeetingCopilotApp() {
   }, [selectedMeetingDetail, meetingList, selectedMeetingId]);
 
   const filteredMeetings = searchText.trim() ? searchResults ?? [] : meetingList;
+
+  // Opening a meeting that is still finalizing would show an empty detail page.
+  // Guard every open path (dashboard cards, sidebar "Recent") so a processing
+  // meeting stays put with a hint instead of a blank screen.
+  const openMeeting = (meetingId: string) => {
+    const target = meetingList.find((m) => m.id === meetingId);
+    if (target && isMeetingProcessing(target)) {
+      toast.info('This recording is still processing — it will open when ready.');
+      return;
+    }
+    setSelectedMeetingId(meetingId);
+    setView('detail');
+  };
 
   const askAi = async (questionOverride?: string) => {
     const question = (questionOverride ?? askInput).trim();
@@ -1347,14 +1430,16 @@ export default function MeetingCopilotApp() {
     })();
   };
 
-  // `nextView` is where to land after stopping. Defaults to the finished
-  // meeting's detail; leaving the live view via the sidebar passes the clicked
-  // destination instead so the user lands where they intended.
-  const stopRecording = (nextView: View = 'detail') => {
+  // `nextView` is where to land after stopping. Defaults to the dashboard, where
+  // the just-stopped meeting shows a non-clickable "Processing…" card until it
+  // finishes finalizing (rather than dropping the user on an empty detail page).
+  // Leaving the live view via the sidebar passes the clicked destination instead
+  // so the user lands where they intended.
+  const stopRecording = (nextView: View = 'dashboard') => {
     // Defensive: this is wired to button `onClick` in a couple of places, so a
     // stray event object (or any non-View) must never reach `setView` — doing so
     // used to blank the whole app (PAGE_META[view] undefined → render crash).
-    const destination: View = typeof nextView === 'string' ? nextView : 'detail';
+    const destination: View = typeof nextView === 'string' ? nextView : 'dashboard';
     const meetingId = selectedMeetingId;
     // `stopLive()` resolves after the recorder flushes its final chunk, so the
     // uploaded blob is guaranteed complete (no timing guess).
@@ -1473,10 +1558,7 @@ export default function MeetingCopilotApp() {
           recentMeetings={meetingList}
           selectedMeeting={selectedMeeting}
           isRecording={isRecording}
-          onOpenMeeting={(meetingId) => {
-            setSelectedMeetingId(meetingId);
-            setView('detail');
-          }}
+          onOpenMeeting={openMeeting}
         />
         <div className='flex min-h-0 min-w-0 flex-1 flex-col'>
           <header className='sticky top-0 z-20 shrink-0 border-b border-border bg-background/95 backdrop-blur-md supports-[backdrop-filter]:bg-background/85'>
@@ -1513,10 +1595,7 @@ export default function MeetingCopilotApp() {
                 allMeetings={meetingList}
                 searchText={searchText}
                 setSearchText={setSearchText}
-                onOpenMeeting={(meetingId) => {
-                  setSelectedMeetingId(meetingId);
-                  setView('detail');
-                }}
+                onOpenMeeting={openMeeting}
                 onStartRecording={startRecording}
                 onImportAudio={handleImportAudio}
                 isLoading={meetingsLoading}
