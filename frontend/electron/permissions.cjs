@@ -387,17 +387,12 @@ async function ensureRecordingPermissions() {
     return { ok: false, blockedReason: 'microphone', permissionStatus: mic.status };
   }
 
-  if (process.platform === 'darwin') {
-    const systemAudio = getSystemAudioPermission();
-    if (!systemAudio.granted) {
-      return {
-        ok: false,
-        blockedReason: 'systemAudio',
-        permissionStatus: systemAudio.status,
-      };
-    }
-  }
-
+  // System audio is intentionally NOT a hard gate. macOS has no reliable TCC
+  // status for the CoreAudio tap, so getSystemAudioPermission() can never report
+  // 'granted' — blocking on it would bounce every recording to Device Check even
+  // when system audio works. Capture is renderer-side (getDisplayMedia) and
+  // already falls back to mic-only when system audio is unavailable, so we let
+  // recording proceed and treat system audio as best-effort.
   return { ok: true };
 }
 

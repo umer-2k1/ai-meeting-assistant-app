@@ -8,13 +8,14 @@ import express from 'express';
 import { requireAuth } from '../middleware/auth.js';
 import { googleOAuthService, getIntegrationsOAuthConfigIssues, GOOGLE_INTEGRATIONS_REDIRECT_URI } from '../connectors/google/oauth.js';
 import { ConnectorManager } from '../connectors/connector-manager.js';
+import { isSlackConfigured, listSlackChannels } from '../services/slack.js';
 import prisma from '../lib/prisma.js';
 import {
   buildIntegrationConnectedPage,
   buildIntegrationErrorPage,
   buildDesktopIntegrationRedirectPage,
 } from '../lib/integration-callback-page.js';
-import type { IntegrationProvider } from '@prisma/client';
+import type { IntegrationProvider } from '../lib/enums.js';
 
 const router = express.Router();
 const DESKTOP_PROTOCOL = process.env.DESKTOP_PROTOCOL || 'ai-meeting-copilot';
@@ -50,7 +51,8 @@ router.get('/status', requireAuth, async (req, res) => {
     const status: Record<string, any> = {
       calendar: { connected: false },
       gmail: { connected: false },
-      slack: { connected: false },
+      // Slack is an app-level bot-token integration (not per-user OAuth).
+      slack: { connected: isSlackConfigured() },
     };
     
     for (const integration of integrations) {
@@ -88,6 +90,23 @@ router.get('/status', requireAuth, async (req, res) => {
   } catch (error) {
     console.error('Error getting integration status:', error);
     res.status(500).json({ error: 'Failed to get integration status' });
+  }
+});
+
+/**
+ * GET /api/integrations/slack/channels
+ * List Slack channels the bot can post to (for the share picker).
+ */
+router.get('/slack/channels', requireAuth, async (_req, res) => {
+  try {
+    if (!isSlackConfigured()) {
+      return res.status(400).json({ error: 'Slack is not configured on this server.' });
+    }
+    const channels = await listSlackChannels();
+    res.json({ channels });
+  } catch (error) {
+    console.error('[integrations:slack] channels error:', error);
+    res.status(500).json({ error: 'Failed to list Slack channels' });
   }
 });
 

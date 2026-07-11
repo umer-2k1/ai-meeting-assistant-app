@@ -1,3 +1,4 @@
+import { BACKEND_URL, TOKEN_KEY } from '@/lib/config';
 import type { ActionItem, TranscriptLine } from './types';
 
 export type AskMeetingResponse = {
@@ -13,100 +14,45 @@ type AskPayload = {
   actionItems: ActionItem[];
 };
 
-const DEFAULT_TIMESTAMP = '00:01:02';
+const DEFAULT_TIMESTAMP = '00:00:00';
 
-function buildFallbackAnswer({
-  question,
-  transcript,
-  actionItems
-}: Pick<AskPayload, 'question' | 'transcript' | 'actionItems'>): AskMeetingResponse {
-  const normalizedQuestion = question.toLowerCase();
-
-  if (normalizedQuestion.includes('action')) {
-    if (actionItems.length === 0) {
-      return {
-        answer: 'No explicit action items are detected yet in this meeting context.',
-        timestamp: DEFAULT_TIMESTAMP,
-        provider: 'fallback'
-      };
-    }
-
-    const summary = actionItems
-      .slice(0, 3)
-      .map((item) => `@${item.assignee}: ${item.task} (${item.due})`)
-      .join('; ');
-
-    return {
-      answer: `Here are the top action items I found: ${summary}.`,
-      timestamp: actionItems[0]?.timestamp ?? DEFAULT_TIMESTAMP,
-      provider: 'fallback'
-    };
-  }
-
-  if (normalizedQuestion.includes('disagree') || normalizedQuestion.includes('timeline')) {
-    const disagreement = transcript.find((line) => {
-      const text = line.text.toLowerCase();
-      return text.includes('disagree') || text.includes('concern') || text.includes('timeline');
-    });
-
-    if (disagreement) {
-      return {
-        answer: `${disagreement.speaker} raised a concern: "${disagreement.text}"`,
-        timestamp: disagreement.timestamp,
-        provider: 'fallback'
-      };
-    }
-  }
-
-  if (normalizedQuestion.includes('who') && normalizedQuestion.includes('pricing')) {
-    return {
-      answer:
-        'Sarah mentioned pricing and requested a review of the enterprise tier before Q3 planning.',
-      timestamp: '00:14:32',
-      provider: 'fallback'
-    };
-  }
-
-  const latest = transcript.at(-1);
-  return {
-    answer:
-      latest?.text ??
-      'The team aligned on Q3 priorities, Dark Mode planning, and API latency risk management.',
-    timestamp: latest?.timestamp ?? DEFAULT_TIMESTAMP,
-    provider: 'fallback'
-  };
-}
-
+/**
+ * Ask the agentic meeting assistant (`/api/ask-meeting`). This hits a real Groq
+ * model with Calendar/Gmail tool access. On failure it returns an honest error
+ * message — never fabricated meeting content.
+ */
 export async function askMeetingQuestion(payload: AskPayload): Promise<AskMeetingResponse> {
-  const backendUrl = import.meta.env['VITE_BACKEND_URL'] ?? 'http://localhost:4000';
+  const token = localStorage.getItem(TOKEN_KEY);
 
-  const timeout = AbortSignal.timeout(4000);
-  const response = await fetch(`${backendUrl}/api/ask-meeting`, {
+  const timeout = AbortSignal.timeout(20000);
+  const response = await fetch(`${BACKEND_URL}/api/ask-meeting`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {})
+    },
     body: JSON.stringify(payload),
     signal: timeout
   }).catch(() => null);
 
   if (!response || !response.ok) {
-    return buildFallbackAnswer(payload);
-  }
-
-  const data: unknown = await response.json().catch(() => null);
-  if (
-    data &&
-    typeof data === 'object' &&
-    'answer' in data &&
-    typeof data.answer === 'string' &&
-    'timestamp' in data &&
-    typeof data.timestamp === 'string'
-  ) {
     return {
-      answer: data.answer,
-      timestamp: data.timestamp,
-      provider: 'backend'
+      answer: 'The assistant is unavailable right now. Please try again in a moment.',
+      timestamp: DEFAULT_TIMESTAMP,
+      provider: 'fallback'
     };
   }
 
-  return buildFallbackAnswer(payload);
+  const data: unknown = await response.json().catch(() => null);
+  if (data && typeof data === 'object' && 'answer' in data && typeof data.answer === 'string') {
+    const timestamp =
+      'timestamp' in data && typeof data.timestamp === 'string' ? data.timestamp : DEFAULT_TIMESTAMP;
+    return { answer: data.answer, timestamp, provider: 'backend' };
+  }
+
+  return {
+    answer: 'The assistant could not produce an answer. Please rephrase and try again.',
+    timestamp: DEFAULT_TIMESTAMP,
+    provider: 'fallback'
+  };
 }

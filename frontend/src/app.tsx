@@ -1,6 +1,8 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { AppErrorBoundary } from './components/app-error-boundary';
 import RootProvider from './components/providers/root';
 import { AuthProvider } from './contexts/auth-context';
+import { PreferencesProvider } from './contexts/preferences-context';
 import { ProtectedRoute } from './components/protected-route';
 import MeetingCopilotApp from './features/meeting-copilot/meeting-copilot-app';
 import LoginScreen from './features/auth/login-screen';
@@ -9,8 +11,10 @@ import AuthErrorScreen from './features/auth/auth-error-screen';
 
 function App() {
   return (
+    <AppErrorBoundary>
     <RootProvider>
       <AuthProvider>
+        <PreferencesProvider>
         <Router>
           <Routes>
             {/* Public Routes */}
@@ -27,13 +31,23 @@ function App() {
                 </ProtectedRoute>
               }
             />
+            <Route
+              path='/meetings/:meetingId'
+              element={
+                <ProtectedRoute>
+                  <MeetingCopilotApp />
+                </ProtectedRoute>
+              }
+            />
 
             {/* Redirect root to dashboard (will be redirected to login if not authenticated) */}
             <Route path='/' element={<Navigate to='/dashboard' replace />} />
           </Routes>
         </Router>
+        </PreferencesProvider>
       </AuthProvider>
     </RootProvider>
+    </AppErrorBoundary>
   );
 }
 

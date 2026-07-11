@@ -6,7 +6,7 @@
 
 import { isDesktopApp } from './google-auth';
 
-const BACKEND_URL = import.meta.env['VITE_BACKEND_URL'] || 'http://localhost:3001';
+import { BACKEND_URL } from './config';
 const TOKEN_KEY = 'ai_meeting_token';
 
 function getAuthHeaders(): HeadersInit {

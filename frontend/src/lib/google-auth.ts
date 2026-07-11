@@ -3,7 +3,7 @@
  * Desktop/Electron must always use the system browser — never navigate the app window to OAuth URLs.
  */
 
-const BACKEND_URL = import.meta.env['VITE_BACKEND_URL'] || 'http://localhost:3001';
+import { BACKEND_URL } from './config';
 
 export function isDesktopApp(): boolean {
   return (

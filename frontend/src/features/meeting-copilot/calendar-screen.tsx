@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect, useCallback } from 'react';
+import { useMemo, useState, useEffect, useCallback, useRef } from 'react';
 
 import {
   IconBell,
@@ -11,15 +11,19 @@ import {
   IconMicrophone,
   IconRefresh,
   IconRepeat,
+  IconSparkles,
   IconUsers,
   IconVideo
 } from '@tabler/icons-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Calendar, type DateRange } from '@/components/ui/calendar';
+import { addDays, format } from 'date-fns';
 import { cn } from '@/lib/utils';
 
 import { COPILOT_BTN_OUTLINE, COPILOT_HIGHLIGHT_PANEL, COPILOT_SURFACE } from './copilot-styles';
+import { BrandLoader } from '@/components/brand/brand-loader';
 import { SettingsSwitch } from './settings-ui';
 import type { CalendarEvent } from './types';
 
@@ -41,6 +45,7 @@ function CalendarConnectionCard({
   connected,
   email,
   connecting,
+  syncing,
   onConnect,
   onSync,
   onManage
@@ -48,6 +53,7 @@ function CalendarConnectionCard({
   connected: boolean;
   email?: string;
   connecting: boolean;
+  syncing?: boolean;
   onConnect: () => void;
   onSync: () => void;
   onManage: () => void;
@@ -90,9 +96,15 @@ function CalendarConnectionCard({
       <div className='flex shrink-0 flex-wrap gap-2'>
         {connected ? (
           <>
-            <Button size='sm' variant='outline' className={cn('rounded-full', COPILOT_BTN_OUTLINE)} onClick={onSync}>
-              <IconRefresh className='mr-1.5 size-3.5' />
-              Sync now
+            <Button
+              size='sm'
+              variant='outline'
+              className={cn('rounded-full', COPILOT_BTN_OUTLINE)}
+              onClick={onSync}
+              disabled={syncing}
+            >
+              <IconRefresh className={cn('mr-1.5 size-3.5', syncing && 'animate-spin')} />
+              {syncing ? 'Syncing…' : 'Sync now'}
             </Button>
             <Button size='sm' variant='ghost' className='rounded-full text-muted-foreground' onClick={onManage}>
               Manage
@@ -138,16 +150,20 @@ function CalendarStat({
   );
 }
 
+type PrepHandler = (ctx: NonNullable<CalendarEvent['prep']>) => void;
+
 function NextMeetingHero({
   event,
   autoRecord,
   onAutoRecordChange,
-  onStartRecording
+  onStartRecording,
+  onPrepare
 }: {
   event: CalendarEvent;
   autoRecord: boolean;
   onAutoRecordChange: (enabled: boolean) => void;
   onStartRecording: () => void;
+  onPrepare?: PrepHandler;
 }) {
   return (
     <article className={cn(COPILOT_HIGHLIGHT_PANEL, 'overflow-hidden p-5')}>
@@ -183,12 +199,23 @@ function NextMeetingHero({
       <p className='mt-3 text-sm text-foreground/85'>{event.note}</p>
       <div className='mt-4 flex flex-wrap items-center gap-3'>
         <Button
-          className='bg-gradient-to-r from-[#1E3A8A] via-[#3B82F6] to-[#06B6D4] text-white'
+          className='bg-primary hover:bg-primary/90 text-white'
           onClick={onStartRecording}
         >
           <IconMicrophone className='mr-1.5 size-4' />
           Start recording
         </Button>
+        {event.prep && onPrepare && (
+          <Button
+            variant='outline'
+            className={cn('rounded-full', COPILOT_BTN_OUTLINE)}
+            size='sm'
+            onClick={() => onPrepare(event.prep!)}
+          >
+            <IconSparkles className='mr-1.5 size-3.5' />
+            Prepare
+          </Button>
+        )}
         <Button variant='outline' className={cn('rounded-full', COPILOT_BTN_OUTLINE)} size='sm'>
           <IconLink className='mr-1.5 size-3.5' />
           Join meeting
@@ -213,12 +240,14 @@ function CalendarEventCard({
   autoRecord,
   onAutoRecordChange,
   onStartRecording,
+  onPrepare,
   isLast
 }: {
   event: CalendarEvent;
   autoRecord: boolean;
   onAutoRecordChange: (enabled: boolean) => void;
   onStartRecording: () => void;
+  onPrepare?: PrepHandler;
   isLast: boolean;
 }) {
   const isVideo =
@@ -294,6 +323,17 @@ function CalendarEventCard({
             <IconMicrophone className='mr-1.5 size-3.5' />
             Record
           </Button>
+          {event.prep && onPrepare && (
+            <Button
+              size='sm'
+              variant='outline'
+              className={cn('rounded-full', COPILOT_BTN_OUTLINE)}
+              onClick={() => onPrepare(event.prep!)}
+            >
+              <IconSparkles className='mr-1.5 size-3.5' />
+              Prepare
+            </Button>
+          )}
           {event.recurring ? (
             <div className='inline-flex items-center gap-2 rounded-full border border-border/70 bg-muted/40 px-3 py-1'>
               <span className='text-xs text-muted-foreground'>Auto-record</span>
@@ -327,6 +367,7 @@ function DayGroup({
   autoRecordById,
   setAutoRecord,
   onStartRecording,
+  onPrepare,
   skipFirstIfHero
 }: {
   label: string;
@@ -334,6 +375,7 @@ function DayGroup({
   autoRecordById: Record<string, boolean>;
   setAutoRecord: (id: string, enabled: boolean) => void;
   onStartRecording: () => void;
+  onPrepare?: PrepHandler;
   skipFirstIfHero?: boolean;
 }) {
   const visible = skipFirstIfHero ? events.slice(1) : events;
@@ -354,6 +396,7 @@ function DayGroup({
               setAutoRecord(event.id, enabled);
             }}
             onStartRecording={onStartRecording}
+            onPrepare={onPrepare}
             isLast={index === visible.length - 1}
           />
         ))}
@@ -364,10 +407,12 @@ function DayGroup({
 
 export default function CalendarScreen({
   onStartRecording,
-  onManageIntegrations
+  onManageIntegrations,
+  onPrepare
 }: {
   onStartRecording: () => void;
   onManageIntegrations?: () => void;
+  onPrepare?: PrepHandler;
 }) {
   const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
   const [loading, setLoading] = useState(true);
@@ -375,20 +420,44 @@ export default function CalendarScreen({
   const [calendarConnected, setCalendarConnected] = useState(false);
   const [calendarEmail, setCalendarEmail] = useState<string | undefined>(undefined);
   const [connecting, setConnecting] = useState(false);
+  // `dateRange` is the *applied* window that actually drives fetching. `draftRange` is the
+  // in-progress calendar selection — editing it (clicking start, then end) does NOT refetch,
+  // so there's no jerk mid-selection. The user commits with the Apply button.
+  const [dateRange, setDateRange] = useState<DateRange | undefined>(() => ({
+    from: new Date(),
+    to: addDays(new Date(), 30),
+  }));
+  const [draftRange, setDraftRange] = useState<DateRange | undefined>(dateRange);
+
+  // Prev/next/Today set a complete range in one shot — apply those immediately and keep the
+  // calendar's draft in sync so it reflects the jumped-to window.
+  const applyRange = useCallback((next: DateRange) => {
+    setDraftRange(next);
+    setDateRange(next);
+  }, []);
+
+  const draftReady = Boolean(draftRange?.from && draftRange?.to);
+  const draftDiffersFromApplied =
+    draftRange?.from?.getTime() !== dateRange?.from?.getTime() ||
+    draftRange?.to?.getTime() !== dateRange?.to?.getTime();
+
+  // Guard against overlapping fetches (rapid "Sync now" clicks, mount + poll).
+  const fetchInFlight = useRef(false);
 
   const fetchCalendarEvents = useCallback(async () => {
+    if (fetchInFlight.current) return;
+    fetchInFlight.current = true;
     try {
       setLoading(true);
       setError(null);
 
       const { getCalendarEvents } = await import('@/lib/integrations-api');
 
-      // Fetch events for the next 30 days
-      const startDate = new Date();
-      const endDate = new Date();
-      endDate.setDate(endDate.getDate() + 30);
+      // Fetch events for the selected date range (defaults to the next 30 days).
+      const startDate = dateRange?.from ?? new Date();
+      const endDate = dateRange?.to ?? addDays(startDate, 30);
 
-      const { events } = await getCalendarEvents(startDate, endDate, 50);
+      const { events } = await getCalendarEvents(startDate, endDate, 100);
 
       // Transform API events to CalendarEvent format
       const transformedEvents: CalendarEvent[] = events.map(event => ({
@@ -402,7 +471,15 @@ export default function CalendarScreen({
         dayLabel: getDayLabel(new Date(event.startTime)),
         attendees: event.attendees?.length,
         recurring: event.recurring,
-        startsSoon: isStartingSoon(new Date(event.startTime))
+        startsSoon: isStartingSoon(new Date(event.startTime)),
+        prep: {
+          title: event.title,
+          description: event.description,
+          attendees: (event.attendees ?? []).map((a) => ({
+            name: a.name || a.email,
+            email: a.email
+          }))
+        }
       }));
 
       setCalendarEvents(transformedEvents);
@@ -415,9 +492,10 @@ export default function CalendarScreen({
       }
       setCalendarEvents([]);
     } finally {
+      fetchInFlight.current = false;
       setLoading(false);
     }
-  }, []);
+  }, [dateRange]);
 
   const refetchConnectionStatus = useCallback(async () => {
     try {
@@ -522,11 +600,12 @@ export default function CalendarScreen({
           email={calendarEmail}
           connecting={connecting}
           onConnect={handleConnectCalendar}
+          syncing={loading}
           onSync={() => void fetchCalendarEvents()}
           onManage={() => onManageIntegrations?.()}
         />
-        <div className='flex items-center justify-center py-12'>
-          <div className='size-8 animate-spin rounded-full border-4 border-primary border-t-transparent' />
+        <div className='py-12'>
+          <BrandLoader label='Loading your calendar…' size={48} />
         </div>
       </section>
     );
@@ -540,6 +619,7 @@ export default function CalendarScreen({
           email={calendarEmail}
           connecting={connecting}
           onConnect={handleConnectCalendar}
+          syncing={loading}
           onSync={() => void fetchCalendarEvents()}
           onManage={() => onManageIntegrations?.()}
         />
@@ -560,6 +640,7 @@ export default function CalendarScreen({
         connected={calendarConnected}
         email={calendarEmail}
         connecting={connecting}
+        syncing={loading}
         onConnect={handleConnectCalendar}
         onSync={() => void fetchCalendarEvents()}
         onManage={() => onManageIntegrations?.()}
@@ -588,21 +669,96 @@ export default function CalendarScreen({
 
       <div className='flex flex-wrap items-center justify-between gap-3'>
         <div>
-          <p className='text-sm font-semibold text-foreground'>{formatTodayHeading()}</p>
+          <p className='text-sm font-semibold text-foreground'>
+            {dateRange?.from
+              ? `${format(dateRange.from, 'MMM d')} – ${format(dateRange.to ?? dateRange.from, 'MMM d, yyyy')}`
+              : formatTodayHeading()}
+          </p>
           <p className='text-xs text-muted-foreground'>
-            {calendarEvents.length === 0 ? 'No upcoming meetings' : `${calendarEvents.length} events loaded`}
+            {calendarEvents.length === 0 ? 'No meetings in range' : `${calendarEvents.length} events loaded`}
           </p>
         </div>
         <div className='inline-flex items-center gap-1 rounded-xl border border-border/70 bg-muted/50 p-1'>
-          <Button size='icon-sm' variant='ghost' className='size-8 rounded-lg' aria-label='Previous week'>
+          <Button
+            size='icon-sm'
+            variant='ghost'
+            className='size-8 rounded-lg'
+            aria-label='Previous week'
+            onClick={() =>
+              applyRange({
+                from: addDays(dateRange?.from ?? new Date(), -7),
+                to: addDays(dateRange?.to ?? addDays(new Date(), 30), -7),
+              })
+            }
+          >
             <IconChevronLeft className='size-4' />
           </Button>
-          <Button size='sm' variant='secondary' className='rounded-lg px-3 text-xs'>
+          <Button
+            size='sm'
+            variant='secondary'
+            className='rounded-lg px-3 text-xs'
+            onClick={() => applyRange({ from: new Date(), to: addDays(new Date(), 30) })}
+          >
             Today
           </Button>
-          <Button size='icon-sm' variant='ghost' className='size-8 rounded-lg' aria-label='Next week'>
+          <Button
+            size='icon-sm'
+            variant='ghost'
+            className='size-8 rounded-lg'
+            aria-label='Next week'
+            onClick={() =>
+              applyRange({
+                from: addDays(dateRange?.from ?? new Date(), 7),
+                to: addDays(dateRange?.to ?? addDays(new Date(), 30), 7),
+              })
+            }
+          >
             <IconChevronRight className='size-4' />
           </Button>
+        </div>
+      </div>
+
+      <div className={cn(COPILOT_SURFACE, 'flex flex-wrap items-start gap-4 p-4')}>
+        <Calendar
+          mode='range'
+          numberOfMonths={1}
+          selected={draftRange}
+          onSelect={setDraftRange}
+          defaultMonth={draftRange?.from}
+        />
+        <div className='flex min-w-[180px] flex-1 flex-col gap-2 text-sm text-muted-foreground'>
+          <p className='font-medium text-foreground'>Pick a date range</p>
+          <p>
+            Select a start and end date, then hit Apply to load meetings from your connected
+            Google Calendar for that window. Use the arrows to jump a week at a time.
+          </p>
+          <p className='text-xs text-foreground/80'>
+            {draftRange?.from
+              ? draftRange.to
+                ? `${format(draftRange.from, 'MMM d')} – ${format(draftRange.to, 'MMM d, yyyy')}`
+                : `${format(draftRange.from, 'MMM d, yyyy')} — pick an end date`
+              : 'No dates selected'}
+          </p>
+          <div className='mt-auto flex items-center gap-2 pt-2'>
+            <Button
+              size='sm'
+              className='rounded-full bg-primary/90 text-primary-foreground hover:bg-primary'
+              disabled={!draftReady || !draftDiffersFromApplied || loading}
+              onClick={() => draftRange && setDateRange(draftRange)}
+            >
+              Apply range
+            </Button>
+            {draftDiffersFromApplied && (
+              <Button
+                size='sm'
+                variant='ghost'
+                className='rounded-full text-muted-foreground'
+                onClick={() => setDraftRange(dateRange)}
+              >
+                Reset
+              </Button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -614,6 +770,7 @@ export default function CalendarScreen({
             setAutoRecord(nextEvent.id, enabled);
           }}
           onStartRecording={onStartRecording}
+          onPrepare={onPrepare}
         />
       )}
 
@@ -632,6 +789,7 @@ export default function CalendarScreen({
             autoRecordById={autoRecordById}
             setAutoRecord={setAutoRecord}
             onStartRecording={onStartRecording}
+            onPrepare={onPrepare}
             skipFirstIfHero={todayEvents[0]?.id === nextEvent?.id}
           />
           <DayGroup
@@ -640,6 +798,7 @@ export default function CalendarScreen({
             autoRecordById={autoRecordById}
             setAutoRecord={setAutoRecord}
             onStartRecording={onStartRecording}
+            onPrepare={onPrepare}
           />
         </div>
 

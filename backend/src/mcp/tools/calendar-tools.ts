@@ -4,7 +4,7 @@
  * Tool definitions for LLM to interact with Google Calendar
  */
 
-import type { IntegrationProvider } from '@prisma/client';
+import type { IntegrationProvider } from '../../lib/enums.js';
 import { ConnectorManager } from '../../connectors/connector-manager.js';
 
 export interface McpTool {

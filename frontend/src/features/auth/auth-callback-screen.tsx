@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth, type User } from '@/contexts/auth-context';
+import { BrandLoader } from '@/components/brand/brand-loader';
 
 export default function AuthCallbackScreen() {
   const [searchParams] = useSearchParams();
@@ -27,12 +28,5 @@ export default function AuthCallbackScreen() {
     }
   }, [token, userParam, navigate, setAuth]);
 
-  return (
-    <div className='flex min-h-screen items-center justify-center bg-background'>
-      <div className='text-center'>
-        <div className='mb-4 inline-block size-12 animate-spin rounded-full border-4 border-primary border-t-transparent' />
-        <p className='text-lg text-foreground'>Completing sign in...</p>
-      </div>
-    </div>
-  );
+  return <BrandLoader fullScreen label='Completing sign in…' />;
 }

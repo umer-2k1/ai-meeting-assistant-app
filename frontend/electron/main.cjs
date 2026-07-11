@@ -15,7 +15,9 @@ const {
 } = require('electron');
 
 const permissions = require('./permissions.cjs');
-const AudioRecordingService = require('./audio-recording-service.cjs');
+// NOTE: Audio capture happens in the renderer (getUserMedia/getDisplayMedia →
+// MediaRecorder → WebSocket → Deepgram). The main process only tracks recording
+// state for the widget/tray/timer. See use-live-transcription.ts.
 
 const APP_NAME = 'AI Meeting Copilot';
 const DESKTOP_PROTOCOL = process.env.DESKTOP_PROTOCOL || 'ai-meeting-copilot';
@@ -25,9 +27,6 @@ const DESKTOP_PROTOCOL = process.env.DESKTOP_PROTOCOL || 'ai-meeting-copilot';
 // CoreAudio Tap gives us "System Audio Recording Only" permission instead of "Screen & System Audio Recording".
 
 const isTestMode = process.env.ELECTRON_TEST_MODE === '1';
-
-// Initialize audio recording service
-const audioService = new AudioRecordingService();
 
 const WIDGET_SIZES = {
   compact: { width: 300, height: 52 },
@@ -45,11 +44,82 @@ let tray = null;
 
 let widgetExpanded = false;
 let widgetUserPlaced = false;
+/** True once the widget renderer has painted (ready-to-show) — gates show(). */
+let widgetContentReady = false;
 /** @type {{ winX: number; winY: number; cursorX: number; cursorY: number } | null} */
 let widgetDragState = null;
 /** @type {{ edge: string; startWidth: number; startHeight: number; cursorX: number; cursorY: number } | null} */
 let widgetResizeState = null;
 let widgetExpandedSize = { ...WIDGET_SIZES.expanded };
+
+// ---- Widget position persistence (survives app restarts) ----
+
+function widgetPrefsPath() {
+  return path.join(app.getPath('userData'), 'widget-prefs.json');
+}
+
+/** @type {{ x: number; y: number } | null} */
+let savedWidgetPosition = null;
+/** @type {NodeJS.Timeout | null} */
+let widgetPrefsSaveTimer = null;
+
+function loadWidgetPrefs() {
+  try {
+    const raw = fs.readFileSync(widgetPrefsPath(), 'utf8');
+    const prefs = JSON.parse(raw);
+    if (
+      prefs &&
+      typeof prefs.x === 'number' &&
+      typeof prefs.y === 'number' &&
+      Number.isFinite(prefs.x) &&
+      Number.isFinite(prefs.y)
+    ) {
+      savedWidgetPosition = { x: Math.round(prefs.x), y: Math.round(prefs.y) };
+    }
+    if (prefs && prefs.expandedSize) {
+      const { width, height } = prefs.expandedSize;
+      if (typeof width === 'number' && typeof height === 'number') {
+        widgetExpandedSize = { width: Math.round(width), height: Math.round(height) };
+      }
+    }
+  } catch {
+    // No prefs yet (first run) or unreadable file — defaults apply.
+  }
+}
+
+/** Debounced write — drag/resize fire per mouse-move. */
+function saveWidgetPrefs() {
+  if (widgetPrefsSaveTimer) clearTimeout(widgetPrefsSaveTimer);
+  widgetPrefsSaveTimer = setTimeout(() => {
+    widgetPrefsSaveTimer = null;
+    try {
+      fs.writeFileSync(
+        widgetPrefsPath(),
+        JSON.stringify({ ...savedWidgetPosition, expandedSize: widgetExpandedSize })
+      );
+    } catch (error) {
+      console.warn('[desktop] Failed to save widget prefs', error);
+    }
+  }, 400);
+}
+
+/**
+ * Apply the saved widget position if it is still (mostly) on a visible
+ * display; otherwise fall back to the default bottom-right anchor.
+ */
+function applySavedWidgetPosition() {
+  if (!savedWidgetPosition || !widgetWindow || widgetWindow.isDestroyed()) return false;
+
+  const { x, y } = savedWidgetPosition;
+  const bounds = widgetWindow.getBounds();
+  const display = screen.getDisplayMatching({ x, y, width: bounds.width, height: bounds.height });
+  const area = display.workArea;
+  const clampedX = Math.min(Math.max(x, area.x), area.x + area.width - bounds.width);
+  const clampedY = Math.min(Math.max(y, area.y), area.y + area.height - bounds.height);
+  widgetWindow.setPosition(Math.round(clampedX), Math.round(clampedY));
+  widgetUserPlaced = true;
+  return true;
+}
 
 const recordingState = {
   isRecording: false,
@@ -117,16 +187,27 @@ function resolveAppIconPath() {
 }
 
 function loadAppIconImage() {
-  const iconPath = resolveAppIconPath();
-  if (!iconPath) return null;
+  const iconsDir = path.join(__dirname, 'icons');
 
-  const image = nativeImage.createFromPath(iconPath);
-  if (image.isEmpty()) {
-    console.warn('[desktop] Failed to load app icon from', iconPath);
-    return null;
+  // nativeImage (tray/dock/window) needs a raster it can actually decode. Electron's
+  // .icns decoder chokes on iconutil-produced PNG-compressed (ic12) files — it returns an
+  // empty image — so prefer the raw PNG here. The .icns stays reserved for packaging, where
+  // macOS itself parses the .app bundle icon. Try each candidate until one decodes.
+  const candidates = [
+    path.join(iconsDir, 'icon.png'),
+    path.join(__dirname, '..', 'public', 'favicon', 'favicon-512.webp'),
+    process.platform === 'darwin' ? path.join(iconsDir, 'icon.icns') : null,
+    process.platform === 'win32' ? path.join(iconsDir, 'icon.ico') : null,
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    if (!fs.existsSync(candidate)) continue;
+    const image = nativeImage.createFromPath(candidate);
+    if (!image.isEmpty()) return image;
   }
 
-  return image;
+  console.warn('[desktop] Failed to load app icon from', candidates.join(', '));
+  return null;
 }
 
 function applyWindowIcon(win) {
@@ -219,12 +300,14 @@ function syncWidgetVisibility() {
   ensureWidgetWindow();
   if (!widgetWindow || widgetWindow.isDestroyed()) return;
 
-  if (!widgetUserPlaced) {
+  if (!widgetUserPlaced && !applySavedWidgetPosition()) {
     positionWidgetBottomRight();
   }
 
-  if (!widgetWindow.isVisible()) {
-    widgetWindow.show();
+  // Show only after first paint; otherwise the ready-to-show handler will show
+  // it (prevents a blank transparent window flashing before React mounts).
+  if (widgetContentReady && !widgetWindow.isVisible()) {
+    widgetWindow.showInactive();
   }
 }
 
@@ -250,28 +333,17 @@ function clearRecordingTimers() {
 
 async function startRecording() {
   try {
-    // Note: AudioRecordingService is deprecated and will throw an error
-    // Real recording should be implemented in the renderer process using
-    // getDisplayMedia(), MediaRecorder, and AudioContext
-    
-    console.warn(
-      '[Recording] Audio recording service is non-functional. ' +
-      'Recording must be implemented in the renderer process. ' +
-      'See use-system-audio-test.ts for the correct approach.'
-    );
-    
-    // For now, just track recording state without actual audio capture
-    const meetingId = `meeting-${Date.now()}`;
-    
+    // By design, the main process only TRACKS recording state (for the widget
+    // timer, tray, and global shortcut). The actual audio capture + streaming to
+    // Deepgram happens in the renderer (getUserMedia/getDisplayMedia →
+    // MediaRecorder → WebSocket). See use-live-transcription.ts. So there is no
+    // audio work to do here — just flip state on and start the timer.
     recordingState.isRecording = true;
     recordingState.isPaused = false;
     startRecordingTimers();
     emitRecordingStateAndSyncWidget();
-    
-    return {
-      ...recordingState,
-      warning: 'Audio recording is not yet implemented. Use Device Check → System Audio Test for testing.'
-    };
+
+    return { ...recordingState };
   } catch (error) {
     console.error('[Recording] Failed to start:', error);
     return {
@@ -285,18 +357,18 @@ function pauseResumeRecording() {
   if (!recordingState.isRecording) return { ...recordingState };
   
   recordingState.isPaused = !recordingState.isPaused;
-  
-  // AudioService is deprecated - no-op
-  // Real recording should be in renderer process
-  
+
+  // State-only: the renderer pauses/resumes the real MediaRecorder; here we just
+  // track the flag so the widget/tray/timer stay in sync.
+
   emitRecordingState();
   return { ...recordingState };
 }
 
 async function stopRecording() {
   try {
-    // AudioService is deprecated - just update state
-    
+    // State-only: the renderer stops the real MediaRecorder and finalizes the
+    // meeting. Here we just clear state so the widget/tray/timer reset.
     recordingState.isRecording = false;
     recordingState.isPaused = false;
     recordingState.elapsedSeconds = 0;
@@ -497,6 +569,12 @@ function workAreaMinY() {
 function createWidgetWindow() {
   if (isTestMode) return;
 
+  // Always create the widget in the compact state. Without this a stale
+  // `widgetExpanded` (left over from a previous window) could pair a large
+  // window with the compact pill — a giant transparent window that reads as a
+  // big black rectangle with the pill floating in its centre.
+  widgetExpanded = false;
+
   widgetWindow = new BrowserWindow({
     width: WIDGET_SIZES.compact.width,
     height: WIDGET_SIZES.compact.height,
@@ -515,19 +593,25 @@ function createWidgetWindow() {
     }
   });
 
+  // Float above everything — including full-screen apps and the menu bar — and
+  // stay present across all Spaces, so the widget is genuinely a screen-wide
+  // overlay rather than something tied to one window/desktop.
+  widgetWindow.setAlwaysOnTop(true, 'screen-saver');
   if (process.platform === 'darwin') {
     widgetWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-    widgetWindow.setAlwaysOnTop(true, 'floating');
   }
 
   loadWidgetContent(widgetWindow);
 
+  // Only show once the renderer has actually painted — showing a transparent
+  // window before first paint is what left a blank/empty overlay on screen.
   widgetWindow.once('ready-to-show', () => {
-    if (!widgetUserPlaced) {
+    widgetContentReady = true;
+    if (!widgetUserPlaced && !applySavedWidgetPosition()) {
       positionWidgetBottomRight();
     }
     if (recordingState.isRecording) {
-      widgetWindow.show();
+      widgetWindow.showInactive();
     }
     emit('recording:state', { ...recordingState });
   });
@@ -535,6 +619,7 @@ function createWidgetWindow() {
   widgetWindow.on('closed', () => {
     widgetWindow = null;
     widgetExpanded = false;
+    widgetContentReady = false;
   });
 }
 
@@ -715,6 +800,17 @@ function registerIpcHandlers() {
   ipcMain.handle('desktop:recording:stop', () => stopRecording());
   ipcMain.handle('desktop:recording:status', () => ({ ...recordingState }));
 
+  // Live transcript relay: the capturing window (main app) owns the Deepgram WS
+  // stream; forward each line to the floating widget so it can show the transcript
+  // too. Fire-and-forget (ipcRenderer.send) — the widget subscribes via
+  // recording.onTranscript. Ignored when the widget isn't open.
+  ipcMain.on('desktop:recording:push-transcript', (_event, line) => {
+    if (!line || !recordingState.isRecording) return;
+    if (widgetWindow && !widgetWindow.isDestroyed()) {
+      widgetWindow.webContents.send('recording:transcript', line);
+    }
+  });
+
   ipcMain.handle('desktop:widget:set-expanded', (_event, expanded) => {
     resizeWidgetWindow(Boolean(expanded));
     return {
@@ -762,6 +858,11 @@ function registerIpcHandlers() {
 
   ipcMain.handle('desktop:widget:drag-end', () => {
     widgetDragState = null;
+    if (widgetWindow && !widgetWindow.isDestroyed()) {
+      const [x, y] = widgetWindow.getPosition();
+      savedWidgetPosition = { x, y };
+      saveWidgetPrefs();
+    }
     return { ok: true };
   });
 
@@ -811,6 +912,11 @@ function registerIpcHandlers() {
 
   ipcMain.handle('desktop:widget:resize-end', () => {
     widgetResizeState = null;
+    if (widgetWindow && !widgetWindow.isDestroyed()) {
+      const [x, y] = widgetWindow.getPosition();
+      savedWidgetPosition = { x, y };
+      saveWidgetPrefs();
+    }
     return { ok: true };
   });
 
@@ -867,6 +973,7 @@ if (!gotSingleInstanceLock) {
 }
 
 app.whenReady().then(() => {
+  loadWidgetPrefs();
   configureMediaSessionPermissions();
   registerIpcHandlers();
   registerDeepLinking();

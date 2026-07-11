@@ -28,6 +28,7 @@ export const meetingStatusSchema = z.enum([
   'PROCESSING',
   'COMPLETED',
   'CANCELLED',
+  'FAILED',
 ]);
 
 export const createMeetingSchema = z.object({
@@ -40,6 +41,9 @@ export const createMeetingSchema = z.object({
 });
 
 export const updateMeetingSchema = createMeetingSchema.partial();
+
+/** Single share-email recipient (used to validate share requests). */
+export const emailRecipientSchema = z.string().email();
 
 export const meetingSchema = z.object({
   id: z.string().cuid(),
@@ -151,6 +155,25 @@ export const chatMessageSchema = z.object({
 });
 
 export type ChatMessageSchema = z.infer<typeof chatMessageSchema>;
+
+// ========================================
+// Integration Enums (single source of truth; SQLite has no native enums)
+// ========================================
+
+export const integrationProviderSchema = z.enum([
+  'GOOGLE_CALENDAR',
+  'GMAIL',
+  'SLACK',
+  'MICROSOFT',
+]);
+
+export const integrationTypeSchema = z.enum([
+  'SLACK',
+  'EMAIL',
+  'PDF_EXPORT',
+  'MARKDOWN_EXPORT',
+  'CALENDAR_SYNC',
+]);
 
 // ========================================
 // Attendee Schemas

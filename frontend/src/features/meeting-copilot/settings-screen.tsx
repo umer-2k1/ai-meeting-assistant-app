@@ -30,6 +30,9 @@ import { cn } from '@/lib/utils';
 import SettingsPermissionsPanel from './settings-permissions-panel';
 import { SettingsRow, SettingsSection, SettingsSwitch } from './settings-ui';
 import { useAuth } from '@/contexts/auth-context';
+import { usePreferences } from '@/contexts/preferences-context';
+import { useTheme } from '@/components/providers/theme';
+import { BrandLoader } from '@/components/brand/brand-loader';
 
 const AUDIO_DEVICES = [
   { value: 'default', label: 'System default' },
@@ -230,12 +233,15 @@ function AudioSettingsTab() {
 }
 
 function AiPreferencesTab() {
-  const [summaryLength, setSummaryLength] = useState('detailed');
-  const [actionSensitivity, setActionSensitivity] = useState('balanced');
-  const [responseStyle, setResponseStyle] = useState('explanatory');
-  const [includeTimestamps, setIncludeTimestamps] = useState(true);
-  const [highlightDecisions, setHighlightDecisions] = useState(true);
-  const [suggestFollowUps, setSuggestFollowUps] = useState(true);
+  const { preferences, updatePreferences } = usePreferences();
+  const {
+    summaryLength,
+    actionSensitivity,
+    responseStyle,
+    includeTimestamps,
+    highlightDecisions,
+    suggestFollowups,
+  } = preferences;
 
   return (
     <div className='space-y-4'>
@@ -247,7 +253,9 @@ function AiPreferencesTab() {
           <SettingsSelect
             aria-label='Summary length'
             value={summaryLength}
-            onValueChange={setSummaryLength}
+            onValueChange={(v) =>
+              updatePreferences({ summaryLength: v as 'brief' | 'balanced' | 'detailed' })
+            }
             options={[
               { value: 'brief', label: 'Brief' },
               { value: 'balanced', label: 'Balanced' },
@@ -262,7 +270,11 @@ function AiPreferencesTab() {
           <SettingsSelect
             aria-label='Action item sensitivity'
             value={actionSensitivity}
-            onValueChange={setActionSensitivity}
+            onValueChange={(v) =>
+              updatePreferences({
+                actionSensitivity: v as 'conservative' | 'balanced' | 'aggressive',
+              })
+            }
             options={[
               { value: 'conservative', label: 'Conservative' },
               { value: 'balanced', label: 'Balanced' },
@@ -274,7 +286,7 @@ function AiPreferencesTab() {
           <SettingsSwitch
             aria-label='Include timestamps'
             checked={includeTimestamps}
-            onCheckedChange={setIncludeTimestamps}
+            onCheckedChange={(v) => updatePreferences({ includeTimestamps: v })}
           />
         </SettingsRow>
         <SettingsRow
@@ -284,7 +296,7 @@ function AiPreferencesTab() {
           <SettingsSwitch
             aria-label='Highlight decisions'
             checked={highlightDecisions}
-            onCheckedChange={setHighlightDecisions}
+            onCheckedChange={(v) => updatePreferences({ highlightDecisions: v })}
           />
         </SettingsRow>
       </SettingsSection>
@@ -294,7 +306,11 @@ function AiPreferencesTab() {
           <SettingsSelect
             aria-label='Response style'
             value={responseStyle}
-            onValueChange={setResponseStyle}
+            onValueChange={(v) =>
+              updatePreferences({
+                responseStyle: v as 'concise' | 'explanatory' | 'structured',
+              })
+            }
             options={[
               { value: 'concise', label: 'Concise' },
               { value: 'explanatory', label: 'Explanatory' },
@@ -308,8 +324,8 @@ function AiPreferencesTab() {
         >
           <SettingsSwitch
             aria-label='Suggest follow-up questions'
-            checked={suggestFollowUps}
-            onCheckedChange={setSuggestFollowUps}
+            checked={suggestFollowups}
+            onCheckedChange={(v) => updatePreferences({ suggestFollowups: v })}
           />
         </SettingsRow>
       </SettingsSection>
@@ -317,8 +333,8 @@ function AiPreferencesTab() {
       <div className='flex items-start gap-3 rounded-2xl border border-cyan-500/30 bg-primary/5 px-5 py-4 dark:border-cyan-500/40'>
         <IconSparkles className='mt-0.5 size-4 shrink-0 text-primary' />
         <p className='text-sm leading-relaxed text-muted-foreground'>
-          API keys and model selection will appear here when backend configuration is wired up.
-          Current preferences are stored locally for this session.
+          These preferences are saved to your account and applied to future meeting
+          summaries, action-item extraction, and Copilot chat.
         </p>
       </div>
     </div>
@@ -488,8 +504,13 @@ function IntegrationsTab() {
         setConnecting((prev) => ({ ...prev, [integrationId]: false }));
       }
     } else {
-      // Slack not yet implemented
-      alert('Slack integration coming soon!');
+      // Slack is an app-level (bot-token) integration configured on the server,
+      // not a per-user OAuth connect.
+      alert(
+        connected.slack
+          ? 'Slack is connected. Use the Share button on a meeting to post its report to a channel.'
+          : 'To enable Slack, add SLACK_BOT_TOKEN to the backend environment and restart the server.'
+      );
     }
   };
 
@@ -517,8 +538,8 @@ function IntegrationsTab() {
 
   if (loading) {
     return (
-      <div className='flex items-center justify-center py-12'>
-        <div className='size-8 animate-spin rounded-full border-4 border-primary border-t-transparent' />
+      <div className='py-12'>
+        <BrandLoader label='Loading settings…' size={48} />
       </div>
     );
   }
@@ -670,8 +691,8 @@ function PrivacyTab() {
 }
 
 function GeneralTab({ isDesktop }: { isDesktop: boolean }) {
-  const [language, setLanguage] = useState('en');
-  const [timeFormat, setTimeFormat] = useState('12h');
+  const { preferences, updatePreferences } = usePreferences();
+  const { theme, setTheme } = useTheme();
 
   return (
     <div className='space-y-4'>
@@ -681,8 +702,8 @@ function GeneralTab({ isDesktop }: { isDesktop: boolean }) {
         <SettingsRow label='Language'>
           <SettingsSelect
             aria-label='Language'
-            value={language}
-            onValueChange={setLanguage}
+            value={preferences.language}
+            onValueChange={(v) => updatePreferences({ language: v })}
             options={[
               { value: 'en', label: 'English' },
               { value: 'es', label: 'Spanish' },
@@ -693,19 +714,25 @@ function GeneralTab({ isDesktop }: { isDesktop: boolean }) {
         <SettingsRow label='Time format'>
           <SettingsSelect
             aria-label='Time format'
-            value={timeFormat}
-            onValueChange={setTimeFormat}
+            value={preferences.timeFormat}
+            onValueChange={(v) => updatePreferences({ timeFormat: v as '12h' | '24h' })}
             options={[
               { value: '12h', label: '12-hour' },
               { value: '24h', label: '24-hour' }
             ]}
           />
         </SettingsRow>
-        <SettingsRow
-          label='Appearance'
-          description='Use the sun/moon toggle in the top-right of the app header.'
-        >
-          <span className='text-sm text-muted-foreground'>System / Light / Dark</span>
+        <SettingsRow label='Appearance' description='Theme for the app.'>
+          <SettingsSelect
+            aria-label='Appearance'
+            value={theme}
+            onValueChange={(v) => setTheme(v as 'light' | 'dark' | 'system')}
+            options={[
+              { value: 'system', label: 'System' },
+              { value: 'light', label: 'Light' },
+              { value: 'dark', label: 'Dark' }
+            ]}
+          />
         </SettingsRow>
       </SettingsSection>
     </div>
@@ -718,12 +745,35 @@ function AccountTab() {
   return (
     <div className='space-y-4'>
       <SettingsSection title='Account' description='Your signed-in profile and session controls.'>
-        <SettingsRow label='Name' description='Shown in the sidebar and profile menu.'>
-          <Input value={user?.name ?? ''} readOnly className='max-w-[320px]' />
-        </SettingsRow>
-        <SettingsRow label='Email' description='Email cannot be changed.'>
-          <Input value={user?.email ?? ''} readOnly className='max-w-[320px]' />
-        </SettingsRow>
+        <div className='space-y-1.5 border-b border-border/60 py-4'>
+          <label htmlFor='account-name' className='text-sm font-semibold text-foreground'>
+            Name
+          </label>
+          <p className='text-sm leading-relaxed text-muted-foreground'>
+            Shown in the sidebar and profile menu.
+          </p>
+          <Input
+            id='account-name'
+            value={user?.name ?? ''}
+            readOnly
+            title={user?.name ?? ''}
+            className='mt-1 h-9 w-full'
+          />
+        </div>
+        <div className='space-y-1.5 border-b border-border/60 py-4'>
+          <label htmlFor='account-email' className='text-sm font-semibold text-foreground'>
+            Email
+          </label>
+          <p className='text-sm leading-relaxed text-muted-foreground'>Email cannot be changed.</p>
+          <Input
+            id='account-email'
+            type='email'
+            value={user?.email ?? ''}
+            readOnly
+            title={user?.email ?? ''}
+            className='mt-1 h-9 w-full'
+          />
+        </div>
         <SettingsRow label='Session' description='Sign out of this device.'>
           <Button
             size='sm'

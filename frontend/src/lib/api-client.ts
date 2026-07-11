@@ -2,8 +2,7 @@
  * API client with authentication support
  */
 
-const BACKEND_URL = import.meta.env['VITE_BACKEND_URL'] || 'http://localhost:3001';
-const TOKEN_KEY = 'ai_meeting_token';
+import { BACKEND_URL, TOKEN_KEY } from './config';
 
 function getAuthToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);

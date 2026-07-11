@@ -6,8 +6,9 @@
  */
 
 import { OAuth2Client } from 'google-auth-library';
-import type { IntegrationProvider } from '@prisma/client';
+import type { IntegrationProvider } from '../../lib/enums.js';
 import prisma from '../../lib/prisma.js';
+import { serializeStringList } from '../../lib/json-list.js';
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID!;
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET!;
@@ -19,7 +20,9 @@ export const GOOGLE_INTEGRATIONS_REDIRECT_URI =
 
 /** Scopes requested during the Connect flow (keep minimal to reduce consent-screen friction). */
 const CONNECT_SCOPES_MAP: Record<string, string[]> = {
-  GOOGLE_CALENDAR: ['https://www.googleapis.com/auth/calendar.readonly'],
+  // calendar.events allows both reading events and creating them (needed by the
+  // MCP `create_meeting` tool); it is narrower than full `calendar`.
+  GOOGLE_CALENDAR: ['https://www.googleapis.com/auth/calendar.events'],
   GMAIL: ['https://www.googleapis.com/auth/gmail.send'],
 };
 
@@ -181,6 +184,7 @@ export class GoogleOAuthService {
       headers: {
         Authorization: `Bearer ${accessToken}`,
       },
+      signal: AbortSignal.timeout(10_000),
     });
     
     if (!response.ok) {
@@ -220,14 +224,14 @@ export class GoogleOAuthService {
         accessToken,
         refreshToken,
         tokenExpiry: expiresAt,
-        scopes,
+        scopes: serializeStringList(scopes),
         isActive: true,
       },
       update: {
         accessToken,
         refreshToken,
         tokenExpiry: expiresAt,
-        scopes,
+        scopes: serializeStringList(scopes),
         isActive: true,
         lastSyncAt: new Date(),
       },

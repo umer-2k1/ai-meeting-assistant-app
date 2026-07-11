@@ -5,11 +5,16 @@ import {
   createMeeting,
   addTranscriptLine,
   getMeetingWithDetails,
+  findOwnedMeeting,
 } from '../services/meeting.js';
 import { answerMeetingQuestionStream } from '../services/ai-stream.js';
 import { searchTranscripts, generateEmbedding } from '../services/embeddings.js';
-import { storeTranscriptEmbedding } from '../services/vector-store.js';
+import { isVectorStoreAvailable } from '../services/vector-store.js';
+import { embedTranscriptLineInBackground } from '../services/transcript-embedding.js';
 import { getRouteParam } from '../lib/params.js';
+import { createLogger, shortId } from '../lib/logger.js';
+
+const log = createLogger('live');
 
 const router = express.Router();
 
@@ -44,9 +49,10 @@ router.post('/meetings', requireAuth, async (req, res) => {
       },
     });
 
+    log.ok(`live meeting ${shortId(meeting.id)} started — "${meeting.title}"`);
     res.json({ meeting });
   } catch (error) {
-    console.error('Start live meeting error:', error);
+    log.error('failed to start live meeting', error instanceof Error ? error.message : error);
     res.status(500).json({ error: 'Failed to start meeting' });
   }
 });
@@ -58,6 +64,9 @@ router.post('/meetings', requireAuth, async (req, res) => {
 router.post('/meetings/:id/transcript', requireAuth, async (req, res) => {
   try {
     const meetingId = getRouteParam(req.params.id);
+    if (!(await findOwnedMeeting(meetingId, req.user!.id))) {
+      return res.status(404).json({ error: 'Meeting not found' });
+    }
     const validated = validateOrThrow(createTranscriptLineSchema, {
       ...req.body,
       meetingId,
@@ -65,38 +74,14 @@ router.post('/meetings/:id/transcript', requireAuth, async (req, res) => {
 
     const transcriptLine = await addTranscriptLine(meetingId, validated);
 
-    // Generate embedding in background (don't block response)
-    const { embedTranscriptChunk } = await import('../services/embeddings.js');
-    const { default: prisma } = await import('../lib/prisma.js');
-    
-    embedTranscriptChunk({
+    // Generate + store embedding in the background (don't block the response).
+    embedTranscriptLineInBackground({
+      id: transcriptLine.id,
+      meetingId,
       speaker: transcriptLine.speaker,
       text: transcriptLine.text,
       timestamp: transcriptLine.timestamp,
-    })
-      .then((embedding) => {
-        return storeTranscriptEmbedding(transcriptLine.id, embedding, {
-          meetingId,
-          speaker: transcriptLine.speaker,
-          text: transcriptLine.text,
-          timestamp: transcriptLine.timestamp,
-        });
-      })
-      .then(() => {
-        return prisma.vectorEmbedding.create({
-          data: {
-            entityType: 'transcript_line',
-            entityId: transcriptLine.id,
-            qdrantId: transcriptLine.id,
-            collectionName: 'transcripts',
-            model: 'gemini',
-            dimension: 768,
-          },
-        });
-      })
-      .catch((error) => {
-        console.error('Background embedding error:', error);
-      });
+    });
 
     res.json({ transcriptLine });
   } catch (error) {
@@ -130,22 +115,31 @@ router.post('/meetings/:id/ask', requireAuth, async (req, res) => {
         return;
       }
 
-      // Get relevant context using vector search
-      const queryEmbedding = await generateEmbedding(validated.question);
-      const relevantSnippets = await searchTranscripts(queryEmbedding, meetingId, 5);
-
       type TranscriptPayload = {
         timestamp?: string;
         speaker?: string;
         text?: string;
       };
 
-      const transcriptContext = relevantSnippets
-        .map((result) => {
-          const payload = result.payload as TranscriptPayload;
-          return `[${payload.timestamp ?? ''}] ${payload.speaker ?? ''}: ${payload.text ?? ''}`;
-        })
-        .join('\n');
+      // Get relevant context via vector search (best-effort — if the embedding
+      // call fails, e.g. Gemini is down, we fall back to the full transcript
+      // below). Vectors live in local SQLite, so the store itself is always
+      // available; isVectorStoreAvailable() is kept as a stable seam.
+      let transcriptContext = '';
+      if (isVectorStoreAvailable()) {
+        try {
+          const queryEmbedding = await generateEmbedding(validated.question);
+          const relevantSnippets = await searchTranscripts(queryEmbedding, meetingId, 5);
+          transcriptContext = relevantSnippets
+            .map((result) => {
+              const payload = result.payload as TranscriptPayload;
+              return `[${payload.timestamp ?? ''}] ${payload.speaker ?? ''}: ${payload.text ?? ''}`;
+            })
+            .join('\n');
+        } catch {
+          // vector-store already logged a single concise warning; fall through.
+        }
+      }
 
       const fullTranscript = meeting.transcript
         .map((line) => `[${line.timestamp}] ${line.speaker}: ${line.text}`)
@@ -168,28 +162,37 @@ router.post('/meetings/:id/ask', requireAuth, async (req, res) => {
             res.write(`data: ${JSON.stringify({ token })}\n\n`);
           },
           onComplete: async (fullAnswer, metadata) => {
-            // Save to database
-            const { default: prisma } = await import('../lib/prisma.js');
-            await prisma.aIChatMessage.create({
-              data: {
-                meetingId: meeting.id,
-                userId: req.user!.id,
-                question: validated.question,
-                answer: fullAnswer,
-                contextType: 'transcript',
-                contextSnippet: transcriptContext.substring(0, 500),
-                model: 'groq',
-                tokensUsed: metadata?.tokensUsed,
-                responseTime: metadata?.responseTime,
-              },
-            });
+            // Save to database — a persistence failure must not swallow the
+            // `done` frame, or the client hangs on a completed answer.
+            try {
+              const { default: prisma } = await import('../lib/prisma.js');
+              await prisma.aIChatMessage.create({
+                data: {
+                  meetingId: meeting.id,
+                  userId: req.user!.id,
+                  question: validated.question,
+                  answer: fullAnswer,
+                  contextType: 'transcript',
+                  contextSnippet: transcriptContext.substring(0, 500),
+                  model: 'groq',
+                  tokensUsed: metadata?.tokensUsed,
+                  responseTime: metadata?.responseTime,
+                },
+              });
+            } catch (dbError) {
+              console.error('Failed to persist chat message:', dbError);
+            }
 
-            res.write(`data: ${JSON.stringify({ done: true, timestamp: metadata?.timestamp })}\n\n`);
-            res.end();
+            if (!res.writableEnded) {
+              res.write(`data: ${JSON.stringify({ done: true, timestamp: metadata?.timestamp })}\n\n`);
+              res.end();
+            }
           },
           onError: (error) => {
-            res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
-            res.end();
+            if (!res.writableEnded) {
+              res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
+              res.end();
+            }
           },
         }
       );
@@ -232,6 +235,15 @@ router.post('/meetings/:id/ask', requireAuth, async (req, res) => {
     }
   } catch (error) {
     console.error('Ask AI error:', error);
+    // If SSE headers are already out, a JSON status response would corrupt the
+    // stream — emit a final SSE error frame instead.
+    if (res.headersSent) {
+      if (!res.writableEnded) {
+        res.write(`data: ${JSON.stringify({ error: 'Failed to answer question' })}\n\n`);
+        res.end();
+      }
+      return;
+    }
     res.status(500).json({ error: 'Failed to answer question' });
   }
 });

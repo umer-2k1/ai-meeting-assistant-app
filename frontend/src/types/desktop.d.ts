@@ -12,6 +12,8 @@ type DesktopTranscriptLine = {
   speaker: string;
   text: string;
   highlighted?: boolean;
+  /** false for replaceable interim results, true (or omitted) for persisted finals. */
+  isFinal?: boolean;
 };
 
 export type DesktopAppInfo = {
@@ -98,6 +100,8 @@ type DesktopApi = {
     getStatus: () => Promise<DesktopRecordingState>;
     onStateChange: (callback: (state: DesktopRecordingState) => void) => () => void;
     onTranscript: (callback: (line: DesktopTranscriptLine) => void) => () => void;
+    /** Forward a live transcript line from the capturing window to the floating widget. */
+    pushTranscript: (line: DesktopTranscriptLine) => void;
   };
   widget: {
     setExpanded: (expanded: boolean) => Promise<{

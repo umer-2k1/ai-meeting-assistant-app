@@ -1,7 +1,17 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { searchTranscripts as searchTranscriptsInQdrant } from './vector-store.js';
+import { searchTranscripts as searchTranscriptsInStore } from './vector-store.js';
 
 const GEMINI_API_KEY = process.env.GOOGLE_GEMINI_API_KEY;
+
+/**
+ * Embedding model + vector dimension. `text-embedding-004` was retired (404 on
+ * v1beta embedContent); `gemini-embedding-001` is its GA successor. This SDK
+ * version can't request a reduced `outputDimensionality`, so we take the model's
+ * native 3072-dim output and keep the stored VectorEmbedding rows in lockstep
+ * via EMBEDDING_DIMENSION.
+ */
+export const EMBEDDING_MODEL = 'gemini-embedding-001';
+export const EMBEDDING_DIMENSION = 3072;
 
 let genAI: GoogleGenerativeAI | null = null;
 
@@ -27,7 +37,7 @@ export async function generateEmbedding(text: string): Promise<number[]> {
   const client = initializeGemini();
 
   try {
-    const model = client.getGenerativeModel({ model: 'text-embedding-004' });
+    const model = client.getGenerativeModel({ model: EMBEDDING_MODEL });
     const result = await model.embedContent(text);
     
     return result.embedding.values;
@@ -93,5 +103,5 @@ export async function searchTranscripts(
   meetingId?: string,
   limit: number = 10
 ) {
-  return searchTranscriptsInQdrant(queryEmbedding, meetingId, limit);
+  return searchTranscriptsInStore(queryEmbedding, meetingId, limit);
 }

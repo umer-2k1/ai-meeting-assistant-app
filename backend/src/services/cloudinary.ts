@@ -1,5 +1,8 @@
 import { v2 as cloudinary } from 'cloudinary';
 import fs from 'node:fs';
+import { createLogger, humanBytes } from '../lib/logger.js';
+
+const log = createLogger('cloudinary');
 
 const CLOUDINARY_CLOUD_NAME = process.env.CLOUDINARY_CLOUD_NAME;
 const CLOUDINARY_API_KEY = process.env.CLOUDINARY_API_KEY;
@@ -21,6 +24,68 @@ export interface UploadResult {
   format: string;
   duration?: number;
   bytes: number;
+}
+
+/** Whether Cloudinary credentials are present (gate audio features gracefully). */
+export function isCloudinaryConfigured(): boolean {
+  return Boolean(CLOUDINARY_CLOUD_NAME && CLOUDINARY_API_KEY && CLOUDINARY_API_SECRET);
+}
+
+/**
+ * Upload audio from an in-memory buffer (multer memoryStorage) via upload_stream —
+ * avoids writing a temp file to disk.
+ */
+export async function uploadAudioBuffer(
+  buffer: Buffer,
+  options: { publicId?: string; folder?: string } = {}
+): Promise<UploadResult> {
+  if (!isCloudinaryConfigured()) {
+    throw new Error('Cloudinary not configured');
+  }
+
+  const folder = options.folder || 'meeting-recordings';
+  log.step(
+    `uploading ${humanBytes(buffer.length)} → ${folder}/${options.publicId ?? '(auto)'} (transcode to mp3)`
+  );
+  const startedAt = Date.now();
+
+  return new Promise<UploadResult>((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      {
+        resource_type: 'video', // audio uploads as 'video' in Cloudinary
+        public_id: options.publicId,
+        folder,
+        format: 'mp3',
+        audio_codec: 'mp3',
+      },
+      (error, result) => {
+        if (error || !result) {
+          // Surface the real Cloudinary failure (http_code + message) so audio
+          // upload problems are diagnosable instead of a generic 500.
+          log.error(
+            `upload failed after ${Date.now() - startedAt}ms` +
+              (error?.http_code ? ` (http ${error.http_code})` : ''),
+            error?.message ?? error
+          );
+          reject(error ?? new Error('Failed to upload audio to Cloudinary'));
+          return;
+        }
+        log.ok(
+          `stored in ${Date.now() - startedAt}ms → ${result.secure_url} ` +
+            `(${result.format}, ${result.duration ?? '?'}s, ${humanBytes(result.bytes)})`
+        );
+        resolve({
+          url: result.url,
+          secureUrl: result.secure_url,
+          publicId: result.public_id,
+          format: result.format,
+          duration: result.duration,
+          bytes: result.bytes,
+        });
+      }
+    );
+    stream.end(buffer);
+  });
 }
 
 /**
@@ -76,26 +141,4 @@ export async function deleteAudio(publicId: string): Promise<void> {
     console.error('Cloudinary delete error:', error);
     throw new Error('Failed to delete audio from Cloudinary');
   }
-}
-
-/**
- * Upload local file and delete after upload
- */
-export async function uploadAndCleanup(
-  filePath: string,
-  options: {
-    publicId?: string;
-    folder?: string;
-  } = {}
-): Promise<UploadResult> {
-  const result = await uploadAudio(filePath, options);
-
-  // Delete local file after successful upload
-  try {
-    fs.unlinkSync(filePath);
-  } catch (error) {
-    console.warn('Failed to delete local file:', error);
-  }
-
-  return result;
 }

@@ -5,9 +5,10 @@
  * Handles connector caching, token refresh, and lifecycle.
  */
 
-import type { IntegrationProvider } from '@prisma/client';
+import type { IntegrationProvider } from '../lib/enums.js';
 import type { BaseConnector, ConnectorConfig } from './base-connector.js';
 import prisma from '../lib/prisma.js';
+import { parseStringList } from '../lib/json-list.js';
 
 export class ConnectorManager {
   private static connectorCache = new Map<string, BaseConnector>();
@@ -49,7 +50,7 @@ export class ConnectorManager {
       accessToken: integration.accessToken,
       refreshToken: integration.refreshToken,
       tokenExpiry: integration.tokenExpiry,
-      scopes: integration.scopes,
+      scopes: parseStringList(integration.scopes),
       metadata: integration.metadata as Record<string, unknown> | undefined,
     };
     

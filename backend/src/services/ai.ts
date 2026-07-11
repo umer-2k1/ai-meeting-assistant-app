@@ -1,6 +1,8 @@
 import { ChatGroq } from '@langchain/groq';
 import { ChatPromptTemplate } from '@langchain/core/prompts';
 import { StringOutputParser } from '@langchain/core/output_parsers';
+import { z } from 'zod';
+import { extractJsonBlock, invokeJson } from '../lib/llm-json.js';
 
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 
@@ -10,6 +12,7 @@ const GROQ_API_KEY = process.env.GROQ_API_KEY;
 export function createGroqLLM(options: {
   model?: string;
   temperature?: number;
+  json?: boolean;
 } = {}) {
   if (!GROQ_API_KEY) {
     throw new Error('GROQ_API_KEY not configured');
@@ -19,32 +22,51 @@ export function createGroqLLM(options: {
     apiKey: GROQ_API_KEY,
     model: options.model || 'llama-3.3-70b-versatile',
     temperature: options.temperature ?? 0.7,
+    // Groq JSON mode forces a syntactically valid JSON object response.
+    ...(options.json
+      ? { modelKwargs: { response_format: { type: 'json_object' } } }
+      : {}),
   });
 }
 
 /**
  * Generate meeting summary from transcript
  */
-export async function generateMeetingSummary(transcript: string): Promise<{
-  summary: string;
-  keyPoints: string[];
-  decisions: string[];
-  risks: string[];
-}> {
-  const llm = createGroqLLM({ temperature: 0.5 });
+const summarySchema = z.object({
+  summary: z.string(),
+  keyPoints: z.array(z.string()).default([]),
+  decisions: z.array(z.string()).default([]),
+  risks: z.array(z.string()).default([]),
+});
+
+export async function generateMeetingSummary(
+  transcript: string,
+  options?: { length?: 'brief' | 'balanced' | 'detailed' }
+): Promise<z.infer<typeof summarySchema>> {
+  const llm = createGroqLLM({ temperature: 0.4, json: true });
+
+  const lengthHint =
+    options?.length === 'brief'
+      ? 'a tight 2-3 sentence executive summary capturing the essence of the meeting'
+      : options?.length === 'detailed'
+        ? 'a comprehensive executive summary of 3-4 full paragraphs that walks through the context, the main topics discussed in the order they came up, the reasoning behind conclusions, and where things were left — written so someone who missed the meeting fully understands what happened'
+        : 'a substantive executive summary of 1-2 full paragraphs covering the purpose, the main topics, and the outcomes';
+
+  const pointCount = options?.length === 'brief' ? '3-4' : '5-8';
 
   const prompt = ChatPromptTemplate.fromTemplate(`
-You are an AI meeting assistant. Analyze the following meeting transcript and provide:
+You are an expert AI meeting assistant. Read the meeting transcript carefully and produce a rich, accurate briefing. Never invent facts not present in the transcript. Write in clear, professional prose.
 
-1. A concise executive summary (2-3 sentences)
-2. Key discussion points (3-5 bullet points)
-3. Decisions made (list all explicit decisions)
-4. Risks or blockers identified (if any)
+Produce:
+1. summary: {lengthHint}. Separate paragraphs with \\n.
+2. keyPoints: {pointCount} specific, self-contained bullet points covering the substantive discussion — topics, arguments, data mentioned, agreements, and open questions. Each bullet is a full, informative sentence, not a fragment.
+3. decisions: every explicit decision or commitment made (empty array if none).
+4. risks: risks, blockers, concerns, or dependencies raised (empty array if none).
 
 Transcript:
 {transcript}
 
-Respond in JSON format:
+Respond ONLY with a single valid JSON object of this exact shape. All string values MUST be wrapped in double quotes and any line breaks inside a string MUST be written as \\n:
 {{
   "summary": "...",
   "keyPoints": ["...", "..."],
@@ -54,67 +76,198 @@ Respond in JSON format:
 `);
 
   const chain = prompt.pipe(llm).pipe(new StringOutputParser());
-
-  const result = await chain.invoke({ transcript });
-
   try {
-    return JSON.parse(result);
-  } catch {
-    // Fallback if JSON parsing fails
-    return {
-      summary: result.substring(0, 500),
-      keyPoints: [],
-      decisions: [],
-      risks: [],
-    };
+    return await invokeJson(
+      () => chain.invoke({ transcript, lengthHint, pointCount }),
+      summarySchema,
+      'meeting summary'
+    );
+  } catch (error) {
+    // The structured call still produced invalid JSON (Groq's JSON mode is
+    // best-effort and longer summaries break it more often). Rather than fail
+    // the whole meeting, degrade gracefully: get the summary as plain text
+    // (no JSON to break) and return it with empty structured lists.
+    console.warn('[ai] summary JSON failed, falling back to plain-text summary:', error);
+    const plainLlm = createGroqLLM({ temperature: 0.4 });
+    const plainPrompt = ChatPromptTemplate.fromTemplate(`
+You are an expert AI meeting assistant. Write {lengthHint} of the following meeting transcript. Use plain prose (no headings, no JSON, no markdown). Never invent facts not present in the transcript.
+
+Transcript:
+{transcript}
+`);
+    const summary = (
+      await plainPrompt.pipe(plainLlm).pipe(new StringOutputParser()).invoke({
+        transcript,
+        lengthHint,
+      })
+    ).trim();
+    return { summary, keyPoints: [], decisions: [], risks: [] };
   }
+}
+
+/**
+ * Assemble a rich HTML summary (Tiptap-compatible) from the structured summary
+ * result. Rendered directly in the Summary tab so it shows everything — exec
+ * summary, key points, decisions, risks — not just a bare paragraph.
+ */
+export function renderSummaryHtml(result: {
+  summary: string;
+  keyPoints?: string[];
+  decisions?: string[];
+  risks?: string[];
+}): string {
+  const esc = (s: string) =>
+    s
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  const list = (items?: string[]) =>
+    items && items.length > 0
+      ? `<ul>${items.map((i) => `<li>${esc(i)}</li>`).join('')}</ul>`
+      : '';
+  const section = (title: string, body: string) =>
+    body ? `<h3>${title}</h3>${body}` : '';
+
+  const summaryParas = result.summary
+    .split(/\n{2,}/)
+    .map((p) => p.trim())
+    .filter(Boolean)
+    .map((p) => `<p>${esc(p)}</p>`)
+    .join('');
+
+  return [
+    '<h2>Executive summary</h2>',
+    summaryParas || `<p>${esc(result.summary)}</p>`,
+    section('Key points', list(result.keyPoints)),
+    section('Key decisions', list(result.decisions)),
+    section('Risks &amp; blockers', list(result.risks)),
+  ]
+    .filter(Boolean)
+    .join('\n');
 }
 
 /**
  * Extract action items from transcript
  */
-export async function extractActionItems(transcript: string): Promise<
+const actionItemsSchema = z.object({
+  items: z
+    .array(
+      z.object({
+        task: z.string(),
+        assignee: z.string().nullish(),
+        dueDate: z.string().nullish(),
+        priority: z
+          .enum(['LOW', 'MEDIUM', 'HIGH', 'URGENT'])
+          .catch('MEDIUM')
+          .default('MEDIUM'),
+      })
+    )
+    .default([]),
+});
+
+export async function extractActionItems(
+  transcript: string,
+  options?: { sensitivity?: 'conservative' | 'balanced' | 'aggressive' }
+): Promise<
   Array<{
     task: string;
     assignee?: string;
     dueDate?: string;
-    priority: 'LOW' | 'MEDIUM' | 'HIGH';
+    priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
   }>
 > {
-  const llm = createGroqLLM({ temperature: 0.3 });
+  const llm = createGroqLLM({ temperature: 0.3, json: true });
+
+  const sensitivityHint =
+    options?.sensitivity === 'conservative'
+      ? 'Only include clear, explicitly-stated action items.'
+      : options?.sensitivity === 'aggressive'
+        ? 'Include implied or potential action items in addition to explicit ones.'
+        : 'Include reasonably clear action items.';
 
   const prompt = ChatPromptTemplate.fromTemplate(`
-You are an AI meeting assistant. Extract all action items from the following transcript.
+You are an AI meeting assistant. Extract action items from the following transcript.
+{sensitivityHint}
 
 For each action item, identify:
 - Task description
 - Assignee (if mentioned)
-- Due date (if mentioned)
+- Due date in ISO 8601 (YYYY-MM-DD) if mentioned, otherwise null
 - Priority (HIGH, MEDIUM, or LOW)
 
 Transcript:
 {transcript}
 
-Respond in JSON format as an array:
-[
-  {{
-    "task": "...",
-    "assignee": "...",
-    "dueDate": "...",
-    "priority": "MEDIUM"
-  }}
-]
+Respond ONLY with a JSON object whose "items" is an array (empty if there are no
+action items):
+{{
+  "items": [
+    {{ "task": "...", "assignee": "..." or null, "dueDate": "YYYY-MM-DD" or null, "priority": "MEDIUM" }}
+  ]
+}}
 `);
 
   const chain = prompt.pipe(llm).pipe(new StringOutputParser());
+  const { items } = await invokeJson(
+    () => chain.invoke({ transcript, sensitivityHint }),
+    actionItemsSchema,
+    'action items'
+  );
+  return items.map((i) => ({
+    task: i.task,
+    assignee: i.assignee ?? undefined,
+    dueDate: i.dueDate ?? undefined,
+    priority: i.priority,
+  }));
+}
 
-  const result = await chain.invoke({ transcript });
+/**
+ * Generate a short human title + topic tags for a processed meeting.
+ * Runs off the already-generated summary (cheap, no full re-read of transcript).
+ */
+const titleTagsSchema = z.object({
+  title: z.string(),
+  tags: z.array(z.string()).default([]),
+});
 
-  try {
-    return JSON.parse(result);
-  } catch {
-    return [];
-  }
+export async function generateMeetingTitleAndTags(input: {
+  summary: string;
+  keyPoints: string[];
+  decisions: string[];
+}): Promise<{ title: string; tags: string[] }> {
+  const llm = createGroqLLM({ temperature: 0.4, json: true });
+
+  const prompt = ChatPromptTemplate.fromTemplate(`
+You name meetings. Given a meeting summary, produce:
+1. "title": a concise 3-5 word title in Title Case (no quotes, no trailing punctuation).
+2. "tags": 2-4 short topic tags, each lowercase, one or two words.
+
+Summary: {summary}
+Key points: {keyPoints}
+Decisions: {decisions}
+
+Respond ONLY with a JSON object of this exact shape:
+{{ "title": "...", "tags": ["...", "..."] }}
+`);
+
+  const chain = prompt.pipe(llm).pipe(new StringOutputParser());
+  const result = await invokeJson(
+    () =>
+      chain.invoke({
+        summary: input.summary,
+        keyPoints: input.keyPoints.join('; ') || 'none',
+        decisions: input.decisions.join('; ') || 'none',
+      }),
+    titleTagsSchema,
+    'meeting title and tags'
+  );
+
+  return {
+    title: result.title.trim().replace(/^["']|["']$/g, '').slice(0, 80),
+    tags: Array.from(
+      new Set(result.tags.map((t) => t.trim().toLowerCase()).filter(Boolean))
+    ).slice(0, 4),
+  };
 }
 
 /**
@@ -169,29 +322,37 @@ Respond in JSON format:
     question,
   });
 
+  // Chat answers degrade to plain text rather than hard-failing.
   try {
-    return JSON.parse(result);
-  } catch {
-    return {
-      answer: result,
+    const parsed = JSON.parse(extractJsonBlock(result)) as {
+      answer?: string;
+      timestamp?: string | null;
     };
+    return {
+      answer: parsed.answer ?? result,
+      timestamp: parsed.timestamp ?? undefined,
+    };
+  } catch {
+    return { answer: result };
   }
 }
 
 /**
  * Generate pre-meeting brief
  */
+const preMeetingBriefSchema = z.object({
+  briefing: z.string(),
+  suggestedTopics: z.array(z.string()).default([]),
+  reminders: z.array(z.string()).default([]),
+});
+
 export async function generatePreMeetingBrief(data: {
   title: string;
   description?: string;
   attendees: Array<{ name: string; role?: string; company?: string }>;
   previousMeetings?: string;
-}): Promise<{
-  briefing: string;
-  suggestedTopics: string[];
-  reminders: string[];
-}> {
-  const llm = createGroqLLM({ temperature: 0.6 });
+}): Promise<z.infer<typeof preMeetingBriefSchema>> {
+  const llm = createGroqLLM({ temperature: 0.6, json: true });
 
   const attendeesList = data.attendees
     .map((a) => `- ${a.name}${a.role ? ` (${a.role})` : ''}${a.company ? ` at ${a.company}` : ''}`)
@@ -224,20 +385,15 @@ Respond in JSON format:
 
   const chain = prompt.pipe(llm).pipe(new StringOutputParser());
 
-  const result = await chain.invoke({
-    title: data.title,
-    description: data.description || 'No description provided',
-    attendees: attendeesList,
-    previousContext: data.previousMeetings || 'No previous meetings',
-  });
-
-  try {
-    return JSON.parse(result);
-  } catch {
-    return {
-      briefing: result,
-      suggestedTopics: [],
-      reminders: [],
-    };
-  }
+  return invokeJson(
+    () =>
+      chain.invoke({
+        title: data.title,
+        description: data.description || 'No description provided',
+        attendees: attendeesList,
+        previousContext: data.previousMeetings || 'No previous meetings',
+      }),
+    preMeetingBriefSchema,
+    'pre-meeting brief'
+  );
 }

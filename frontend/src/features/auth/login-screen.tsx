@@ -1,7 +1,9 @@
-import { IconBrandGoogle, IconSparkles } from '@tabler/icons-react';
+import { IconBrandGoogle } from '@tabler/icons-react';
 import { useAuth } from '../../contexts/auth-context';
 import { useNavigate } from 'react-router-dom';
 import { useEffect } from 'react';
+import { BrandLoader } from '../../components/brand/brand-loader';
+import { BrandMark } from '../../components/brand/brand-mark';
 
 export default function LoginScreen() {
   const { login, isAuthenticated, isLoading } = useAuth();
@@ -15,11 +17,7 @@ export default function LoginScreen() {
   }, [isAuthenticated, isLoading, navigate]);
 
   if (isLoading) {
-    return (
-      <div className='flex min-h-screen items-center justify-center bg-background'>
-        <div className='inline-block size-12 animate-spin rounded-full border-4 border-primary border-t-transparent' />
-      </div>
-    );
+    return <BrandLoader fullScreen label='Signing you in…' />;
   }
 
   return (
@@ -32,8 +30,8 @@ export default function LoginScreen() {
       <div className='relative z-10 w-full max-w-md px-6'>
         {/* Logo/Brand */}
         <div className='mb-8 text-center'>
-          <div className='mb-4 inline-flex items-center justify-center rounded-2xl bg-gradient-to-br from-cyan-500/20 to-blue-500/20 p-4 backdrop-blur-xl'>
-            <IconSparkles className='size-12 text-cyan-400' />
+          <div className='mb-5 inline-flex items-center justify-center'>
+            <BrandMark size={72} animated />
           </div>
           <h1 className='mb-2 text-4xl font-bold tracking-tight text-white'>
             AI Meeting Copilot
