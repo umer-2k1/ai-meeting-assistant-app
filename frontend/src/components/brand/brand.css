@@ -25,38 +25,26 @@
   animation: brand-sheen 3.2s ease-in-out infinite;
 }
 
-.brand-mark__bars {
+.brand-mark__glyph {
   position: relative;
   z-index: 1;
-  display: flex;
-  align-items: center;
-  gap: 11%;
-  height: 46%;
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
-.brand-mark__bar {
-  width: 9%;
-  min-width: 2px;
-  height: 100%;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.95);
-  transform: scaleY(0.4);
+.brand-mark__node {
+  transform-box: fill-box;
   transform-origin: center;
 }
 
-.brand-mark__bar--animated {
-  animation: brand-eq 1.15s ease-in-out infinite;
+.brand-mark__node--animated {
+  animation: brand-twinkle 1.5s ease-in-out infinite;
 }
 
-/* Static resting shape (staggered heights) when not animated */
-.brand-mark__bar:nth-child(1) { transform: scaleY(0.5); }
-.brand-mark__bar:nth-child(2) { transform: scaleY(0.9); }
-.brand-mark__bar:nth-child(3) { transform: scaleY(0.65); }
-.brand-mark__bar:nth-child(4) { transform: scaleY(1); }
-
-@keyframes brand-eq {
-  0%, 100% { transform: scaleY(0.35); }
-  50% { transform: scaleY(1); }
+@keyframes brand-twinkle {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
 }
 
 @keyframes brand-sheen {
@@ -130,7 +118,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .brand-mark::after,
-  .brand-mark__bar--animated,
+  .brand-mark__node--animated,
   .brand-loader__mark,
   .brand-loader__ring,
   .brand-loader__label {
