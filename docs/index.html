@@ -1,0 +1,794 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AI Meeting Copilot — Never take meeting notes again</title>
+<meta name="description" content="AI Meeting Copilot transcribes every word in real time, answers your questions live during the call, and delivers the summary, decisions, and action items the moment you hang up. On web and desktop." />
+<meta name="theme-color" content="#2563eb" />
+<meta property="og:type" content="website" />
+<meta property="og:title" content="AI Meeting Copilot — AI meeting intelligence" />
+<meta property="og:description" content="Real-time transcription, a live in-meeting AI copilot, and automated summaries, decisions & action items. Powered by Deepgram, Groq & Gemini." />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%232563eb'/%3E%3Cstop offset='.52' stop-color='%233b82f6'/%3E%3Cstop offset='1' stop-color='%2360a5fa'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='100' height='100' rx='28' fill='url(%23g)'/%3E%3Cg stroke='%23fff' stroke-width='3' stroke-linecap='round'%3E%3Cline x1='30' y1='36' x2='52' y2='50'/%3E%3Cline x1='66' y1='28' x2='52' y2='50'/%3E%3Cline x1='72' y1='63' x2='52' y2='50'/%3E%3Cline x1='39' y1='71' x2='52' y2='50'/%3E%3C/g%3E%3Cg fill='%23fff'%3E%3Ccircle cx='30' cy='36' r='6'/%3E%3Ccircle cx='66' cy='28' r='5'/%3E%3Ccircle cx='72' cy='63' r='6'/%3E%3Ccircle cx='39' cy='71' r='5'/%3E%3Ccircle cx='52' cy='50' r='8.5'/%3E%3C/g%3E%3C/svg%3E" />
+
+<script>
+  // Set theme before first paint to avoid a flash.
+  (function () {
+    // Mark that JS is running so reveal-on-scroll can hide content up front.
+    // Without JS the .reveal content stays fully visible (no hidden sections).
+    document.documentElement.classList.add('js');
+    try {
+      var saved = localStorage.getItem('mc-theme');
+      var sysDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+      var theme = saved || (sysDark ? 'dark' : 'light');
+      document.documentElement.setAttribute('data-theme', theme);
+    } catch (e) {}
+  })();
+</script>
+
+<style>
+  /* ============================================================
+     Design tokens — mirror the AI Meeting Copilot app palette
+     (blue #2563eb→#60a5fa accent; deep-navy dark surfaces).
+     ============================================================ */
+  :root {
+    --brand-1: #2563eb;
+    --brand-2: #3b82f6;
+    --brand-3: #60a5fa;
+    --grad: linear-gradient(135deg, #2563eb 0%, #3b82f6 52%, #60a5fa 100%);
+
+    --bg: #ffffff;
+    --bg-soft: #f7f9fc;
+    --surface: #ffffff;
+    --surface-2: #f1f5f9;
+    --text: #0f172a;
+    --text-soft: #334155;
+    --muted: #64748b;
+    --border: #e5e9f0;
+    --border-strong: #d5dce7;
+    --primary: #2563eb;
+    --primary-contrast: #ffffff;
+    --ring: rgba(37, 99, 235, 0.18);
+    --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06), 0 1px 3px rgba(15, 23, 42, 0.05);
+    --shadow-md: 0 10px 30px rgba(15, 23, 42, 0.08);
+    --shadow-lg: 0 30px 70px rgba(15, 23, 42, 0.14);
+    --glow-1: rgba(37, 99, 235, 0.14);
+    --glow-2: rgba(96, 165, 250, 0.12);
+    --nav-bg: rgba(255, 255, 255, 0.72);
+    --code-bg: #f1f5f9;
+  }
+
+  html[data-theme="dark"] {
+    --bg: #0a0f1d;
+    --bg-soft: #0d1424;
+    --surface: #121a2c;
+    --surface-2: #17203300;
+    --text: #eef2f9;
+    --text-soft: #c6d0e0;
+    --muted: #93a1b8;
+    --border: rgba(255, 255, 255, 0.10);
+    --border-strong: rgba(255, 255, 255, 0.16);
+    --primary: #3b82f6;
+    --primary-contrast: #ffffff;
+    --ring: rgba(59, 130, 246, 0.28);
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-md: 0 16px 40px rgba(0, 0, 0, 0.45);
+    --shadow-lg: 0 40px 90px rgba(0, 0, 0, 0.6);
+    --glow-1: rgba(37, 99, 235, 0.30);
+    --glow-2: rgba(59, 130, 246, 0.18);
+    --nav-bg: rgba(10, 15, 29, 0.66);
+    --code-bg: rgba(255, 255, 255, 0.06);
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    overflow-x: hidden;
+    transition: background-color .3s ease, color .3s ease;
+  }
+
+  a { color: inherit; text-decoration: none; }
+  img, svg { display: block; max-width: 100%; }
+  h1, h2, h3, h4 { line-height: 1.12; letter-spacing: -0.02em; margin: 0; font-weight: 700; }
+
+  .wrap { width: min(1160px, 100% - 40px); margin-inline: auto; }
+  section { position: relative; }
+
+  .eyebrow {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-size: 13px; font-weight: 600; letter-spacing: .01em;
+    color: var(--primary);
+    background: color-mix(in srgb, var(--primary) 10%, transparent);
+    border: 1px solid color-mix(in srgb, var(--primary) 24%, transparent);
+    padding: 6px 12px; border-radius: 999px;
+  }
+  .eyebrow .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--primary); box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary) 18%, transparent); }
+
+  .lead { color: var(--muted); font-size: 18px; }
+  .section-head { max-width: 680px; margin: 0 auto 52px; text-align: center; }
+  .section-head h2 { font-size: clamp(28px, 4vw, 44px); }
+  .section-head p { color: var(--muted); font-size: 18px; margin-top: 16px; }
+  .kicker { font-size: 13px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--primary); margin-bottom: 14px; display: block; }
+
+  /* ---------- Buttons ---------- */
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 9px;
+    font-weight: 600; font-size: 15px; padding: 12px 20px; border-radius: 12px;
+    border: 1px solid transparent; cursor: pointer; transition: transform .15s ease, box-shadow .2s ease, background .2s ease, border-color .2s ease;
+    white-space: nowrap;
+  }
+  .btn:focus-visible { outline: none; box-shadow: 0 0 0 4px var(--ring); }
+  .btn-primary { background: var(--grad); color: #fff; box-shadow: 0 8px 22px rgba(37, 99, 235, .32); }
+  .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 14px 30px rgba(37, 99, 235, .42); }
+  .btn-ghost { background: var(--surface); color: var(--text); border-color: var(--border-strong); box-shadow: var(--shadow-sm); }
+  .btn-ghost:hover { transform: translateY(-2px); border-color: var(--primary); color: var(--primary); }
+  .btn-lg { padding: 15px 26px; font-size: 16px; border-radius: 14px; }
+
+  /* ---------- Nav ---------- */
+  header.nav {
+    position: sticky; top: 0; z-index: 50;
+    backdrop-filter: saturate(180%) blur(14px);
+    -webkit-backdrop-filter: saturate(180%) blur(14px);
+    background: var(--nav-bg);
+    border-bottom: 1px solid var(--border);
+  }
+  .nav-inner { display: flex; align-items: center; justify-content: space-between; height: 66px; gap: 16px; }
+  .brand { display: inline-flex; align-items: center; gap: 11px; }
+  .brand .name { font-weight: 700; font-size: 16px; letter-spacing: -0.01em; }
+  .brand .sub { display: block; font-size: 11px; color: var(--muted); font-weight: 500; letter-spacing: 0; margin-top: -2px; }
+
+  .logo-mark {
+    position: relative; width: 38px; height: 38px; border-radius: 11px; flex: none;
+    background: var(--grad); box-shadow: 0 6px 16px rgba(37, 99, 235, .34);
+    display: inline-flex; align-items: center; justify-content: center; overflow: hidden;
+  }
+  .logo-mark svg { width: 100%; height: 100%; }
+
+  .nav-links { display: flex; align-items: center; gap: 6px; }
+  .nav-links a { padding: 8px 12px; border-radius: 9px; font-size: 14.5px; font-weight: 500; color: var(--text-soft); transition: background .15s, color .15s; }
+  .nav-links a:hover { background: var(--surface-2); color: var(--text); }
+  .nav-right { display: flex; align-items: center; gap: 10px; }
+
+  .theme-toggle {
+    width: 40px; height: 40px; border-radius: 11px; border: 1px solid var(--border-strong);
+    background: var(--surface); color: var(--text); cursor: pointer; display: inline-grid; place-items: center;
+    transition: transform .15s, border-color .2s, color .2s;
+  }
+  .theme-toggle:hover { transform: translateY(-1px); border-color: var(--primary); color: var(--primary); }
+  .theme-toggle:focus-visible { outline: none; box-shadow: 0 0 0 4px var(--ring); }
+  .theme-toggle .sun { display: none; } .theme-toggle .moon { display: block; }
+  html[data-theme="dark"] .theme-toggle .sun { display: block; }
+  html[data-theme="dark"] .theme-toggle .moon { display: none; }
+
+  .hamburger { display: none; }
+
+  @media (max-width: 900px) {
+    .nav-links, .nav-desktop-cta { display: none; }
+    .hamburger {
+      display: inline-grid; place-items: center; width: 40px; height: 40px; border-radius: 11px;
+      border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); cursor: pointer;
+    }
+    .mobile-menu[open] .mobile-panel { animation: fade .18s ease; }
+    .mobile-menu summary { list-style: none; }
+    .mobile-menu summary::-webkit-details-marker { display: none; }
+    .mobile-panel {
+      position: absolute; top: 66px; left: 0; right: 0; background: var(--surface);
+      border-bottom: 1px solid var(--border); box-shadow: var(--shadow-md); padding: 12px 20px 18px; z-index: 49;
+    }
+    .mobile-panel a { display: block; padding: 12px 8px; border-radius: 10px; font-weight: 500; color: var(--text-soft); border-bottom: 1px solid var(--border); }
+    .mobile-panel a:last-of-type { border-bottom: 0; }
+    .mobile-panel .btn { width: 100%; margin-top: 12px; }
+  }
+  @media (min-width: 901px) { .mobile-menu { display: none; } }
+
+  /* ---------- Glows ---------- */
+  .glow { position: absolute; border-radius: 50%; filter: blur(80px); pointer-events: none; z-index: 0; }
+
+  /* ---------- Hero ---------- */
+  .hero { padding: 74px 0 40px; overflow: hidden; }
+  .hero .glow-a { width: 520px; height: 520px; background: var(--glow-1); top: -180px; left: -120px; }
+  .hero .glow-b { width: 460px; height: 460px; background: var(--glow-2); top: -60px; right: -140px; }
+  .hero-grid { position: relative; z-index: 1; display: grid; grid-template-columns: 1.05fr 1fr; gap: 54px; align-items: center; }
+  .hero h1 { font-size: clamp(38px, 5.6vw, 62px); font-weight: 800; margin: 20px 0 0; }
+  .hero h1 .grad { background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .hero p.sub { font-size: 19px; color: var(--muted); margin: 22px 0 0; max-width: 560px; }
+  .hero .cta-row { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 32px; }
+  .hero .trust { margin-top: 26px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; color: var(--muted); font-size: 14px; }
+  .avatars { display: flex; }
+  .avatars span { width: 28px; height: 28px; border-radius: 50%; border: 2px solid var(--bg); margin-left: -8px; background: var(--grad); }
+  .avatars span:first-child { margin-left: 0; }
+  .stars { color: #f5a623; letter-spacing: 2px; }
+
+  @media (max-width: 940px) {
+    .hero-grid { grid-template-columns: 1fr; gap: 40px; }
+    .hero { padding: 48px 0 20px; }
+  }
+
+  /* ---------- App window mockup ---------- */
+  .window {
+    border: 1px solid var(--border); border-radius: 16px; overflow: hidden;
+    background: var(--surface); box-shadow: var(--shadow-lg);
+  }
+  .win-bar { display: flex; align-items: center; gap: 8px; padding: 11px 14px; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--surface-2) 70%, var(--surface)); }
+  html[data-theme="dark"] .win-bar { background: rgba(255,255,255,.03); }
+  .win-dot { width: 11px; height: 11px; border-radius: 50%; }
+  .win-dot.r{ background:#ff5f57; } .win-dot.y{ background:#febc2e; } .win-dot.g{ background:#28c840; }
+  .win-title { margin-left: 10px; font-size: 12.5px; color: var(--muted); font-weight: 500; }
+  .win-body { padding: 16px; }
+
+  .mock-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+  .mock-rec { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; font-size: 14px; }
+  .rec-dot { width: 10px; height: 10px; border-radius: 50%; background: #ef4444; box-shadow: 0 0 0 4px rgba(239,68,68,.18); animation: pulse 1.6s ease-in-out infinite; }
+  .chip { font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--primary) 30%, transparent); color: var(--primary); background: color-mix(in srgb, var(--primary) 8%, transparent); }
+  .chip.cyan { color: #0891b2; border-color: rgba(8,145,178,.35); background: rgba(8,145,178,.08); }
+  html[data-theme="dark"] .chip.cyan { color: #67e8f9; }
+
+  .tline { border: 1px solid var(--border); border-radius: 11px; padding: 10px 12px; margin-bottom: 9px; background: var(--bg); }
+  .tline .who { font-size: 11.5px; color: var(--muted); margin-bottom: 3px; font-weight: 500; }
+  .tline .who b { color: var(--primary); font-weight: 600; }
+  .tline .txt { font-size: 13.5px; color: var(--text-soft); }
+  .tline.hl { border-color: color-mix(in srgb, var(--primary) 40%, transparent); background: color-mix(in srgb, var(--primary) 6%, transparent); }
+  .tline.interim .txt { color: var(--muted); }
+  .caret { display:inline-block; width:2px; height:13px; background: var(--primary); margin-left:2px; vertical-align:-2px; animation: blink 1s step-end infinite; }
+
+  .ask { margin-top: 12px; border-top: 1px dashed var(--border); padding-top: 12px; }
+  .bubble-q { margin-left: auto; width: fit-content; max-width: 88%; background: var(--grad); color: #fff; font-size: 13px; padding: 7px 12px; border-radius: 14px 14px 4px 14px; }
+  .bubble-a { margin-top: 6px; width: fit-content; max-width: 92%; background: var(--surface-2); border: 1px solid var(--border); color: var(--text-soft); font-size: 13px; padding: 8px 12px; border-radius: 14px 14px 14px 4px; }
+  html[data-theme="dark"] .bubble-a { background: rgba(255,255,255,.05); }
+
+  /* audio scrubber mock */
+  .scrub { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
+  .scrub .play { width: 34px; height: 34px; border-radius: 50%; background: var(--surface-2); border:1px solid var(--border); display: grid; place-items: center; color: var(--text); }
+  .scrub .bar { position: relative; flex: 1; height: 6px; border-radius: 999px; background: var(--border-strong); }
+  .scrub .fill { position: absolute; inset: 0 auto 0 0; width: 38%; border-radius: 999px; background: var(--grad); }
+  .scrub .knob { position: absolute; left: 38%; top: 50%; width: 13px; height: 13px; border-radius: 50%; background: var(--primary); transform: translate(-50%,-50%); box-shadow: 0 0 0 4px var(--ring); }
+  .scrub .time { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  /* ---------- Tech strip ---------- */
+  .tech { padding: 30px 0 8px; }
+  .tech p { text-align: center; color: var(--muted); font-size: 13px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; margin: 0 0 18px; }
+  .tech-row { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; }
+  .tech-pill { display: inline-flex; align-items: center; gap: 8px; padding: 9px 16px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); box-shadow: var(--shadow-sm); font-weight: 600; font-size: 14px; color: var(--text-soft); }
+  .tech-pill .d { width: 8px; height: 8px; border-radius: 50%; background: var(--grad); }
+
+  /* ---------- Generic section spacing ---------- */
+  .band { padding: 88px 0; }
+  .band.alt { background: var(--bg-soft); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+
+  /* ---------- Problem/overview split ---------- */
+  .split { display: grid; grid-template-columns: 1fr 1fr; gap: 52px; align-items: center; }
+  @media (max-width: 900px){ .split { grid-template-columns: 1fr; gap: 34px; } }
+  .prob-list { list-style: none; padding: 0; margin: 24px 0 0; display: grid; gap: 14px; }
+  .prob-list li { display: flex; gap: 12px; align-items: flex-start; color: var(--text-soft); font-size: 15.5px; }
+  .prob-list .x { flex: none; width: 24px; height: 24px; border-radius: 7px; display: grid; place-items: center; background: rgba(239,68,68,.12); color: #ef4444; font-weight: 700; }
+  .sol-list li .x { background: color-mix(in srgb, var(--primary) 14%, transparent); color: var(--primary); }
+
+  /* ---------- Feature cards ---------- */
+  .feat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; }
+  @media (max-width: 980px){ .feat-grid { grid-template-columns: repeat(2,1fr); } }
+  @media (max-width: 620px){ .feat-grid { grid-template-columns: 1fr; } }
+  .card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 18px; padding: 26px 24px;
+    box-shadow: var(--shadow-sm); transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease;
+    position: relative; overflow: hidden;
+  }
+  html[data-theme="dark"] .card { background: linear-gradient(140deg, rgba(30,41,59,.9), rgba(15,23,42,.86)); }
+  .card:hover { transform: translateY(-5px); box-shadow: var(--shadow-md); border-color: color-mix(in srgb, var(--primary) 45%, transparent); }
+  .icon {
+    width: 48px; height: 48px; border-radius: 13px; display: grid; place-items: center; margin-bottom: 18px;
+    background: color-mix(in srgb, var(--primary) 12%, transparent); color: var(--primary);
+  }
+  .card h3 { font-size: 18.5px; margin-bottom: 9px; }
+  .card p { color: var(--muted); font-size: 14.5px; margin: 0; }
+
+  /* ---------- How it works ---------- */
+  .steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; counter-reset: step; }
+  @media (max-width: 980px){ .steps { grid-template-columns: repeat(2,1fr); } }
+  @media (max-width: 520px){ .steps { grid-template-columns: 1fr; } }
+  .step { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 26px 22px; position: relative; box-shadow: var(--shadow-sm); }
+  html[data-theme="dark"] .step { background: rgba(255,255,255,.03); }
+  .step .num { width: 40px; height: 40px; border-radius: 12px; background: var(--grad); color: #fff; font-weight: 800; display: grid; place-items: center; font-size: 16px; margin-bottom: 16px; box-shadow: 0 8px 18px rgba(37,99,235,.3); }
+  .step h3 { font-size: 17px; margin-bottom: 8px; }
+  .step p { color: var(--muted); font-size: 14px; margin: 0; }
+
+  /* ---------- Benefits ---------- */
+  .benefits { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+  @media (max-width: 720px){ .benefits { grid-template-columns: 1fr; } }
+  .benefit { display: flex; gap: 14px; padding: 20px; border-radius: 14px; border: 1px solid var(--border); background: var(--surface); }
+  html[data-theme="dark"] .benefit { background: rgba(255,255,255,.03); }
+  .benefit .ck { flex: none; width: 34px; height: 34px; border-radius: 10px; background: color-mix(in srgb, var(--primary) 13%, transparent); color: var(--primary); display: grid; place-items: center; }
+  .benefit h4 { font-size: 16px; margin-bottom: 4px; }
+  .benefit p { color: var(--muted); font-size: 14px; margin: 0; }
+
+  /* ---------- Comparison ---------- */
+  .compare { overflow-x: auto; border: 1px solid var(--border); border-radius: 18px; box-shadow: var(--shadow-sm); background: var(--surface); }
+  table.cmp { width: 100%; border-collapse: collapse; min-width: 620px; }
+  table.cmp th, table.cmp td { padding: 16px 18px; text-align: left; border-bottom: 1px solid var(--border); font-size: 14.5px; }
+  table.cmp thead th { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 700; }
+  table.cmp thead th.us { color: var(--primary); }
+  table.cmp td.feature { color: var(--text-soft); font-weight: 500; }
+  table.cmp col.us-col, table.cmp th.us, table.cmp td.us { background: color-mix(in srgb, var(--primary) 7%, transparent); }
+  table.cmp tr:last-child td { border-bottom: 0; }
+  .yes { color: var(--primary); font-weight: 700; }
+  .no { color: var(--muted); opacity: .7; }
+  .partial { color: #f59e0b; font-weight: 600; }
+
+  /* ---------- FAQ ---------- */
+  .faq { max-width: 800px; margin: 0 auto; display: grid; gap: 12px; }
+  details.q { border: 1px solid var(--border); border-radius: 13px; background: var(--surface); overflow: hidden; transition: border-color .2s; }
+  html[data-theme="dark"] details.q { background: rgba(255,255,255,.03); }
+  details.q[open] { border-color: color-mix(in srgb, var(--primary) 40%, transparent); }
+  details.q summary { list-style: none; cursor: pointer; padding: 18px 20px; font-weight: 600; font-size: 16px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+  details.q summary::-webkit-details-marker { display: none; }
+  details.q summary .plus { flex: none; width: 24px; height: 24px; border-radius: 7px; background: var(--surface-2); display: grid; place-items: center; color: var(--primary); transition: transform .2s; font-size: 18px; line-height: 1; }
+  html[data-theme="dark"] details.q summary .plus { background: rgba(255,255,255,.06); }
+  details.q[open] summary .plus { transform: rotate(45deg); }
+  details.q .a { padding: 0 20px 20px; color: var(--muted); font-size: 15px; }
+
+  /* ---------- CTA band ---------- */
+  .cta-final { position: relative; overflow: hidden; border-radius: 26px; padding: 64px 40px; text-align: center; background: var(--grad); color: #fff; box-shadow: var(--shadow-lg); }
+  .cta-final::after { content:""; position:absolute; inset:0; background: radial-gradient(600px 300px at 50% -20%, rgba(255,255,255,.25), transparent 70%); pointer-events:none; }
+  .cta-final h2 { font-size: clamp(28px, 4.4vw, 46px); position: relative; }
+  .cta-final p { position: relative; font-size: 18px; opacity: .92; margin: 16px auto 30px; max-width: 560px; }
+  .cta-final .btn-primary { background: #fff; color: var(--brand-1); box-shadow: 0 12px 30px rgba(0,0,0,.22); position: relative; }
+  .cta-final .btn-primary:hover { background: #f8fafc; }
+  .cta-final .btn-ghost { background: rgba(255,255,255,.12); color:#fff; border-color: rgba(255,255,255,.4); position: relative; }
+  .cta-final .btn-ghost:hover { background: rgba(255,255,255,.2); color:#fff; }
+
+  /* ---------- Footer ---------- */
+  footer.ft { border-top: 1px solid var(--border); background: var(--bg-soft); padding: 60px 0 30px; }
+  .ft-grid { display: grid; grid-template-columns: 1.4fr 1fr 1fr 1fr; gap: 34px; }
+  @media (max-width: 820px){ .ft-grid { grid-template-columns: 1fr 1fr; gap: 28px; } }
+  @media (max-width: 480px){ .ft-grid { grid-template-columns: 1fr; } }
+  .ft-grid h5 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 14px; }
+  .ft-grid a { display: block; color: var(--text-soft); font-size: 14.5px; padding: 5px 0; }
+  .ft-grid a:hover { color: var(--primary); }
+  /* Keep the footer brand a flex row — the generic `.ft-grid a` rule above sets
+     display:block, which otherwise collapses the logo onto the wordmark. */
+  .ft-about a.brand { display: inline-flex; align-items: center; gap: 11px; padding: 0; }
+  .ft-about p { color: var(--muted); font-size: 14px; margin: 14px 0 0; max-width: 300px; }
+  .ft-bottom { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px; margin-top: 44px; padding-top: 24px; border-top: 1px solid var(--border); color: var(--muted); font-size: 13.5px; }
+  .ft-bottom .credit { color: var(--text-soft); text-decoration: underline; text-underline-offset: 2px; }
+  .ft-bottom .credit:hover { color: var(--primary); }
+  .ft-social { display: flex; gap: 10px; }
+  .ft-social a { width: 38px; height: 38px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); display: grid; place-items: center; color: var(--text-soft); }
+  .ft-social a:hover { color: var(--primary); border-color: var(--primary); }
+
+  /* Reveal-on-scroll is a progressive enhancement: only hide up front when JS
+     is present, so no-JS visitors always see every section. */
+  html.js .reveal { opacity: 0; transform: translateY(18px); transition: opacity .6s ease, transform .6s ease; }
+  html.js .reveal.in { opacity: 1; transform: none; }
+  @media (prefers-reduced-motion: reduce){ html.js .reveal { opacity: 1 !important; transform: none !important; } }
+
+  @keyframes pulse { 0%,100%{ box-shadow: 0 0 0 4px rgba(239,68,68,.18);} 50%{ box-shadow: 0 0 0 7px rgba(239,68,68,.06);} }
+  @keyframes blink { 50% { opacity: 0; } }
+  @keyframes fade { from { opacity: 0; transform: translateY(-6px);} to { opacity:1; transform:none; } }
+</style>
+</head>
+
+<body>
+
+<!-- ============ NAV ============ -->
+<header class="nav">
+  <div class="wrap nav-inner">
+    <a class="brand" href="#top" aria-label="AI Meeting Copilot home">
+      <span class="logo-mark" aria-hidden="true"><svg viewBox="0 0 100 100" fill="none"><g stroke="#fff" stroke-width="3" stroke-linecap="round" opacity=".9"><line x1="30" y1="36" x2="52" y2="50"/><line x1="66" y1="28" x2="52" y2="50"/><line x1="72" y1="63" x2="52" y2="50"/><line x1="39" y1="71" x2="52" y2="50"/></g><g fill="#fff"><circle cx="30" cy="36" r="6"/><circle cx="66" cy="28" r="5"/><circle cx="72" cy="63" r="6"/><circle cx="39" cy="71" r="5"/><circle cx="52" cy="50" r="8.5"/></g></svg></span>
+      <span>
+        <span class="name">Meeting Copilot</span>
+        <span class="sub">AI meeting intelligence</span>
+      </span>
+    </a>
+
+    <nav class="nav-links" aria-label="Primary">
+      <a href="#features">Features</a>
+      <a href="#how">How it works</a>
+      <a href="#why">Why us</a>
+      <a href="#preview">Preview</a>
+      <a href="#faq">FAQ</a>
+    </nav>
+
+    <div class="nav-right">
+      <button class="theme-toggle" id="themeToggle" type="button" aria-label="Toggle color theme">
+        <svg class="moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        <svg class="sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+      </button>
+      <a class="btn btn-primary nav-desktop-cta" href="#get-started">Get started</a>
+
+      <details class="mobile-menu">
+        <summary class="hamburger" aria-label="Open menu">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+        </summary>
+        <div class="mobile-panel">
+          <a href="#features">Features</a>
+          <a href="#how">How it works</a>
+          <a href="#why">Why us</a>
+          <a href="#preview">Preview</a>
+          <a href="#faq">FAQ</a>
+          <a class="btn btn-primary" href="#get-started">Get started</a>
+        </div>
+      </details>
+    </div>
+  </div>
+</header>
+
+<span id="top"></span>
+
+<!-- ============ HERO ============ -->
+<section class="hero">
+  <div class="glow glow-a"></div>
+  <div class="glow glow-b"></div>
+  <div class="wrap hero-grid">
+    <div class="reveal">
+      <span class="eyebrow"><span class="dot"></span> Real-time transcription · Live AI copilot · Auto follow-ups</span>
+      <h1>Never take meeting<br><span class="grad">notes again.</span></h1>
+      <p class="sub">
+        AI Meeting Copilot transcribes every word in real time, answers your questions <em>live</em> during the call,
+        and delivers the summary, decisions, and action items the moment you hang up — on web and desktop.
+      </p>
+      <div class="cta-row">
+        <a class="btn btn-primary btn-lg" href="#get-started">Start free →</a>
+        <a class="btn btn-ghost btn-lg" href="#how">See how it works</a>
+      </div>
+      <div class="trust">
+        <span class="avatars"><span></span><span></span><span></span><span></span></span>
+        <span class="stars">★★★★★</span>
+        <span>Built for founders, PMs & teams who live in meetings</span>
+      </div>
+    </div>
+
+    <!-- Hero mockup: live session -->
+    <div class="reveal" aria-hidden="true">
+      <div class="window">
+        <div class="win-bar">
+          <span class="win-dot r"></span><span class="win-dot y"></span><span class="win-dot g"></span>
+          <span class="win-title">Live Session — Q3 Roadmap Sync</span>
+        </div>
+        <div class="win-body">
+          <div class="mock-head">
+            <span class="mock-rec"><span class="rec-dot"></span> Recording · 12:04</span>
+            <span class="chip cyan">⚡ Live AI</span>
+          </div>
+          <div class="tline">
+            <div class="who">[12:01] <b>Sarah</b></div>
+            <div class="txt">Let's lock the launch date — I'm pushing for the last week of October.</div>
+          </div>
+          <div class="tline hl">
+            <div class="who">[12:02] <b>Marcus</b> ⭐</div>
+            <div class="txt">Agreed, but engineering needs the API frozen by the 10th or it slips.</div>
+          </div>
+          <div class="tline interim">
+            <div class="who">[12:04] <b>Priya</b></div>
+            <div class="txt">I can have the pricing page ready before then<span class="caret"></span></div>
+          </div>
+          <div class="ask">
+            <div class="bubble-q">What did the team decide about the launch date?</div>
+            <div class="bubble-a">The team agreed to launch in the <b>last week of October</b>, contingent on freezing the API by <b>Oct 10</b> (Marcus, 12:02).</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ TECH STRIP ============ -->
+<section class="tech">
+  <div class="wrap">
+    <p>The AI stack under the hood</p>
+    <div class="tech-row">
+      <span class="tech-pill"><span class="d"></span>Deepgram Nova-2</span>
+      <span class="tech-pill"><span class="d"></span>Groq LLM</span>
+      <span class="tech-pill"><span class="d"></span>Google Gemini</span>
+      <span class="tech-pill"><span class="d"></span>Electron + React</span>
+      <span class="tech-pill"><span class="d"></span>SQLite Vector Store</span>
+      <span class="tech-pill"><span class="d"></span>Google OAuth</span>
+    </div>
+  </div>
+</section>
+
+<!-- ============ PROBLEM / OVERVIEW ============ -->
+<section class="band">
+  <div class="wrap split">
+    <div class="reveal">
+      <span class="kicker">The problem</span>
+      <h2 style="font-size:clamp(26px,3.6vw,40px)">Meetings are where decisions happen — and where they get lost.</h2>
+      <p class="lead" style="margin-top:16px">
+        You can either <strong>be present</strong> or <strong>take good notes</strong> — not both. So context slips,
+        action items evaporate, and the real decision lives in someone's memory until the next "wait, what did we agree on?"
+      </p>
+      <ul class="prob-list">
+        <li><span class="x">✕</span> Half your attention goes to scribbling instead of the conversation.</li>
+        <li><span class="x">✕</span> Generic transcription tools hand you a wall of text — not answers.</li>
+        <li><span class="x">✕</span> Decisions and owners get buried; follow-through quietly dies.</li>
+        <li><span class="x">✕</span> Last month's meetings are impossible to search when you need them.</li>
+      </ul>
+    </div>
+    <div class="reveal">
+      <span class="kicker">The solution</span>
+      <h2 style="font-size:clamp(26px,3.6vw,40px)">One always-on brain for every conversation.</h2>
+      <p class="lead" style="margin-top:16px">
+        Meeting Copilot listens, understands, and remembers — so you can stay in the room. It captures the transcript,
+        answers questions <em>as the meeting happens</em>, and turns the recording into structured, searchable knowledge.
+      </p>
+      <ul class="prob-list sol-list">
+        <li><span class="x">✓</span> Be fully present — the copilot handles the record-keeping.</li>
+        <li><span class="x">✓</span> Ask "what did we decide?" and get a grounded answer, live.</li>
+        <li><span class="x">✓</span> Every decision, risk, and action item extracted automatically.</li>
+        <li><span class="x">✓</span> Search across all your meetings by meaning, not keywords.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ============ FEATURES ============ -->
+<section class="band alt" id="features">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <span class="kicker">Features</span>
+      <h2>Everything you need, before and after the call</h2>
+      <p>A complete meeting workflow — capture, understand, act, and recall — in one polished app.</p>
+    </div>
+    <div class="feat-grid">
+      <div class="card reveal">
+        <div class="icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v1a7 7 0 0 1-14 0v-1M12 18v4M8 22h8"/></svg></div>
+        <h3>Real-time transcription</h3>
+        <p>Deepgram Nova-2 streams a live, accurate transcript with speaker diarization — captured from mic <em>and</em> system audio, saved as you speak.</p>
+      </div>
+      <div class="card reveal">
+        <div class="icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 4.6L18 9l-4.1 1.4L12 15l-1.9-4.6L6 9l4.1-1.4L12 3z"/><path d="M5 19l.9-2.2L8 16l-2.1-.8L5 13l-.9 2.2L2 16l2.1.8L5 19z"/></svg></div>
+        <h3>Live AI copilot</h3>
+        <p>Ask anything mid-meeting — "who owns this?", "summarize the last 5 minutes" — and get RAG-grounded answers streamed token-by-token, with citations to the moment.</p>
+      </div>
+      <div class="card reveal">
+        <div class="icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></div>
+        <h3>Summaries & action items</h3>
+        <p>The instant you stop, Groq generates an executive summary, key decisions, risks/blockers, and prioritized action items with owners and due dates.</p>
+      </div>
+      <div class="card reveal">
+        <div class="icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></div>
+        <h3>Semantic search</h3>
+        <p>Find any moment or past meeting by meaning, not exact words — powered by Gemini embeddings and an on-device SQLite vector store.</p>
+      </div>
+      <div class="card reveal">
+        <div class="icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18M8 15h3"/></svg></div>
+        <h3>Google Calendar integration</h3>
+        <p>Connect your calendar and upcoming meetings appear automatically — one click to start recording or open a prep brief, so you're never scrambling before a call.</p>
+      </div>
+      <div class="card reveal">
+        <div class="icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M20.5 20.5 23 23"/><circle cx="18.5" cy="17.5" r="2.5"/></svg></div>
+        <h3>Know the room before you join</h3>
+        <p>Pre-meeting briefs research the participants and surface their background, shared context, and suggested talking points — so you walk in prepared for everyone at the table.</p>
+      </div>
+      <div class="card reveal">
+        <div class="icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7"/><path d="M16 6l-4-4-4 4M12 2v13"/></svg></div>
+        <h3>Share & export anywhere</h3>
+        <p>One-click export to Markdown, PDF, or audio. Send recaps to email and Slack, copy a shareable link, and stay in sync with your calendar.</p>
+      </div>
+      <div class="card reveal">
+        <div class="icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg></div>
+        <h3>Web &amp; native desktop</h3>
+        <p>Use it in the browser, or install the Electron desktop app for system-audio capture and a floating widget that stays with you across every call.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ HOW IT WORKS ============ -->
+<section class="band" id="how">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <span class="kicker">How it works</span>
+      <h2>From "hello" to action items in four steps</h2>
+      <p>No setup rituals. Start a session and Copilot does the rest.</p>
+    </div>
+    <div class="steps">
+      <div class="step reveal"><div class="num">1</div><h3>Start or import</h3><p>Kick off a live recording, join from your calendar, or import an existing audio file to analyze.</p></div>
+      <div class="step reveal"><div class="num">2</div><h3>Capture live</h3><p>Watch the transcript appear in real time with speakers — and ask the AI copilot questions as the meeting unfolds.</p></div>
+      <div class="step reveal"><div class="num">3</div><h3>Auto-process</h3><p>Stop the session and Copilot writes the summary, extracts decisions, risks, and action items automatically.</p></div>
+      <div class="step reveal"><div class="num">4</div><h3>Share &amp; recall</h3><p>Export or send the recap to Slack and email, then search across every meeting whenever you need it.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ BENEFITS + PREVIEW ============ -->
+<section class="band alt" id="preview">
+  <div class="wrap split">
+    <div class="reveal">
+      <span class="kicker">Benefits</span>
+      <h2 style="font-size:clamp(26px,3.6vw,40px)">Do less, remember more, follow through every time.</h2>
+      <p class="lead" style="margin-top:16px">The value isn't a transcript — it's getting your attention back and never letting a decision slip again.</p>
+      <div class="benefits" style="margin-top:26px">
+        <div class="benefit"><span class="ck">✓</span><div><h4>Stay present</h4><p>Put the pen down and lead the conversation.</p></div></div>
+        <div class="benefit"><span class="ck">✓</span><div><h4>Perfect recall</h4><p>Every decision and owner, captured and citable.</p></div></div>
+        <div class="benefit"><span class="ck">✓</span><div><h4>Real follow-through</h4><p>Prioritized action items land where work happens.</p></div></div>
+        <div class="benefit"><span class="ck">✓</span><div><h4>Private by design</h4><p>Local SQLite data + your own API keys. No lock-in.</p></div></div>
+      </div>
+    </div>
+
+    <!-- Preview mockup: meeting detail -->
+    <div class="reveal" aria-hidden="true">
+      <div class="window">
+        <div class="win-bar">
+          <span class="win-dot r"></span><span class="win-dot y"></span><span class="win-dot g"></span>
+          <span class="win-title">Meeting Detail — Q3 Roadmap Sync</span>
+        </div>
+        <div class="win-body">
+          <div class="mock-head">
+            <div><div style="font-weight:700;font-size:16px">Q3 Roadmap Sync</div><div style="font-size:12px;color:var(--muted)">Today · 28 min · 4 participants</div></div>
+            <span class="chip">Completed</span>
+          </div>
+
+          <div class="scrub">
+            <span class="play"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></span>
+            <span class="time">10:42</span>
+            <span class="bar"><span class="fill"></span><span class="knob"></span></span>
+            <span class="time">28:00</span>
+          </div>
+
+          <div style="margin-top:16px;font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)">Executive summary</div>
+          <p style="font-size:13.5px;color:var(--text-soft);margin:6px 0 12px">The team committed to an end-of-October launch, gated on an Oct 10 API freeze. Pricing page ownership moved to Priya.</p>
+
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <span class="chip">Decision: Launch wk of Oct 27</span>
+            <span class="chip cyan">Risk: API freeze slip</span>
+          </div>
+
+          <div class="tline" style="margin-top:14px">
+            <div class="who">☑ Action · <b>@priya</b> · Due Oct 8</div>
+            <div class="txt">Ship the pricing page draft for review.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ WHY CHOOSE US ============ -->
+<section class="band" id="why">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <span class="kicker">Why choose Meeting Copilot</span>
+      <h2>More than a transcript. A meeting operating system.</h2>
+      <p>Notepads miss things. Basic transcription apps stop at text. Copilot understands and acts.</p>
+    </div>
+    <div class="compare reveal">
+      <table class="cmp">
+        <colgroup><col/><col class="us-col"/><col/><col/></colgroup>
+        <thead>
+          <tr>
+            <th>Capability</th>
+            <th class="us">AI Meeting Copilot</th>
+            <th>Manual notes</th>
+            <th>Basic transcription apps</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td class="feature">Real-time transcript with speakers</td><td class="us"><span class="yes">✓</span></td><td><span class="no">✕</span></td><td><span class="yes">✓</span></td></tr>
+          <tr><td class="feature">Live in-meeting AI Q&amp;A</td><td class="us"><span class="yes">✓</span></td><td><span class="no">✕</span></td><td><span class="no">✕</span></td></tr>
+          <tr><td class="feature">Auto summary, decisions &amp; action items</td><td class="us"><span class="yes">✓</span></td><td><span class="partial">Manual</span></td><td><span class="partial">Partial</span></td></tr>
+          <tr><td class="feature">Semantic search across meetings</td><td class="us"><span class="yes">✓</span></td><td><span class="no">✕</span></td><td><span class="partial">Keyword</span></td></tr>
+          <tr><td class="feature">Desktop system-audio capture</td><td class="us"><span class="yes">✓</span></td><td><span class="no">✕</span></td><td><span class="partial">Varies</span></td></tr>
+          <tr><td class="feature">Runs on your own keys &amp; local data</td><td class="us"><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="no">✕</span></td></tr>
+          <tr><td class="feature">Slack &amp; email recaps + export</td><td class="us"><span class="yes">✓</span></td><td><span class="no">✕</span></td><td><span class="partial">Some</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ============ FAQ ============ -->
+<section class="band alt" id="faq">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <span class="kicker">FAQ</span>
+      <h2>Questions, answered</h2>
+    </div>
+    <div class="faq">
+      <details class="q reveal"><summary><span>Which platforms does it run on?</span><span class="plus">+</span></summary><div class="a">Both a web app (any modern browser) and a native desktop app built with Electron for macOS, Windows, and Linux. The desktop build adds system-audio capture and a floating widget that stays on top during calls.</div></details>
+      <details class="q reveal"><summary><span>Does the AI really work <em>during</em> the meeting?</span><span class="plus">+</span></summary><div class="a">Yes. The transcript is saved live, and the AI copilot answers questions in real time using retrieval-augmented generation over what's been said so far — streamed token-by-token via Server-Sent Events. It also works after the meeting.</div></details>
+      <details class="q reveal"><summary><span>What AI models power it?</span><span class="plus">+</span></summary><div class="a">Deepgram Nova-2 for streaming speech-to-text with diarization, Groq-hosted LLMs for summaries and chat, and Google Gemini embeddings for semantic search. You bring your own API keys.</div></details>
+      <details class="q reveal"><summary><span>How is my data handled?</span><span class="plus">+</span></summary><div class="a">Meeting Copilot uses an embedded SQLite database for both relational data and the vector store — no Postgres and no separate vector database. It runs on your own credentials, keeping you in control of your data.</div></details>
+      <details class="q reveal"><summary><span>Can I export and share recaps?</span><span class="plus">+</span></summary><div class="a">Absolutely. Export any meeting to Markdown, PDF, or audio, copy a shareable link, or send the recap straight to Slack and email. Summaries, transcripts, and notes are all included.</div></details>
+      <details class="q reveal"><summary><span>Do I need to set up a database server?</span><span class="plus">+</span></summary><div class="a">No. SQLite is created on disk automatically — there's nothing to provision or run. Getting started is just Node, pnpm, and your API keys.</div></details>
+    </div>
+  </div>
+</section>
+
+<!-- ============ FINAL CTA ============ -->
+<section class="band" id="get-started">
+  <div class="wrap reveal">
+    <div class="cta-final">
+      <h2>Walk into your next meeting empty-handed.</h2>
+      <p>Let Meeting Copilot capture, understand, and remember it for you — so you can focus on the conversation that matters.</p>
+      <div class="cta-row" style="justify-content:center">
+        <a class="btn btn-primary btn-lg" href="https://github.com/" rel="noopener">Get started on GitHub</a>
+        <a class="btn btn-ghost btn-lg" href="#features">Explore features</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ FOOTER ============ -->
+<footer class="ft" id="contact">
+  <div class="wrap">
+    <div class="ft-grid">
+      <div class="ft-about">
+        <a class="brand" href="#top" aria-label="AI Meeting Copilot home">
+          <span class="logo-mark" aria-hidden="true"><svg viewBox="0 0 100 100" fill="none"><g stroke="#fff" stroke-width="3" stroke-linecap="round" opacity=".9"><line x1="30" y1="36" x2="52" y2="50"/><line x1="66" y1="28" x2="52" y2="50"/><line x1="72" y1="63" x2="52" y2="50"/><line x1="39" y1="71" x2="52" y2="50"/></g><g fill="#fff"><circle cx="30" cy="36" r="6"/><circle cx="66" cy="28" r="5"/><circle cx="72" cy="63" r="6"/><circle cx="39" cy="71" r="5"/><circle cx="52" cy="50" r="8.5"/></g></svg></span>
+          <span><span class="name">Meeting Copilot</span><span class="sub">AI meeting intelligence</span></span>
+        </a>
+        <p>Real-time transcription, a live AI copilot, and automated follow-ups — the meeting workflow, reimagined for people who live in meetings.</p>
+      </div>
+      <div>
+        <h5>Product</h5>
+        <a href="#features">Features</a>
+        <a href="#how">How it works</a>
+        <a href="#why">Why us</a>
+        <a href="#preview">Preview</a>
+      </div>
+      <div>
+        <h5>Resources</h5>
+        <a href="GETTING_STARTED.md">Getting started</a>
+        <a href="ARCHITECTURE.md">Architecture</a>
+        <a href="#faq">FAQ</a>
+        <a href="https://github.com/" rel="noopener">GitHub repo</a>
+      </div>
+      <div>
+        <h5>Contact</h5>
+        <a href="mailto:hello@meetingcopilot.app">hello@meetingcopilot.app</a>
+        <a href="https://github.com/" rel="noopener">Open an issue</a>
+        <a href="#get-started">Get started</a>
+      </div>
+    </div>
+
+    <div class="ft-bottom">
+      <span>© <span id="year">2026</span> AI Meeting Copilot. Built by <a class="credit" href="https://github.com/umer-2k1" rel="noopener">umer-2k1</a>.</span>
+      <div class="ft-social">
+        <a href="https://github.com/" aria-label="GitHub" rel="noopener"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5A11.5 11.5 0 0 0 .5 12a11.5 11.5 0 0 0 7.9 10.9c.6.1.8-.2.8-.5v-2c-3.2.7-3.9-1.4-3.9-1.4-.5-1.3-1.3-1.7-1.3-1.7-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 .1.8 1.3 2.7 1 .1-.7.4-1.2.7-1.5-2.5-.3-5.2-1.3-5.2-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0C17 4.6 18 4.9 18 4.9c.6 1.6.2 2.8.1 3.1.8.8 1.2 1.8 1.2 3.1 0 4.4-2.7 5.4-5.2 5.7.4.3.8 1 .8 2.1v3.1c0 .3.2.6.8.5A11.5 11.5 0 0 0 23.5 12 11.5 11.5 0 0 0 12 .5z"/></svg></a>
+        <a href="mailto:hello@meetingcopilot.app" aria-label="Email"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg></a>
+      </div>
+    </div>
+  </div>
+</footer>
+
+<script>
+  // Theme toggle
+  var toggle = document.getElementById('themeToggle');
+  toggle.addEventListener('click', function () {
+    var cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+    var next = cur === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    try { localStorage.setItem('mc-theme', next); } catch (e) {}
+    document.querySelector('meta[name="theme-color"]').setAttribute('content', next === 'dark' ? '#0a0f1d' : '#2563eb');
+  });
+
+  // Current year
+  try { document.getElementById('year').textContent = new Date().getFullYear(); } catch (e) {}
+
+  // Reveal on scroll
+  if ('IntersectionObserver' in window) {
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } });
+    }, { threshold: 0.12, rootMargin: '0px 0px -40px 0px' });
+    document.querySelectorAll('.reveal').forEach(function (el) { io.observe(el); });
+  } else {
+    document.querySelectorAll('.reveal').forEach(function (el) { el.classList.add('in'); });
+  }
+
+  // Close mobile menu after clicking a link
+  document.querySelectorAll('.mobile-panel a').forEach(function (a) {
+    a.addEventListener('click', function () {
+      var m = document.querySelector('.mobile-menu'); if (m) m.removeAttribute('open');
+    });
+  });
+</script>
+</body>
+</html>
