@@ -346,6 +346,7 @@ function IntegrationCard({
   connected,
   connecting,
   connectedEmail,
+  needsReconnect,
   featureToggles,
   onConnectToggle,
   onFeatureToggle
@@ -354,6 +355,7 @@ function IntegrationCard({
   connected: boolean;
   connecting?: boolean;
   connectedEmail?: string;
+  needsReconnect?: boolean;
   featureToggles: Record<string, boolean>;
   onConnectToggle: () => void;
   onFeatureToggle: (key: string, enabled: boolean) => void;
@@ -380,10 +382,18 @@ function IntegrationCard({
                 'rounded-full border-0 px-2 py-0 text-[11px] font-medium',
                 connected
                   ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400'
-                  : 'bg-muted text-muted-foreground'
+                  : needsReconnect
+                    ? 'bg-destructive/15 text-destructive'
+                    : 'bg-muted text-muted-foreground'
               )}
             >
-              {connecting ? 'Connecting…' : connected ? 'Connected' : 'Not connected'}
+              {connecting
+                ? 'Connecting…'
+                : connected
+                  ? 'Connected'
+                  : needsReconnect
+                    ? 'Reconnect required'
+                    : 'Not connected'}
             </Badge>
           </div>
           <p className='mt-1 text-sm text-muted-foreground'>
@@ -391,6 +401,11 @@ function IntegrationCard({
             {connectedEmail && (
               <span className='block mt-1 text-xs'>
                 {connectedEmail}
+              </span>
+            )}
+            {!connected && needsReconnect && (
+              <span className='mt-1 block text-xs text-destructive'>
+                Access expired or was revoked — reconnect to restore this integration.
               </span>
             )}
           </p>
@@ -402,7 +417,13 @@ function IntegrationCard({
           onClick={onConnectToggle}
           disabled={connecting}
         >
-          {connecting ? 'Connecting…' : connected ? 'Disconnect' : 'Connect'}
+          {connecting
+            ? 'Connecting…'
+            : connected
+              ? 'Disconnect'
+              : needsReconnect
+                ? 'Reconnect'
+                : 'Connect'}
         </Button>
       </header>
       <div className={cn('px-5 py-1', !connected && 'pointer-events-none opacity-50')}>
@@ -434,6 +455,12 @@ function IntegrationsTab() {
     slack: undefined,
     calendar: undefined
   });
+  /** Grant revoked/expired — only re-consent fixes it, so prompt instead of failing quietly. */
+  const [needsReconnect, setNeedsReconnect] = useState<Record<IntegrationId, boolean>>({
+    gmail: false,
+    slack: false,
+    calendar: false
+  });
   const [loading, setLoading] = useState(true);
   const [connecting, setConnecting] = useState<Record<IntegrationId, boolean>>({
     gmail: false,
@@ -456,6 +483,12 @@ function IntegrationsTab() {
         gmail: status.gmail.connected,
         slack: status.slack.connected,
         calendar: status.calendar.connected
+      });
+
+      setNeedsReconnect({
+        gmail: Boolean(status.gmail.needsReconnect),
+        slack: Boolean(status.slack.needsReconnect),
+        calendar: Boolean(status.calendar.needsReconnect)
       });
 
       setEmails({
@@ -553,6 +586,7 @@ function IntegrationsTab() {
           connected={connected[integration.id]}
           connecting={connecting[integration.id]}
           connectedEmail={emails[integration.id]}
+          needsReconnect={needsReconnect[integration.id]}
           featureToggles={features[integration.id]}
           onConnectToggle={() => {
             if (connected[integration.id]) {

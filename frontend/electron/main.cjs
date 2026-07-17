@@ -483,6 +483,30 @@ function loadWidgetContent(win) {
   }
 }
 
+function isWidgetUrl(urlString) {
+  return typeof urlString === 'string' && urlString.includes('widget.html');
+}
+
+/**
+ * The widget window must never leave widget.html. Any navigation away swaps the
+ * transparent overlay for an opaque full-window app page — which reads on screen
+ * as a big black box with the pill floating in it. The renderer no longer
+ * redirects on 401 (see api-client.ts), and this is the backstop that keeps it
+ * that way regardless of what future code does.
+ */
+function lockWidgetToItsOwnPage(win) {
+  win.webContents.on('will-navigate', (event, url) => {
+    if (isWidgetUrl(url)) return;
+    event.preventDefault();
+    console.warn('[desktop][widget] blocked navigation away from widget.html →', url);
+  });
+
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    console.warn('[desktop][widget] blocked window.open from the overlay →', url);
+    return { action: 'deny' };
+  });
+}
+
 function positionWidgetBottomRight() {
   if (!widgetWindow || widgetWindow.isDestroyed()) return;
 
@@ -601,6 +625,7 @@ function createWidgetWindow() {
     widgetWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   }
 
+  lockWidgetToItsOwnPage(widgetWindow);
   loadWidgetContent(widgetWindow);
 
   // Only show once the renderer has actually painted — showing a transparent

@@ -23,6 +23,12 @@ export interface ConnectorStatus {
   email?: string;
   lastSync?: Date;
   error?: string;
+  /**
+   * The stored grant is dead (revoked/expired) and only re-consent can fix it.
+   * Distinct from a transient failure: the UI should prompt to reconnect rather
+   * than just showing "Not connected" and waiting for a recovery that can't come.
+   */
+  needsReconnect?: boolean;
 }
 
 export interface TokenRefreshResult {

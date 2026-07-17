@@ -18,7 +18,6 @@ const REQUIRED_VARS: RequiredVar[] = [
   { name: 'SESSION_SECRET', hint: 'random secret for express-session' },
   { name: 'GOOGLE_CLIENT_ID', hint: 'Google OAuth client id (login + calendar/gmail)' },
   { name: 'GOOGLE_CLIENT_SECRET', hint: 'Google OAuth client secret' },
-  { name: 'GROQ_API_KEY', hint: 'Groq LLM API key (summaries, action items, chat)' },
   { name: 'GOOGLE_GEMINI_API_KEY', hint: 'Gemini embeddings API key (RAG)' },
   { name: 'DEEPGRAM_API_KEY', hint: 'Deepgram API key (live transcription)' },
   { name: 'CLOUDINARY_CLOUD_NAME', hint: 'Cloudinary cloud name (audio/exports)' },
@@ -35,12 +34,23 @@ const PRODUCTION_REQUIRED_VARS: RequiredVar[] = [
   { name: 'GOOGLE_REDIRECT_URI', hint: 'public login OAuth callback, e.g. https://api.example.com/auth/google/callback' },
 ];
 
+/**
+ * The LLM key requirement depends on the selected provider. GROQ needs an API
+ * key; `LLM_PROVIDER=claude-code` uses the local `claude` CLI subscription and
+ * needs none.
+ */
+function llmRequiredVars(): RequiredVar[] {
+  if (process.env.LLM_PROVIDER === 'claude-code') return [];
+  return [{ name: 'GROQ_API_KEY', hint: 'Groq LLM API key (summaries, action items, chat)' }];
+}
+
 /** Returns the list of missing required env vars (empty when all present). */
 export function getMissingEnvVars(): RequiredVar[] {
-  const required =
-    process.env.NODE_ENV === 'production'
-      ? [...REQUIRED_VARS, ...PRODUCTION_REQUIRED_VARS]
-      : REQUIRED_VARS;
+  const required = [
+    ...REQUIRED_VARS,
+    ...llmRequiredVars(),
+    ...(process.env.NODE_ENV === 'production' ? PRODUCTION_REQUIRED_VARS : []),
+  ];
   return required.filter(({ name }) => {
     const value = process.env[name];
     return !value || value.trim().length === 0;

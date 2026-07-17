@@ -41,20 +41,53 @@ function formatTodayHeading() {
   }).format(new Date());
 }
 
+/**
+ * Open a meeting link in the real browser (desktop) or a new tab (web).
+ *
+ * http(s) only: the URL comes from third-party calendar data, and it reaches
+ * shell.openExternal on the desktop — which would happily launch a file:// or
+ * custom-scheme target. Anything else is dropped.
+ */
+function openMeetingLink(rawUrl: string) {
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    console.warn('[calendar] ignoring unparseable meeting link', rawUrl);
+    return;
+  }
+
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') {
+    console.warn('[calendar] refusing non-http(s) meeting link', url.protocol);
+    return;
+  }
+
+  const desktop = globalThis.window.desktop;
+  if (desktop?.auth?.openExternal) {
+    void desktop.auth.openExternal(url.href);
+    return;
+  }
+  globalThis.window.open(url.href, '_blank', 'noopener,noreferrer');
+}
+
 function CalendarConnectionCard({
   connected,
   email,
   connecting,
+  needsReconnect,
   syncing,
   onConnect,
+  onCancelConnect,
   onSync,
   onManage
 }: {
   connected: boolean;
   email?: string;
   connecting: boolean;
+  needsReconnect?: boolean;
   syncing?: boolean;
   onConnect: () => void;
+  onCancelConnect: () => void;
   onSync: () => void;
   onManage: () => void;
 }) {
@@ -78,6 +111,13 @@ function CalendarConnectionCard({
             >
               Connected
             </Badge>
+          ) : needsReconnect ? (
+            <Badge
+              variant='outline'
+              className='rounded-full border-destructive/40 bg-destructive/10 px-2 py-0 text-[11px] font-medium text-destructive'
+            >
+              Reconnect required
+            </Badge>
           ) : (
             <Badge
               variant='outline'
@@ -90,7 +130,9 @@ function CalendarConnectionCard({
         <p className='mt-0.5 text-sm text-muted-foreground'>
           {connected
             ? (email ?? 'Synced with your Google account')
-            : 'Connect Google Calendar in Settings to see your meetings here.'}
+            : needsReconnect
+              ? 'Google access expired or was revoked. Reconnect to restore your calendar.'
+              : 'Connect Google Calendar in Settings to see your meetings here.'}
         </p>
       </div>
       <div className='flex shrink-0 flex-wrap gap-2'>
@@ -111,14 +153,26 @@ function CalendarConnectionCard({
             </Button>
           </>
         ) : (
-          <Button
-            size='sm'
-            className='rounded-full bg-primary/90 text-primary-foreground hover:bg-primary'
-            onClick={onConnect}
-            disabled={connecting}
-          >
-            {connecting ? 'Connecting…' : 'Connect'}
-          </Button>
+          <>
+            <Button
+              size='sm'
+              className='rounded-full bg-primary/90 text-primary-foreground hover:bg-primary'
+              onClick={onConnect}
+              disabled={connecting}
+            >
+              {connecting ? 'Connecting…' : needsReconnect ? 'Reconnect' : 'Connect'}
+            </Button>
+            {connecting ? (
+              <Button
+                size='sm'
+                variant='ghost'
+                className='rounded-full text-muted-foreground'
+                onClick={onCancelConnect}
+              >
+                Cancel
+              </Button>
+            ) : null}
+          </>
         )}
       </div>
     </div>
@@ -216,10 +270,17 @@ function NextMeetingHero({
             Prepare
           </Button>
         )}
-        <Button variant='outline' className={cn('rounded-full', COPILOT_BTN_OUTLINE)} size='sm'>
-          <IconLink className='mr-1.5 size-3.5' />
-          Join meeting
-        </Button>
+        {event.meetLink && (
+          <Button
+            variant='outline'
+            className={cn('rounded-full', COPILOT_BTN_OUTLINE)}
+            size='sm'
+            onClick={() => openMeetingLink(event.meetLink!)}
+          >
+            <IconLink className='mr-1.5 size-3.5' />
+            Join meeting
+          </Button>
+        )}
         {event.recurring && (
           <label className='inline-flex items-center gap-2 text-sm text-muted-foreground'>
             <SettingsSwitch
@@ -349,8 +410,13 @@ function CalendarEventCard({
               Remind me
             </Button>
           )}
-          {isVideo && (
-            <Button size='sm' variant='ghost' className='rounded-full text-muted-foreground'>
+          {isVideo && event.meetLink && (
+            <Button
+              size='sm'
+              variant='ghost'
+              className='rounded-full text-muted-foreground'
+              onClick={() => openMeetingLink(event.meetLink!)}
+            >
               <IconLink className='mr-1.5 size-3.5' />
               Join
             </Button>
@@ -419,7 +485,13 @@ export default function CalendarScreen({
   const [error, setError] = useState<string | null>(null);
   const [calendarConnected, setCalendarConnected] = useState(false);
   const [calendarEmail, setCalendarEmail] = useState<string | undefined>(undefined);
+  /** Grant revoked/expired — reconnecting is the only fix, so say so. */
+  const [calendarNeedsReconnect, setCalendarNeedsReconnect] = useState(false);
   const [connecting, setConnecting] = useState(false);
+  /** Lets the Cancel button (and unmount) abort an in-flight OAuth attempt. */
+  const connectAbortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => () => connectAbortRef.current?.abort(), []);
   // `dateRange` is the *applied* window that actually drives fetching. `draftRange` is the
   // in-progress calendar selection — editing it (clicking start, then end) does NOT refetch,
   // so there's no jerk mid-selection. The user commits with the Apply button.
@@ -467,6 +539,7 @@ export default function CalendarScreen({
         startTime: new Date(event.startTime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }),
         endTime: new Date(event.endTime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }),
         location: event.meetLink || event.location || 'No location',
+        meetLink: event.meetLink,
         note: event.description || '',
         dayLabel: getDayLabel(new Date(event.startTime)),
         attendees: event.attendees?.length,
@@ -503,6 +576,7 @@ export default function CalendarScreen({
       const status = await getIntegrationStatus();
       setCalendarConnected(status.calendar.connected);
       setCalendarEmail(status.calendar.email);
+      setCalendarNeedsReconnect(Boolean(status.calendar.needsReconnect));
     } catch (err) {
       console.error('Failed to fetch calendar connection status:', err);
     }
@@ -521,13 +595,22 @@ export default function CalendarScreen({
     return () => clearInterval(interval);
   }, [fetchCalendarEvents, refetchConnectionStatus]);
 
+  const handleCancelConnect = useCallback(() => {
+    connectAbortRef.current?.abort();
+  }, []);
+
   const handleConnectCalendar = useCallback(async () => {
+    connectAbortRef.current?.abort();
+    const controller = new AbortController();
+    connectAbortRef.current = controller;
+
     try {
       setConnecting(true);
       const { connectGoogleIntegration } = await import('@/lib/integrations-api');
       // Handles both web (popup) and desktop (system browser + deep link)
-      // flows, resolving once the OAuth attempt has finished.
-      await connectGoogleIntegration('GOOGLE_CALENDAR');
+      // flows, resolving once the OAuth attempt has finished, is cancelled, or
+      // is detected as abandoned.
+      await connectGoogleIntegration('GOOGLE_CALENDAR', { signal: controller.signal });
 
       void refetchConnectionStatus();
       void fetchCalendarEvents();
@@ -539,6 +622,7 @@ export default function CalendarScreen({
         alert('Failed to connect Google Calendar. Please try again.');
       }
     } finally {
+      if (connectAbortRef.current === controller) connectAbortRef.current = null;
       setConnecting(false);
     }
   }, [fetchCalendarEvents, refetchConnectionStatus]);
@@ -599,7 +683,9 @@ export default function CalendarScreen({
           connected={calendarConnected}
           email={calendarEmail}
           connecting={connecting}
+          needsReconnect={calendarNeedsReconnect}
           onConnect={handleConnectCalendar}
+          onCancelConnect={handleCancelConnect}
           syncing={loading}
           onSync={() => void fetchCalendarEvents()}
           onManage={() => onManageIntegrations?.()}
@@ -618,7 +704,9 @@ export default function CalendarScreen({
           connected={calendarConnected}
           email={calendarEmail}
           connecting={connecting}
+          needsReconnect={calendarNeedsReconnect}
           onConnect={handleConnectCalendar}
+          onCancelConnect={handleCancelConnect}
           syncing={loading}
           onSync={() => void fetchCalendarEvents()}
           onManage={() => onManageIntegrations?.()}
@@ -640,8 +728,10 @@ export default function CalendarScreen({
         connected={calendarConnected}
         email={calendarEmail}
         connecting={connecting}
+        needsReconnect={calendarNeedsReconnect}
         syncing={loading}
         onConnect={handleConnectCalendar}
+        onCancelConnect={handleCancelConnect}
         onSync={() => void fetchCalendarEvents()}
         onManage={() => onManageIntegrations?.()}
       />
