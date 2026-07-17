@@ -9,7 +9,7 @@
 
 import { AIMessage, HumanMessage, SystemMessage, ToolMessage } from '@langchain/core/messages';
 import type { BaseMessage } from '@langchain/core/messages';
-import { createGroqLLM } from './ai.js';
+import { createLLM } from './llm-provider.js';
 import { mcpToolRegistry } from '../mcp/tools/index.js';
 
 const MAX_TOOL_STEPS = 4;
@@ -81,8 +81,9 @@ export async function answerWithTools(
   const tools = mcpToolRegistry.getLangChainTools(userId);
   const toolByName = new Map(tools.map((t) => [t.name, t]));
 
-  const llm = createGroqLLM({ temperature: 0.3 });
-  const llmWithTools = tools.length > 0 ? llm.bindTools(tools) : llm;
+  const llm = createLLM({ temperature: 0.3 });
+  const llmWithTools =
+    tools.length > 0 && llm.bindTools ? llm.bindTools(tools) : llm;
 
   const messages: BaseMessage[] = [
     new SystemMessage(buildSystemPrompt(context)),
@@ -128,7 +129,7 @@ export async function answerWithTools(
 
   // Exhausted tool-call budget — ask once more without tools for a final answer
   // grounded in whatever the tools already returned.
-  const finalResponse = await createGroqLLM({ temperature: 0.3 }).invoke(messages);
+  const finalResponse = await createLLM({ temperature: 0.3 }).invoke(messages);
   return {
     answer: contentToString(finalResponse.content),
     toolCalls: toolCallLog.length > 0 ? toolCallLog : undefined,

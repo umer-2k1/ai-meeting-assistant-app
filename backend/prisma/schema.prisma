@@ -164,12 +164,16 @@ model MeetingAttendee {
   email           String?
   role            String?   // "organizer", "required", "optional"
 
-  // Enrichment data
+  // Enrichment data (snapshot; shared cache lives on Contact)
   linkedinUrl     String?
   company         String?
   title           String?
   bio             String?
   enrichedAt      DateTime?
+
+  // Link to the shared, cross-meeting enriched profile (nullable).
+  contactId       String?
+  contact         Contact?  @relation(fields: [contactId], references: [id], onDelete: SetNull)
 
   // Timestamps
   createdAt       DateTime  @default(now())
@@ -177,6 +181,48 @@ model MeetingAttendee {
 
   @@index([meetingId])
   @@index([email])
+  @@index([contactId])
+}
+
+// ========================================
+// Contact — shared enriched profile, cached across meetings by email.
+// Populated by the guest-research service (free base + optional LinkedIn layer).
+// ========================================
+
+model Contact {
+  id             String    @id @default(cuid())
+  email          String    @unique
+  domain         String?
+  isFreeEmail    Boolean   @default(false)
+
+  // Profile (v1: company + website + LinkedIn/Gravatar/GitHub)
+  fullName       String?
+  title          String?
+  company        String?
+  companyDomain  String?
+  website        String?
+  linkedinUrl    String?
+  avatarUrl      String?
+  bio            String?
+  location       String?
+
+  // Extension seam for broader socials (YouTube/FB/IG/X/GitHub…)
+  socialProfiles Json?             // { github?, twitter?, youtube?, ... }
+
+  // Provenance & trust
+  confidence     String    @default("low")     // 'high' | 'medium' | 'low'
+  matchStatus    String    @default("unknown") // 'verified' | 'possible_matches' | 'unknown'
+  sources        Json?             // [{ type, url?, note? }]
+  provider       String?           // active LinkedIn-layer provider at enrich time
+  raw            Json?             // provider raw payload (debug / re-derive)
+  enrichedAt     DateTime?
+
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  attendees      MeetingAttendee[]
+
+  @@index([domain])
 }
 
 // ========================================

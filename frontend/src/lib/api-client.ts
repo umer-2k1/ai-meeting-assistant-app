@@ -4,6 +4,26 @@
 
 import { BACKEND_URL, TOKEN_KEY } from './config';
 
+/**
+ * Thrown when the backend rejects our credentials. Callers decide what to do —
+ * this module must never navigate. It runs in both the main app and the
+ * floating widget window, and a redirect there would drag the widget off
+ * widget.html and replace the transparent overlay with an opaque app page.
+ */
+export class AuthError extends Error {
+  constructor(message = 'Authentication required') {
+    super(message);
+    this.name = 'AuthError';
+  }
+}
+
+export function isAuthError(error: unknown): error is AuthError {
+  return error instanceof AuthError;
+}
+
+/** Fired on 401 so the main app can route to login. The widget ignores it. */
+export const UNAUTHORIZED_EVENT = 'auth:unauthorized';
+
 function getAuthToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
 }
@@ -37,11 +57,12 @@ export async function apiRequest<T>(
 
   if (!response.ok) {
     if (response.status === 401) {
-      // Token expired or invalid - redirect to login
+      // Token expired or invalid. Drop the dead credentials and announce it —
+      // whoever owns routing decides where to go. See AuthError above.
       localStorage.removeItem(TOKEN_KEY);
       localStorage.removeItem('ai_meeting_user');
-      window.location.href = '/login';
-      throw new Error('Authentication required');
+      globalThis.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT));
+      throw new AuthError();
     }
 
     const errorBody: unknown = await response.json().catch(() => ({ error: 'Request failed' }));

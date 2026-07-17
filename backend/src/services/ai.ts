@@ -1,32 +1,21 @@
-import { ChatGroq } from '@langchain/groq';
 import { ChatPromptTemplate } from '@langchain/core/prompts';
 import { StringOutputParser } from '@langchain/core/output_parsers';
 import { z } from 'zod';
 import { extractJsonBlock, invokeJson } from '../lib/llm-json.js';
-
-const GROQ_API_KEY = process.env.GROQ_API_KEY;
+import { createLLM } from './llm-provider.js';
 
 /**
- * Initialize Groq LLM client
+ * Initialize the LLM client for the active provider (GROQ or Claude Code).
+ *
+ * Kept named `createGroqLLM` for call-site compatibility; provider selection now
+ * lives in `createLLM` (see llm-provider.ts, driven by `LLM_PROVIDER`).
  */
 export function createGroqLLM(options: {
   model?: string;
   temperature?: number;
   json?: boolean;
 } = {}) {
-  if (!GROQ_API_KEY) {
-    throw new Error('GROQ_API_KEY not configured');
-  }
-
-  return new ChatGroq({
-    apiKey: GROQ_API_KEY,
-    model: options.model || 'llama-3.3-70b-versatile',
-    temperature: options.temperature ?? 0.7,
-    // Groq JSON mode forces a syntactically valid JSON object response.
-    ...(options.json
-      ? { modelKwargs: { response_format: { type: 'json_object' } } }
-      : {}),
-  });
+  return createLLM(options);
 }
 
 /**

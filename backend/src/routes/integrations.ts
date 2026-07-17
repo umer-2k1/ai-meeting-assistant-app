@@ -65,6 +65,8 @@ router.get('/status', requireAuth, async (req, res) => {
             connected: connectorStatus.connected,
             email: connectorStatus.email,
             lastSync: integration.lastSyncAt,
+            needsReconnect: connectorStatus.needsReconnect ?? false,
+            error: connectorStatus.error,
           };
         } catch (error) {
           console.error('[integrations:status] Error getting calendar status:', error);
@@ -78,6 +80,8 @@ router.get('/status', requireAuth, async (req, res) => {
             connected: connectorStatus.connected,
             email: connectorStatus.email,
             lastSync: integration.lastSyncAt,
+            needsReconnect: connectorStatus.needsReconnect ?? false,
+            error: connectorStatus.error,
           };
         } catch (error) {
           console.error('[integrations:status] Error getting gmail status:', error);
@@ -293,6 +297,13 @@ router.get('/google/callback', async (req, res) => {
         isActive: saved.isActive,
       });
     }
+
+    // saveIntegration writes tokens straight to the DB, bypassing
+    // ConnectorManager.updateTokens (which is what normally evicts the cache).
+    // Without this, a reconnect keeps serving the connector built from the old
+    // tokens/scopes until the process restarts — so the fresh grant appears to
+    // have no effect.
+    ConnectorManager.clearCache(userId);
 
     if (authorizedProviders.length === 0) {
       console.warn('[integrations:callback] no providers authorized from granted scopes; nothing saved');

@@ -47,6 +47,12 @@ export type CalendarEvent = {
   startTime?: string;
   endTime?: string;
   attendees?: number;
+  /**
+   * Video-call URL (Google Meet/Zoom/Teams), kept separate from `location`.
+   * `location` folds this into a display string, which left Join with nothing
+   * to open.
+   */
+  meetLink?: string;
   /** Highlight as the imminent next meeting */
   startsSoon?: boolean;
   /** Context for building a pre-meeting brief (raw attendees preserved) */

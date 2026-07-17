@@ -10,6 +10,7 @@ import type { IntegrationProvider } from '../../lib/enums.js';
 import { BaseConnector, type ConnectorConfig, type ConnectorStatus, type TokenRefreshResult } from '../base-connector.js';
 import { googleOAuthService } from './oauth.js';
 import { ConnectorManager } from '../connector-manager.js';
+import { describeGoogleError, isInvalidGrant, RECONNECT_REQUIRED_MESSAGE } from './auth-errors.js';
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID!;
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET!;
@@ -64,48 +65,68 @@ export class GmailConnector extends BaseConnector {
     return 'GMAIL';
   }
   
+  /**
+   * The signed-in account's email, via the userinfo endpoint — always granted
+   * (generateAuthUrl adds userinfo.email to every consent), unlike
+   * users.getProfile which needs gmail.readonly. Routed through oauth2Client so
+   * an expired access token is refreshed first.
+   */
+  private async fetchAccountEmail(): Promise<string | undefined> {
+    const { data } = await this.oauth2Client.request<{ email?: string }>({
+      url: 'https://www.googleapis.com/oauth2/v2/userinfo',
+    });
+    return data.email;
+  }
+
+  /**
+   * Verify the credentials with an endpoint our granted scopes actually cover.
+   * The Connect flow requests gmail.send only (see CONNECT_SCOPES_MAP), and
+   * gmail.send grants no read access — so the old users.getProfile probe
+   * returned 403 "insufficient authentication scopes" and reported healthy
+   * send-only accounts as disconnected. There is no read-free Gmail probe, so
+   * validate via userinfo instead.
+   *
+   * Throws on failure so callers can tell a dead grant from a transient error.
+   */
+  private async probeAccess(): Promise<void> {
+    if (!this.config.accessToken) {
+      throw new Error('No access token');
+    }
+    await this.fetchAccountEmail();
+  }
+
   async isConnected(): Promise<boolean> {
     try {
-      if (!this.config.accessToken) {
-        return false;
-      }
-      
-      // Try to get user profile to verify connection
-      await this.gmail.users.getProfile({ userId: 'me' });
+      await this.probeAccess();
       return true;
     } catch (error) {
-      console.error('Gmail connection check failed:', error);
+      // describeGoogleError, never the raw error — the raw one embeds the
+      // refresh token on token-refresh failures.
+      console.error('[gmail] connection check failed:', describeGoogleError(error));
       return false;
     }
   }
-  
+
   async getStatus(): Promise<ConnectorStatus> {
+    let email: string | undefined;
     try {
-      const connected = await this.isConnected();
-      
-      if (!connected) {
-        return {
-          connected: false,
-          provider: this.getProvider(),
-          error: 'Not connected or token expired',
-        };
-      }
-      
-      // Get user's email address
-      const profile = await this.gmail.users.getProfile({ userId: 'me' });
-      
-      return {
-        connected: true,
-        provider: this.getProvider(),
-        email: profile.data.emailAddress || undefined,
-      };
+      email = await this.fetchAccountEmail();
     } catch (error) {
+      const deadGrant = isInvalidGrant(error);
+      console.error('[gmail] status probe failed:', describeGoogleError(error));
       return {
         connected: false,
         provider: this.getProvider(),
-        error: error instanceof Error ? error.message : 'Unknown error',
+        needsReconnect: deadGrant,
+        error: deadGrant ? RECONNECT_REQUIRED_MESSAGE : describeGoogleError(error),
       };
     }
+
+    return {
+      connected: true,
+      provider: this.getProvider(),
+      email,
+    };
   }
   
   async refreshTokens(): Promise<TokenRefreshResult> {

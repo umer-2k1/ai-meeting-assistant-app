@@ -352,6 +352,44 @@ export async function fetchPreMeetingBrief(input: PreMeetingInput): Promise<PreM
   });
 }
 
+// ----- Guest research (internet enrichment) -----
+
+export interface GuestProfile {
+  email: string;
+  name: string | null;
+  domain: string | null;
+  isFreeEmail: boolean;
+  fullName: string | null;
+  title: string | null;
+  company: string | null;
+  companyDomain: string | null;
+  website: string | null;
+  linkedinUrl: string | null;
+  avatarUrl: string | null;
+  bio: string | null;
+  location: string | null;
+  socialProfiles: Record<string, string>;
+  confidence: 'high' | 'medium' | 'low';
+  matchStatus: 'verified' | 'possible_matches' | 'unknown';
+  sources: Array<{ type: string; url?: string }>;
+  enrichedAt: string | null;
+}
+
+export interface ResearchGuestsResponse {
+  enabled: boolean;
+  providerConfigured: boolean;
+  guests: GuestProfile[];
+}
+
+export async function fetchGuestResearch(
+  attendees: Array<{ name: string; email?: string | null }>
+): Promise<ResearchGuestsResponse> {
+  return apiRequest<ResearchGuestsResponse>('/api/intelligence/research-guests', {
+    method: 'POST',
+    body: JSON.stringify({ attendees }),
+  });
+}
+
 /** Download a meeting export (markdown or pdf) with auth, triggering a browser save. */
 export async function downloadMeetingExport(
   meetingId: string,

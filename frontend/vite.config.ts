@@ -30,7 +30,11 @@ export default defineConfig({
   ],
   server: {
     host: config.server.host,
-    port: config.server.port
+    port: config.server.port,
+    // Fail loudly instead of drifting to the next free port. Electron loads the
+    // widget from a hardcoded VITE_DEV_SERVER_URL, so a silent port change meant
+    // it attached to whatever stale server already held this one.
+    strictPort: true
   },
   build: {
     rollupOptions: {
