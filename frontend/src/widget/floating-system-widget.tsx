@@ -141,10 +141,35 @@ export default function FloatingSystemWidget() {
     if (el) el.scrollTop = el.scrollHeight;
   }, [transcript, interimLine, expanded]);
 
+  /**
+   * Tell the main process what size the window should be.
+   *
+   * The preload bridge is not always injected by first render. Returning early
+   * on a missing API used to strand the two sides permanently — `expanded` never
+   * changes afterwards, so the effect never re-ran, leaving an expanded-sized
+   * window drawing a compact pill (a full-screen black rectangle on macOS).
+   * So: retry until the bridge exists rather than giving up.
+   */
   useEffect(() => {
-    const desktopApi = globalThis.window.desktop;
-    if (!desktopApi?.widget) return;
-    void desktopApi.widget.setExpanded(expanded);
+    let cancelled = false;
+    let retry: ReturnType<typeof setTimeout> | undefined;
+
+    const sync = () => {
+      if (cancelled) return;
+      const desktopApi = globalThis.window.desktop;
+      if (!desktopApi?.widget) {
+        retry = setTimeout(sync, 100);
+        return;
+      }
+      void desktopApi.widget.setExpanded(expanded);
+    };
+
+    sync();
+
+    return () => {
+      cancelled = true;
+      if (retry) clearTimeout(retry);
+    };
   }, [expanded]);
 
   const toggleExpanded = () => {
