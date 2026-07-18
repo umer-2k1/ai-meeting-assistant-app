@@ -113,6 +113,17 @@ model Meeting {
   recordingStarted  DateTime?
   recordingEnded    DateTime?
 
+  // Where this meeting came from.
+  // MeetingSource: DIRECT | CALENDAR
+  // DIRECT   — ad-hoc "New Recording"; no invite, so no attendee list.
+  // CALENDAR — started from a Google Calendar event, so it carries that event's
+  //            attendees. That attendee list is the join key the pre-meeting
+  //            brief uses to find past meetings with the same people, which is
+  //            why preserving the distinction matters beyond a UI badge.
+  source            String    @default("DIRECT")
+  /** Google Calendar event id, when source = CALENDAR. */
+  calendarEventId   String?
+
   // Platform info
   platform          String?   // "zoom", "meet", "teams", "in-person"
   platformMeetingId String?
@@ -149,6 +160,9 @@ model Meeting {
   @@index([userId])
   @@index([startTime])
   @@index([status])
+  @@index([source])
+  // Lets a repeat "Start recording" on the same invite find the existing meeting.
+  @@index([calendarEventId])
 }
 
 // ========================================

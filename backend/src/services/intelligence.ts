@@ -7,6 +7,9 @@
 import prisma from '../lib/prisma.js';
 import { generatePreMeetingBrief } from './ai.js';
 import { enrichPerson, isEnrichmentConfigured } from './enrichment.js';
+import { generateEmbedding } from './embeddings.js';
+import { searchSimilarMeetings } from './vector-store.js';
+import { parseStringList } from '../lib/json-list.js';
 
 export interface PreMeetingInput {
   title: string;
@@ -91,13 +94,79 @@ export async function buildPreMeetingBrief(
   return result;
 }
 
+/** How many past meetings end up in the brief. */
+const BRIEF_MEETING_LIMIT = 5;
+/** Candidate pool to rank. Wider than the limit so ranking has something to do. */
+const BRIEF_CANDIDATE_LIMIT = 25;
+
+/**
+ * Rank this person's past meetings by relevance to the upcoming one.
+ *
+ * Recency alone is a poor proxy: for someone you meet weekly it is usually
+ * right, but for a contact you meet across several unrelated projects the last
+ * five meetings can be entirely off-topic. The meeting-level embeddings needed
+ * to do better already exist — they just were not being used here.
+ *
+ * The most recent meeting is always kept regardless of score: "what did we say
+ * last time" is context you want even when it is off-topic. Falls back to pure
+ * recency when there is nothing to embed or the embedding call fails.
+ */
+async function rankPastMeetingsByRelevance<T extends { id: string; startTime: Date }>(
+  candidates: T[],
+  userId: string,
+  queryText: string
+): Promise<T[]> {
+  const byRecency = [...candidates].sort(
+    (a, b) => b.startTime.getTime() - a.startTime.getTime()
+  );
+
+  if (candidates.length <= BRIEF_MEETING_LIMIT || !queryText.trim()) {
+    return byRecency.slice(0, BRIEF_MEETING_LIMIT);
+  }
+
+  try {
+    const queryEmbedding = await generateEmbedding(queryText);
+    const hits = await searchSimilarMeetings(queryEmbedding, userId, BRIEF_CANDIDATE_LIMIT * 2);
+
+    const scoreByMeeting = new Map<string, number>();
+    for (const hit of hits) {
+      const meetingId = (hit.payload as { meetingId?: unknown })?.meetingId;
+      if (typeof meetingId === 'string') {
+        scoreByMeeting.set(meetingId, Math.max(scoreByMeeting.get(meetingId) ?? 0, hit.score));
+      }
+    }
+
+    // Nothing indexed yet (older meetings predate embedding) — recency it is.
+    if (scoreByMeeting.size === 0) return byRecency.slice(0, BRIEF_MEETING_LIMIT);
+
+    const mostRecent = byRecency[0];
+    const ranked = [...candidates].sort((a, b) => {
+      const diff = (scoreByMeeting.get(b.id) ?? 0) - (scoreByMeeting.get(a.id) ?? 0);
+      return diff !== 0 ? diff : b.startTime.getTime() - a.startTime.getTime();
+    });
+
+    const picked = ranked.slice(0, BRIEF_MEETING_LIMIT);
+    if (mostRecent && !picked.some((m) => m.id === mostRecent.id)) {
+      picked.splice(BRIEF_MEETING_LIMIT - 1, 1, mostRecent);
+    }
+    return picked;
+  } catch (error) {
+    console.warn(
+      '[pre-meeting] relevance ranking failed, falling back to recency:',
+      error instanceof Error ? error.message : error
+    );
+    return byRecency.slice(0, BRIEF_MEETING_LIMIT);
+  }
+}
+
 async function computePreMeetingBrief(userId: string, input: PreMeetingInput) {
   const emails = input.attendees
     .map((a) => a.email)
     .filter((e): e is string => Boolean(e));
 
-  // Past completed meetings that shared any of these attendees.
-  const pastMeetings = emails.length
+  // Past completed meetings that shared any of these attendees. Pull a wide
+  // candidate set, then rank it — see rankPastMeetingsByRelevance.
+  const candidates = emails.length
     ? await prisma.meeting.findMany({
         where: {
           userId,
@@ -105,9 +174,15 @@ async function computePreMeetingBrief(userId: string, input: PreMeetingInput) {
           attendees: { some: { email: { in: emails } } },
         },
         orderBy: { startTime: 'desc' },
-        take: 5,
+        take: BRIEF_CANDIDATE_LIMIT,
       })
     : [];
+
+  const pastMeetings = await rankPastMeetingsByRelevance(
+    candidates,
+    userId,
+    [input.title, input.description].filter(Boolean).join('\n')
+  );
 
   const meetingIds = pastMeetings.map((m) => m.id);
 
@@ -120,8 +195,31 @@ async function computePreMeetingBrief(userId: string, input: PreMeetingInput) {
       })
     : [];
 
+  // Decisions are the highest-value thing to recall walking into a follow-up
+  // ("what did we already settle?"), and they were being dropped entirely — the
+  // context string carried only title + summary.
   const previousContext = pastMeetings
-    .map((m) => `- ${m.title} (${m.startTime.toDateString()}): ${m.aiSummary ?? 'No summary'}`)
+    .map((m) => {
+      const decisions = parseStringList(m.keyDecisions);
+      const lines = [
+        `- ${m.title} (${m.startTime.toDateString()}): ${m.aiSummary ?? 'No summary'}`,
+      ];
+      if (decisions.length > 0) {
+        lines.push(`  Decisions made: ${decisions.join('; ')}`);
+      }
+      return lines.join('\n');
+    })
+    .join('\n');
+
+  // The model was previously never shown the open action items, so its
+  // "reminders" were inferred from summaries rather than grounded in real
+  // outstanding commitments — a genuinely overdue item could go unmentioned.
+  const openCommitments = openActionItems
+    .map((i) => {
+      const owner = i.assignee ? ` — ${i.assignee}` : '';
+      const due = i.dueDate ? ` (due ${i.dueDate.toDateString()})` : '';
+      return `- ${i.task}${owner}${due}`;
+    })
     .join('\n');
 
   const brief = await generatePreMeetingBrief({
@@ -129,6 +227,7 @@ async function computePreMeetingBrief(userId: string, input: PreMeetingInput) {
     description: input.description,
     attendees: input.attendees.map((a) => ({ name: a.name })),
     previousMeetings: previousContext || undefined,
+    openActionItems: openCommitments || undefined,
   });
 
   // Best-effort live enrichment (only when SERPER_API_KEY is set).

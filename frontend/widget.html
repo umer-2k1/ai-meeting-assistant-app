@@ -4,6 +4,23 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>AI Meeting Copilot Widget</title>
+    <!--
+      Transparency is declared inline, before any bundled stylesheet, so the
+      overlay stays see-through even if the CSS bundle fails to load. This window
+      is transparent+frameless: anything that paints an opaque background turns
+      it into a black rectangle floating over the desktop. Duplicated in
+      src/widget/widget.css for the dev/HMR path — keep both.
+    -->
+    <style>
+      html,
+      body,
+      #root {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: transparent !important;
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>

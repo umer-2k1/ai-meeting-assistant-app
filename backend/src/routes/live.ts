@@ -24,11 +24,31 @@ const router = express.Router();
  */
 router.post('/meetings', requireAuth, async (req, res) => {
   try {
-    const { title, description, platform, platformUrl } = req.body;
+    const { title, description, platform, platformUrl, calendarEventId } = req.body;
 
     if (!title) {
       return res.status(400).json({ error: 'Title is required' });
     }
+
+    // A meeting is a CALENDAR meeting when it was started from a Google Calendar
+    // event — the event id is the evidence, so derive the source from it rather
+    // than trusting a separate client-supplied flag that could disagree.
+    const source: 'DIRECT' | 'CALENDAR' =
+      typeof calendarEventId === 'string' && calendarEventId.trim() ? 'CALENDAR' : 'DIRECT';
+
+    const attendees = Array.isArray(req.body?.attendees)
+      ? req.body.attendees
+          .map((a: unknown) => {
+            if (typeof a === 'string') return { name: a, email: null, role: null };
+            const obj = a as { name?: unknown; email?: unknown; role?: unknown };
+            return {
+              name: typeof obj?.name === 'string' ? obj.name : '',
+              email: typeof obj?.email === 'string' ? obj.email : null,
+              role: typeof obj?.role === 'string' ? obj.role : null,
+            };
+          })
+          .filter((a: { name: string; email: string | null }) => a.name || a.email)
+      : [];
 
     const meeting = await createMeeting({
       userId: req.user!.id,
@@ -37,7 +57,15 @@ router.post('/meetings', requireAuth, async (req, res) => {
       startTime: new Date(),
       platform,
       platformUrl,
+      source,
+      calendarEventId: source === 'CALENDAR' ? calendarEventId.trim() : undefined,
+      attendees,
     });
+
+    log.info(
+      `meeting ${shortId(meeting.id)} source=${source}` +
+        (attendees.length ? ` with ${attendees.length} attendee(s)` : ' with no attendees')
+    );
 
     // Update to LIVE status
     const { default: prisma } = await import('../lib/prisma.js');
@@ -87,6 +115,45 @@ router.post('/meetings/:id/transcript', requireAuth, async (req, res) => {
   } catch (error) {
     console.error('Add transcript error:', error);
     res.status(400).json({ error: 'Failed to add transcript line' });
+  }
+});
+
+/**
+ * GET /api/live/meetings/:id/chat
+ *
+ * This meeting's AI chat history, oldest first. Answers were already being
+ * persisted per meeting but never read back, so the UI kept one in-memory list
+ * shared by every meeting — opening meeting B showed meeting A's conversation.
+ * Ownership is enforced through the meeting, so one user cannot read another's.
+ */
+router.get('/meetings/:id/chat', requireAuth, async (req, res) => {
+  try {
+    const meetingId = getRouteParam(req.params.id);
+    const { default: prisma } = await import('../lib/prisma.js');
+
+    const meeting = await prisma.meeting.findFirst({
+      where: { id: meetingId, userId: req.user!.id },
+      select: { id: true },
+    });
+    if (!meeting) return res.status(404).json({ error: 'Meeting not found' });
+
+    const messages = await prisma.aIChatMessage.findMany({
+      where: { meetingId, userId: req.user!.id },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true, question: true, answer: true, createdAt: true },
+    });
+
+    res.json({
+      messages: messages.map((m) => ({
+        id: m.id,
+        question: m.question,
+        answer: m.answer,
+        timestamp: m.createdAt.toISOString(),
+      })),
+    });
+  } catch (error) {
+    console.error('Failed to load meeting chat history:', error);
+    res.status(500).json({ error: 'Failed to load chat history' });
   }
 });
 

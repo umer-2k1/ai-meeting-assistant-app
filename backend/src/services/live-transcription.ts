@@ -41,6 +41,74 @@ export function formatTimestamp(totalSeconds: number): string {
   return `${hh}:${mm}:${ss}`;
 }
 
+/** A stretch of consecutive words attributed to one diarized speaker. */
+export interface SpeakerRun {
+  speaker: string;
+  text: string;
+  startSeconds: number;
+}
+
+/** Deepgram's per-word shape, narrowed to what diarization needs. */
+type DeepgramWord = {
+  start?: number;
+  speaker?: number;
+  word?: string;
+  punctuated_word?: string;
+};
+
+/**
+ * Split a Deepgram result's words into consecutive same-speaker runs.
+ *
+ * Deepgram diarizes PER WORD, but a single result can contain several speakers
+ * when people talk over/straight after each other. Reading only `words[0]`
+ * attributed the whole segment to whoever happened to speak first — which is how
+ * an entire fast-moving conversation collapsed onto "Speaker 1".
+ *
+ * A word with no `speaker` continues the current run rather than starting a new
+ * one: sporadic missing labels should not fragment a line.
+ */
+export function groupWordsBySpeaker(
+  words: DeepgramWord[] | undefined,
+  fallbackSpeaker = 'Speaker 1'
+): SpeakerRun[] {
+  if (!words || words.length === 0) return [];
+
+  const runs: SpeakerRun[] = [];
+  let current: SpeakerRun | null = null;
+  let currentIdx: number | null = null;
+
+  for (const word of words) {
+    const token = (word.punctuated_word ?? word.word ?? '').trim();
+    if (!token) continue;
+
+    const idx = typeof word.speaker === 'number' ? word.speaker : null;
+    // `null` (unlabelled) never forces a boundary — only a *different* label does.
+    const startsNewRun = current === null || (idx !== null && currentIdx !== null && idx !== currentIdx);
+
+    if (startsNewRun) {
+      current = {
+        speaker: idx === null ? fallbackSpeaker : `Speaker ${idx + 1}`,
+        text: token,
+        // Each run carries its OWN first word's start, so per-line timestamps
+        // stay correct after a split.
+        startSeconds: word.start ?? 0,
+      };
+      currentIdx = idx;
+      runs.push(current);
+      continue;
+    }
+
+    current!.text = `${current!.text} ${token}`;
+    // Adopt the first real label seen if the run began on unlabelled words.
+    if (currentIdx === null && idx !== null) {
+      currentIdx = idx;
+      current!.speaker = `Speaker ${idx + 1}`;
+    }
+  }
+
+  return runs;
+}
+
 const KEEPALIVE_MS = 8000;
 /** Bounded reconnect on transient Deepgram drops: 3 tries, doubling delay. */
 const RECONNECT_MAX_ATTEMPTS = 3;
@@ -194,18 +262,41 @@ export function createLiveTranscriptionSession(
         typeof speakerIdx === 'number' ? `Speaker ${speakerIdx + 1}` : null;
 
       if (data.is_final) {
-        // Finalized segment: append to the current utterance buffer.
-        if (text) {
+        // Split the segment on speaker changes and commit a line per speaker.
+        //
+        // The buffer used to flush ONLY on speech_final/UtteranceEnd, both of
+        // which need ~800-1000ms of silence. In a fast back-and-forth there is
+        // no such silence, so segments from different speakers concatenated into
+        // one line wearing the first speaker's label. Flushing on speaker change
+        // as well is what makes rapid alternation attribute correctly.
+        const runs = groupWordsBySpeaker(words, utterance?.speaker ?? 'Speaker 1');
+
+        if (runs.length === 0 && text) {
+          // No word-level data (rare) — keep the previous behaviour.
           if (utterance) {
             utterance.text = `${utterance.text} ${text}`.trim();
           } else {
+            utterance = { text, startSeconds, speaker: detectedSpeaker ?? 'Speaker 1' };
+          }
+        }
+
+        for (const run of runs) {
+          if (utterance && utterance.speaker !== run.speaker) {
+            // Speaker changed mid-stream: close the previous line before opening
+            // the next, instead of appending across the boundary.
+            commitUtterance();
+          }
+          if (utterance) {
+            utterance.text = `${utterance.text} ${run.text}`.trim();
+          } else {
             utterance = {
-              text,
-              startSeconds,
-              speaker: detectedSpeaker ?? 'Speaker 1',
+              text: run.text,
+              startSeconds: run.startSeconds,
+              speaker: run.speaker,
             };
           }
         }
+
         // Commit the whole utterance at a natural pause; otherwise keep buffering
         // and reflect progress as a live (interim) line.
         if (data.speech_final) {
@@ -217,9 +308,17 @@ export function createLiveTranscriptionSession(
       }
 
       // Interim hypothesis: show buffered text + the live partial as one line.
+      //
+      // Deliberately NOT split by speaker. Interim results get revised
+      // constantly, so splitting here would make labels flicker mid-sentence.
+      // Interims are never persisted, so a transient mislabel self-corrects on
+      // the next final. When there is no buffer, use the LAST run's speaker —
+      // whoever is talking now — rather than the first word's.
       if (!text && !utterance) return;
+      const interimRuns = groupWordsBySpeaker(words);
+      const trailingSpeaker = interimRuns.at(-1)?.speaker ?? detectedSpeaker;
       const startForLine = utterance?.startSeconds ?? startSeconds;
-      const speakerForLine = utterance?.speaker ?? detectedSpeaker ?? 'Speaker 1';
+      const speakerForLine = utterance?.speaker ?? trailingSpeaker ?? 'Speaker 1';
       const combined = utterance ? `${utterance.text} ${text}`.trim() : text;
       emit({
         type: 'transcript',
@@ -316,7 +415,13 @@ interface DeepgramTranscript {
   channel?: {
     alternatives?: Array<{
       transcript?: string;
-      words?: Array<{ start?: number; speaker?: number }>;
+      words?: Array<{
+        start?: number;
+        speaker?: number;
+        word?: string;
+        /** Present when `punctuate`/`smart_format` are on — prefer it for display. */
+        punctuated_word?: string;
+      }>;
     }>;
   };
 }

@@ -457,6 +457,20 @@ export async function getSlackChannelsApi(): Promise<{ id: string; name: string 
 }
 
 /**
+ * This meeting's saved AI chat history, oldest first.
+ *
+ * Each meeting owns its own conversation — never share one list across meetings.
+ */
+export async function fetchMeetingChatHistory(
+  meetingId: string
+): Promise<Array<{ id: string; question: string; answer: string; timestamp: string }>> {
+  const res = await apiRequest<{
+    messages: Array<{ id: string; question: string; answer: string; timestamp: string }>;
+  }>(`/api/live/meetings/${meetingId}/chat`);
+  return res.messages;
+}
+
+/**
  * Stream a RAG-grounded answer about a meeting via SSE
  * (`/api/live/meetings/:id/ask`). Tokens arrive incrementally; resolves with the
  * full answer + optional timestamp. Throws on transport/LLM error.

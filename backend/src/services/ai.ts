@@ -340,6 +340,8 @@ export async function generatePreMeetingBrief(data: {
   description?: string;
   attendees: Array<{ name: string; role?: string; company?: string }>;
   previousMeetings?: string;
+  /** Still-open commitments from past meetings with these people. */
+  openActionItems?: string;
 }): Promise<z.infer<typeof preMeetingBriefSchema>> {
   const llm = createGroqLLM({ temperature: 0.6, json: true });
 
@@ -356,13 +358,24 @@ Description: {description}
 Attendees:
 {attendees}
 
-Previous Meeting Context:
+Previous Meeting Context (past meetings with these people, including decisions already made):
 {previousContext}
 
+Still-open action items from those meetings:
+{openActionItems}
+
 Provide:
-1. A brief overview (2-3 sentences)
+1. A brief overview (2-3 sentences). If decisions were already made with these
+   people, say what they were — the user needs to walk in knowing what is settled.
 2. Suggested discussion topics (3-5 bullet points)
-3. Important reminders or follow-ups (if applicable)
+3. Important reminders or follow-ups
+
+Rules for reminders:
+- Ground them in the open action items and decisions listed above. Name the
+  specific commitment and who owns it.
+- Do NOT invent commitments, deadlines, or decisions that are not listed. If
+  there are no open items and no prior decisions, return an empty reminders list
+  rather than inventing plausible-sounding ones.
 
 Respond in JSON format:
 {{
@@ -381,6 +394,7 @@ Respond in JSON format:
         description: data.description || 'No description provided',
         attendees: attendeesList,
         previousContext: data.previousMeetings || 'No previous meetings',
+        openActionItems: data.openActionItems || 'None outstanding',
       }),
     preMeetingBriefSchema,
     'pre-meeting brief'

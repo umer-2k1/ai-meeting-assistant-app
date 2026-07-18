@@ -72,6 +72,7 @@ import {
   importAudioApi,
   searchMeetingsApi,
   streamMeetingAnswer,
+  fetchMeetingChatHistory,
   updateMeetingTitleApi,
 } from './meetings-api';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -1046,7 +1047,14 @@ export default function MeetingCopilotApp() {
   const [detailAskInput, setDetailAskInput] = useState('');
   const [isAsking, setIsAsking] = useState(false);
   const [askError, setAskError] = useState<string | null>(null);
-  const [aiAnswers, setAiAnswers] = useState<AiAnswer[]>([]);
+  /**
+   * AI chat, keyed by meeting id. Each meeting owns an isolated conversation:
+   * a single shared array leaked meeting A's questions into every other
+   * meeting's AI Chat tab. Never flatten this back into one list.
+   */
+  const [aiAnswersByMeeting, setAiAnswersByMeeting] = useState<Record<string, AiAnswer[]>>({});
+  /** Meetings whose saved history has been fetched, so we load once per meeting. */
+  const [chatHistoryLoaded, setChatHistoryLoaded] = useState<Record<string, boolean>>({});
   // Re-checked periodically: a grant can die mid-session, and the only fix is
   // re-consent, so the prompt has to find the user wherever they are.
   const { revoked: revokedIntegrations } = useIntegrationHealth({ pollMs: 5 * 60 * 1000 });
@@ -1071,6 +1079,50 @@ export default function MeetingCopilotApp() {
     takeRecording,
     error: liveError
   } = useLiveTranscription();
+
+  /** Only the open meeting's conversation is ever rendered. */
+  const aiAnswers = selectedMeetingId ? (aiAnswersByMeeting[selectedMeetingId] ?? []) : [];
+
+  // Load this meeting's saved chat once, so history survives reopening the
+  // meeting or restarting the app. Answers are already persisted per meeting
+  // server-side; before this they were written and never read back.
+  useEffect(() => {
+    const meetingId = selectedMeetingId;
+    if (!meetingId || chatHistoryLoaded[meetingId]) return;
+
+    let cancelled = false;
+    void fetchMeetingChatHistory(meetingId)
+      .then((messages) => {
+        if (cancelled) return;
+        setAiAnswersByMeeting((byMeeting) => {
+          // Newest first, matching how live answers are prepended. Anything
+          // asked while this was in flight stays on top.
+          const restored: AiAnswer[] = messages
+            .map((m) => ({
+              id: m.id,
+              question: m.question,
+              answer: m.answer,
+              timestamp: m.timestamp
+            }))
+            .reverse();
+          const pending = byMeeting[meetingId] ?? [];
+          const known = new Set(pending.map((a) => a.id));
+          return {
+            ...byMeeting,
+            [meetingId]: [...pending, ...restored.filter((a) => !known.has(a.id))]
+          };
+        });
+        setChatHistoryLoaded((loaded) => ({ ...loaded, [meetingId]: true }));
+      })
+      .catch((error) => {
+        // Non-fatal: the tab still works for new questions.
+        console.error('Failed to load meeting chat history:', error);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedMeetingId, chatHistoryLoaded]);
 
   // True while any meeting in the list is still being finalized — drives the
   // dashboard's background polling so a just-stopped recording flips from
@@ -1282,7 +1334,7 @@ export default function MeetingCopilotApp() {
     const question = (questionOverride ?? askInput).trim();
     if (!question || isAsking) return;
 
-    const meetingId = selectedMeeting?.id;
+    const meetingId = selectedMeetingId ?? selectedMeeting?.id;
     if (!meetingId) {
       setAskError('Open or start a meeting before asking the AI.');
       return;
@@ -1291,9 +1343,18 @@ export default function MeetingCopilotApp() {
     setIsAsking(true);
     setAskError(null);
 
+    // Every update targets THIS meeting's bucket. Answers must land in the
+    // meeting they were asked about even if the user navigates mid-stream.
+    const updateAnswers = (updater: (current: AiAnswer[]) => AiAnswer[]) => {
+      setAiAnswersByMeeting((byMeeting) => ({
+        ...byMeeting,
+        [meetingId]: updater(byMeeting[meetingId] ?? [])
+      }));
+    };
+
     // Insert a placeholder answer and stream tokens into it (RAG-grounded SSE).
     const answerId = crypto.randomUUID();
-    setAiAnswers((current) => [
+    updateAnswers((current) => [
       { id: answerId, question, answer: '', timestamp: '' },
       ...current
     ]);
@@ -1302,7 +1363,7 @@ export default function MeetingCopilotApp() {
     try {
       const { timestamp } = await streamMeetingAnswer(meetingId, question, {
         onToken: (tokenText) => {
-          setAiAnswers((current) =>
+          updateAnswers((current) =>
             current.map((a) =>
               a.id === answerId ? { ...a, answer: a.answer + tokenText } : a
             )
@@ -1310,7 +1371,7 @@ export default function MeetingCopilotApp() {
         }
       });
       if (timestamp) {
-        setAiAnswers((current) =>
+        updateAnswers((current) =>
           current.map((a) => (a.id === answerId ? { ...a, timestamp } : a))
         );
       }
@@ -1319,7 +1380,7 @@ export default function MeetingCopilotApp() {
       // interrupted — the panel shows a Retry affordance instead of silently
       // presenting a truncated answer as complete.
       setAskError('Ask AI is temporarily unavailable. Please retry.');
-      setAiAnswers((current) =>
+      updateAnswers((current) =>
         current.map((a) => (a.id === answerId ? { ...a, error: true } : a))
       );
     } finally {
@@ -1347,7 +1408,8 @@ export default function MeetingCopilotApp() {
     setAskError(null);
     setIsRecordingPaused(false);
     setElapsedSeconds(0);
-    setAiAnswers([]);
+    // No chat to clear: each meeting has its own bucket, so a new recording
+    // starts empty by construction rather than by wiping shared state.
 
     const beginSession = (liveMeetingId: string) => {
       // Start the real renderer-side capture → WS → Deepgram pipeline.

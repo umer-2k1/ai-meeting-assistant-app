@@ -36,6 +36,12 @@ export default defineConfig({
     // it attached to whatever stale server already held this one.
     strictPort: true
   },
+  // Relative asset URLs. Electron loads the built HTML with loadFile() over
+  // file://, where the default absolute base ('/') resolves /assets/* against
+  // the FILESYSTEM ROOT — so every script and stylesheet 404s and the app (and
+  // the widget overlay) renders as an empty opaque window. Relative paths work
+  // under both file:// and the dev server.
+  base: './',
   build: {
     rollupOptions: {
       input: {
