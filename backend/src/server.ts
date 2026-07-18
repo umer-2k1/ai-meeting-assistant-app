@@ -41,6 +41,15 @@ const wsLog = createLogger('ws');
 // Fail fast if required credentials are missing (before anything else runs).
 validateEnvOrExit();
 
+// Since Node 15, ANY unhandled promise rejection kills the process — and this
+// server does a lot of fire-and-forget async work (post-meeting processing,
+// spawned LLM calls, WebSocket pipelines). One stray rejection must not take
+// down every live recording and API request with it, so log-and-survive.
+// Synchronous uncaught exceptions still exit: state after those is undefined.
+process.on('unhandledRejection', (reason) => {
+  console.error('[fatal-averted] Unhandled promise rejection:', reason);
+});
+
 const app = express();
 const port = Number(process.env.PORT ?? 3001);
 

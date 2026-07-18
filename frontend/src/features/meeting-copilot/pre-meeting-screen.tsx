@@ -6,6 +6,7 @@ import {
   IconBulb,
   IconChecklist,
   IconHistory,
+  IconRefresh,
   IconSearch,
   IconSparkles,
   IconUsers,
@@ -46,6 +47,7 @@ export default function PreMeetingScreen({
 }) {
   const [data, setData] = useState<PreMeetingBrief | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isRegenerating, setIsRegenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Guest research (on-demand internet enrichment).
@@ -89,6 +91,19 @@ export default function PreMeetingScreen({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [context.title, context.description, JSON.stringify(context.attendees)]);
 
+  /** The brief above is served from cache; this is the way to force a rebuild. */
+  const regenerate = async () => {
+    setIsRegenerating(true);
+    setError(null);
+    try {
+      setData(await fetchPreMeetingBrief(context, { refresh: true }));
+    } catch {
+      setError('Could not rebuild the pre-meeting brief. Please retry.');
+    } finally {
+      setIsRegenerating(false);
+    }
+  };
+
   return (
     <section className='mx-auto flex max-w-4xl flex-col gap-5'>
       <div className='flex items-center gap-3'>
@@ -102,10 +117,23 @@ export default function PreMeetingScreen({
           <IconArrowLeft className='mr-1.5 size-3.5' />
           Back
         </Button>
-        <div>
+        <div className='min-w-0 flex-1'>
           <h1 className='text-xl font-semibold text-foreground'>{context.title}</h1>
           <p className='text-xs text-muted-foreground'>AI pre-meeting brief</p>
         </div>
+        {!isLoading && !error && (
+          <Button
+            type='button'
+            size='sm'
+            variant='outline'
+            className={cn('shrink-0 rounded-full', COPILOT_BTN_OUTLINE)}
+            disabled={isRegenerating}
+            onClick={() => void regenerate()}
+          >
+            <IconRefresh className='mr-1.5 size-3.5' />
+            {isRegenerating ? 'Rebuilding…' : 'Regenerate'}
+          </Button>
+        )}
       </div>
 
       {isLoading ? (

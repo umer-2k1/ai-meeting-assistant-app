@@ -63,6 +63,8 @@ import DeviceCheckScreen, { type DeviceCheckTab } from './device-check-screen';
 import MeetingDetailScreen from './meeting-detail/meeting-detail-screen';
 import { useMeetingDetail, useMeetingList } from './use-meetings-data';
 import { useLiveTranscription } from './use-live-transcription';
+import { useIntegrationHealth } from './use-integration-health';
+import IntegrationReconnectBanner from './integration-reconnect-banner';
 import {
   completeMeetingApi,
   createLiveMeetingApi,
@@ -523,9 +525,9 @@ function DashboardScreen({
           <Card key={stat.label} className={SURFACE}>
             <CardContent className='space-y-1'>
               <p className='text-xs uppercase tracking-[0.12em] text-muted-foreground'>{stat.label}</p>
-              <p className='text-2xl font-semibold text-foreground'>
+              <div className='text-2xl font-semibold text-foreground'>
                 {isLoading ? <Skeleton className='h-8 w-16' /> : stat.value}
-              </p>
+              </div>
             </CardContent>
           </Card>
         ))}
@@ -1045,6 +1047,9 @@ export default function MeetingCopilotApp() {
   const [isAsking, setIsAsking] = useState(false);
   const [askError, setAskError] = useState<string | null>(null);
   const [aiAnswers, setAiAnswers] = useState<AiAnswer[]>([]);
+  // Re-checked periodically: a grant can die mid-session, and the only fix is
+  // re-consent, so the prompt has to find the user wherever they are.
+  const { revoked: revokedIntegrations } = useIntegrationHealth({ pollMs: 5 * 60 * 1000 });
 
   const {
     meetings: meetingList,
@@ -1610,6 +1615,14 @@ export default function MeetingCopilotApp() {
                 : 'overflow-y-auto overscroll-contain'
             )}
           >
+            {/* Settings already shows per-integration reconnect state, and the
+                live view stays clear while recording. */}
+            {view !== 'settings' && view !== 'live' && (
+              <IntegrationReconnectBanner
+                revoked={revokedIntegrations}
+                onManageIntegrations={() => setView('settings')}
+              />
+            )}
             {view === 'dashboard' && (
               <DashboardScreen
                 filteredMeetings={filteredMeetings}

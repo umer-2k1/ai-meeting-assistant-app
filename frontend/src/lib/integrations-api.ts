@@ -42,10 +42,17 @@ export interface ProviderStatus {
   error?: string;
 }
 
+export interface SlackProviderStatus extends ProviderStatus {
+  /** Slack workspace name, once installed. */
+  workspace?: string;
+  /** Whether the server has SLACK_CLIENT_ID/SECRET — without them, no install is possible. */
+  configured?: boolean;
+}
+
 export interface IntegrationStatus {
   calendar: ProviderStatus;
   gmail: ProviderStatus;
-  slack: ProviderStatus;
+  slack: SlackProviderStatus;
 }
 
 export interface CalendarEvent {
@@ -102,15 +109,18 @@ export async function connectGoogle(
   return (await response.json()) as { authUrl: string };
 }
 
-function statusKeyFor(provider: GoogleIntegrationProvider): 'calendar' | 'gmail' {
+/** Which `/status` key a connect flow should watch to know it finished. */
+type IntegrationStatusKey = 'calendar' | 'gmail' | 'slack';
+
+function statusKeyFor(provider: GoogleIntegrationProvider): IntegrationStatusKey {
   return provider === 'GMAIL' ? 'gmail' : 'calendar';
 }
 
-async function isProviderConnected(provider: GoogleIntegrationProvider): Promise<boolean> {
+async function isProviderConnected(statusKey: IntegrationStatusKey): Promise<boolean> {
   try {
     const status = await getIntegrationStatus();
-    const connected = Boolean(status[statusKeyFor(provider)]?.connected);
-    console.log('[connect] status poll', { provider, connected, status });
+    const connected = Boolean(status[statusKey]?.connected);
+    console.log('[connect] status poll', { statusKey, connected, status });
     return connected;
   } catch (error) {
     console.warn('[connect] status poll failed', error);
@@ -142,7 +152,7 @@ const RETURN_GRACE_MS = 5000;
  *      back to the app and staying (see RETURN_GRACE_MS) without connecting.
  */
 function waitForDesktopConnect(
-  provider: GoogleIntegrationProvider,
+  statusKey: IntegrationStatusKey,
   {
     alreadyConnected,
     desktop,
@@ -169,13 +179,13 @@ function waitForDesktopConnect(
       window.removeEventListener('blur', onBlur);
       signal?.removeEventListener('abort', onAbort);
       unsubscribe?.();
-      console.log('[connect] desktop flow finished', { provider, connected });
+      console.log('[connect] desktop flow finished', { statusKey, connected });
       resolve(connected);
     };
 
     const checkConnected = async (): Promise<boolean> => {
       if (settled) return false;
-      const connected = await isProviderConnected(provider);
+      const connected = await isProviderConnected(statusKey);
       if (settled) return false;
       // Skip the first read of a reconnect: it still reflects the OLD
       // connection, not the one being made right now.
@@ -236,7 +246,7 @@ function waitForDesktopConnect(
 
 /** Web completion watcher — the popup handle tells us when the user is done. */
 function waitForPopupConnect(
-  provider: GoogleIntegrationProvider,
+  statusKey: IntegrationStatusKey,
   { authUrl, signal }: { authUrl: string; signal?: AbortSignal }
 ): Promise<boolean> {
   return new Promise<boolean>((resolve, reject) => {
@@ -262,7 +272,7 @@ function waitForPopupConnect(
     };
 
     const pollInterval = window.setInterval(() => {
-      if (popup.closed) void isProviderConnected(provider).then(finish);
+      if (popup.closed) void isProviderConnected(statusKey).then(finish);
     }, 500);
 
     signal?.addEventListener('abort', onAbort);
@@ -290,9 +300,10 @@ export async function connectGoogleIntegration(
   options: { signal?: AbortSignal } = {}
 ): Promise<boolean> {
   const { signal } = options;
+  const statusKey = statusKeyFor(provider);
   const desktopMode = isDesktopApp();
   console.log('[connect] start', { provider, desktopMode });
-  const alreadyConnected = await isProviderConnected(provider);
+  const alreadyConnected = await isProviderConnected(statusKey);
   const { authUrl } = await connectGoogle(provider);
   console.log('[connect] got authUrl', { provider, alreadyConnected, authUrl });
   const desktop = globalThis.window.desktop;
@@ -300,10 +311,100 @@ export async function connectGoogleIntegration(
   if (desktopMode && desktop?.auth?.openExternal) {
     console.log('[connect] opening system browser (desktop flow)');
     void desktop.auth.openExternal(authUrl);
-    return waitForDesktopConnect(provider, { alreadyConnected, desktop, signal });
+    return waitForDesktopConnect(statusKey, { alreadyConnected, desktop, signal });
   }
 
-  return waitForPopupConnect(provider, { authUrl, signal });
+  return waitForPopupConnect(statusKey, { authUrl, signal });
+}
+
+/**
+ * Start the Slack install ("Add to Slack"). Same two-mode completion handling as
+ * the Google flow — popup on web, system browser + deep link on desktop.
+ */
+export async function connectSlackIntegration(
+  options: { signal?: AbortSignal } = {}
+): Promise<boolean> {
+  const { signal } = options;
+  const desktopMode = isDesktopApp();
+
+  const response = await apiFetch('/api/integrations/slack/connect', {
+    method: 'POST',
+    body: JSON.stringify({ source: desktopMode ? 'desktop' : undefined }),
+  });
+
+  if (!response.ok) {
+    // The server tells us exactly what is missing from its Slack app config;
+    // surfacing that beats a generic failure the user cannot act on.
+    const body = (await response.json().catch(() => ({}))) as {
+      error?: string;
+      configIssues?: string[];
+    };
+    throw new Error(
+      [body.error ?? 'Failed to start Slack install', ...(body.configIssues ?? [])].join(' ')
+    );
+  }
+
+  const { authUrl } = (await response.json()) as { authUrl: string };
+  const alreadyConnected = await isProviderConnected('slack');
+  const desktop = globalThis.window.desktop;
+
+  if (desktopMode && desktop?.auth?.openExternal) {
+    void desktop.auth.openExternal(authUrl);
+    return waitForDesktopConnect('slack', { alreadyConnected, desktop, signal });
+  }
+
+  return waitForPopupConnect('slack', { authUrl, signal });
+}
+
+export interface SlackChannel {
+  id: string;
+  name: string;
+}
+
+export async function getSlackChannels(): Promise<SlackChannel[]> {
+  const response = await apiFetch('/api/integrations/slack/channels', { method: 'GET' });
+  if (!response.ok) {
+    const body = (await response.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error ?? 'Failed to list Slack channels');
+  }
+  const { channels } = (await response.json()) as { channels: SlackChannel[] };
+  return channels;
+}
+
+export interface SlackPreferences {
+  defaultChannelId: string | null;
+  defaultChannelName: string | null;
+  /** Post the summary to the default channel when a meeting finishes processing. */
+  autoPost: boolean;
+}
+
+export async function getSlackPreferences(): Promise<SlackPreferences> {
+  const response = await apiFetch('/api/integrations/slack/preferences', { method: 'GET' });
+  if (!response.ok) throw new Error('Failed to load Slack preferences');
+  return (await response.json()) as SlackPreferences;
+}
+
+export async function saveSlackPreferences(
+  prefs: Partial<SlackPreferences>
+): Promise<SlackPreferences> {
+  const response = await apiFetch('/api/integrations/slack/preferences', {
+    method: 'PUT',
+    body: JSON.stringify(prefs),
+  });
+  if (!response.ok) {
+    const body = (await response.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error ?? 'Failed to save Slack preferences');
+  }
+  return (await response.json()) as SlackPreferences;
+}
+
+/** Uninstall the Slack app for this user. */
+export async function disconnectSlack(): Promise<{ success: boolean }> {
+  const response = await apiFetch('/api/integrations/slack/disconnect', { method: 'DELETE' });
+  if (!response.ok) {
+    throw new Error('Failed to disconnect Slack');
+  }
+  return (await response.json()) as { success: boolean };
 }
 
 /**

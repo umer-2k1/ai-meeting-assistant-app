@@ -41,17 +41,30 @@ export default function MeetingShareDialog({
   const [selectedChannel, setSelectedChannel] = useState('');
   const [postingSlack, setPostingSlack] = useState(false);
   const [loadingChannels, setLoadingChannels] = useState(false);
-  // null = status unknown (still loading) — don't block sending on it.
-  const [gmailConnected, setGmailConnected] = useState<boolean | null>(null);
+  /**
+   * 'unknown' = still loading or the status call failed — never block sending on
+   * it. 'revoked' is deliberately distinct from 'disconnected': telling someone
+   * to "connect Gmail" when they already did, and it silently expired, sends
+   * them looking for a setup step that isn't the problem.
+   */
+  const [gmailState, setGmailState] = useState<
+    'unknown' | 'connected' | 'disconnected' | 'revoked'
+  >('unknown');
 
-  // Check integration availability up front so the user learns "Gmail isn't
-  // connected" when the dialog opens, not after a failed send.
+  // Check integration availability up front so the user learns Gmail is unusable
+  // when the dialog opens, not after a failed send.
   useEffect(() => {
     if (!open) return;
     void getIntegrationStatus()
-      .then((status) => setGmailConnected(Boolean(status.gmail?.connected)))
-      .catch(() => setGmailConnected(null));
+      .then((status) => {
+        if (status.gmail?.connected) setGmailState('connected');
+        else if (status.gmail?.needsReconnect) setGmailState('revoked');
+        else setGmailState('disconnected');
+      })
+      .catch(() => setGmailState('unknown'));
   }, [open]);
+
+  const gmailUnusable = gmailState === 'disconnected' || gmailState === 'revoked';
 
   const loadChannels = async () => {
     if (channels || loadingChannels) return;
@@ -62,7 +75,7 @@ export default function MeetingShareDialog({
       setChannels(list);
       setSelectedChannel(list[0]?.id ?? '');
     } catch {
-      setSlackError('Slack is not configured on this server. Add SLACK_BOT_TOKEN to enable it.');
+      setSlackError('Slack is not connected. Connect it in Settings → Integrations to post reports.');
     } finally {
       setLoadingChannels(false);
     }
@@ -141,7 +154,12 @@ export default function MeetingShareDialog({
               onChange={(e) => setRecipients(e.currentTarget.value)}
               placeholder='alice@example.com, bob@example.com'
             />
-            {gmailConnected === false ? (
+            {gmailState === 'revoked' ? (
+              <p className='text-xs text-destructive'>
+                Gmail access expired or was revoked. Reconnect it in Settings → Integrations to
+                email reports.
+              </p>
+            ) : gmailState === 'disconnected' ? (
               <p className='text-xs text-destructive'>
                 Gmail is not connected. Connect it in Settings → Integrations to email reports.
               </p>
@@ -153,7 +171,7 @@ export default function MeetingShareDialog({
             <Button
               type='button'
               className='w-full bg-primary text-primary-foreground'
-              disabled={sendingEmail || gmailConnected === false}
+              disabled={sendingEmail || gmailUnusable}
               onClick={() => void sendEmail()}
             >
               {sendingEmail ? 'Sending…' : 'Send email'}

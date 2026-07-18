@@ -541,6 +541,8 @@ export default function CalendarScreen({
         location: event.meetLink || event.location || 'No location',
         meetLink: event.meetLink,
         note: event.description || '',
+        startsAt: new Date(event.startTime),
+        endsAt: new Date(event.endTime),
         dayLabel: getDayLabel(new Date(event.startTime)),
         attendees: event.attendees?.length,
         recurring: event.recurring,
@@ -668,8 +670,24 @@ export default function CalendarScreen({
 
   const todayEvents = grouped.get('Today') ?? [];
   const tomorrowEvents = grouped.get('Tomorrow') ?? [];
-  const nextEvent =
-    calendarEvents.find((e) => e.startsSoon) ?? todayEvents[0] ?? calendarEvents[0];
+  /**
+   * "Next up" must never be a meeting that already ended. The loaded range can
+   * start in the past (the picker defaults to a window, not to today), so
+   * falling back to `calendarEvents[0]` used to surface a finished meeting and
+   * offer to record it. Pick the earliest event still running or yet to start.
+   */
+  const nextEvent = useMemo(() => {
+    const now = Date.now();
+    const upcoming = calendarEvents
+      .filter((e) => {
+        // An event still counts while it is in progress, so prefer its end.
+        const boundary = e.endsAt ?? e.startsAt;
+        return boundary ? boundary.getTime() > now : false;
+      })
+      .sort((a, b) => (a.startsAt?.getTime() ?? 0) - (b.startsAt?.getTime() ?? 0));
+
+    return upcoming.find((e) => e.startsSoon) ?? upcoming[0];
+  }, [calendarEvents]);
   const autoRecordCount = Object.values(autoRecordById).filter(Boolean).length;
 
   const setAutoRecord = (id: string, enabled: boolean) => {

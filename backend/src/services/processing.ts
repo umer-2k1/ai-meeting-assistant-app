@@ -16,7 +16,7 @@ import {
   storeMeetingEmbedding,
   storeTranscriptEmbedding,
 } from './vector-store.js';
-import { autoEmailMeetingSummary } from './share.js';
+import { autoEmailMeetingSummary, autoSlackMeetingSummary } from './share.js';
 import { createLogger, shortId } from '../lib/logger.js';
 
 const log = createLogger('processing');
@@ -179,6 +179,16 @@ export async function processMeeting(meetingId: string) {
     log.step(`auto-emailing summary if Gmail connected (${mid})`);
     await autoEmailMeetingSummary(meetingId).catch((error) => {
       log.warn(`auto-email skipped (best-effort, ${mid})`, error instanceof Error ? error.message : error);
+    });
+
+    // 9. Auto-post to Slack when the user picked a default channel and enabled
+    //    it. Same best-effort/idempotent contract as the email above.
+    log.step(`auto-posting to Slack if enabled (${mid})`);
+    await autoSlackMeetingSummary(meetingId).catch((error) => {
+      log.warn(
+        `auto-slack skipped (best-effort, ${mid})`,
+        error instanceof Error ? error.message : error
+      );
     });
 
     return {

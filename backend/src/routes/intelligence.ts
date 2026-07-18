@@ -36,7 +36,14 @@ router.post('/pre-meeting', requireAuth, async (req, res) => {
 
     const attendees = parseAttendees(req.body?.attendees).filter((a) => a.name.length > 0);
 
-    const result = await buildPreMeetingBrief(req.user!.id, { title, description, attendees });
+    // Briefs are cached; `refresh` lets the client force a rebuild on demand.
+    const refresh = req.body?.refresh === true;
+
+    const result = await buildPreMeetingBrief(
+      req.user!.id,
+      { title, description, attendees },
+      { refresh }
+    );
     res.json(result);
   } catch (error) {
     console.error('Pre-meeting brief error:', error);

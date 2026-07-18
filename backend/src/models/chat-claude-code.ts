@@ -135,7 +135,14 @@ export class ChatClaudeCode extends BaseChatModel<ChatClaudeCodeCallOptions> {
    * doesn't treat our instructions as injected content and refuse.
    */
   private buildArgs(stream: boolean, systemFile?: string): string[] {
-    const args = ['-p', '--output-format', stream ? 'stream-json' : 'json'];
+    // `--tools ""` strips EVERY built-in tool from the CLI. This is a hard
+    // safety requirement, not an optimization: the CLI is a full coding agent,
+    // and meeting transcripts are untrusted input. Without this, a transcript
+    // that *sounds* like instructions ("please fix these issues") can make the
+    // spawned agent edit this repo, run git, or execute shell commands as the
+    // backend user — which is exactly what a runaway session did on 17 Jul 2026
+    // (rogue edits + a "fix issues" commit while summarizing a meeting).
+    const args = ['-p', '--tools', '', '--output-format', stream ? 'stream-json' : 'json'];
     if (stream) args.push('--include-partial-messages', '--verbose');
     if (systemFile) {
       args.push('--system-prompt-file', systemFile, '--exclude-dynamic-system-prompt-sections');
@@ -253,6 +260,11 @@ export class ChatClaudeCode extends BaseChatModel<ChatClaudeCodeCallOptions> {
     return new Promise((resolve, reject) => {
       const child = spawn(this.cliPath, this.buildArgs(false, systemFile), {
         stdio: ['pipe', 'pipe', 'pipe'],
+        // Never run inside the repo: keeps the CLI from loading this project's
+        // CLAUDE.md / .claude settings (incl. permission allowlists) and, with
+        // --tools "", is the second wall between untrusted transcript text and
+        // this codebase.
+        cwd: tmpdir(),
       });
       let out = '';
       let err = '';
@@ -360,6 +372,8 @@ export class ChatClaudeCode extends BaseChatModel<ChatClaudeCodeCallOptions> {
     const { file: systemFile, cleanup } = await this.writeSystemFile(system);
     const child = spawn(this.cliPath, this.buildArgs(true, systemFile), {
       stdio: ['pipe', 'pipe', 'pipe'],
+      // Same containment as runOnceSpawn: no repo cwd, no project settings.
+      cwd: tmpdir(),
     });
 
     let stderr = '';
