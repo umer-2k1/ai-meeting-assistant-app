@@ -630,6 +630,20 @@ function createWidgetWindow() {
 
   // Only show once the renderer has actually painted — showing a transparent
   // window before first paint is what left a blank/empty overlay on screen.
+  // A fresh renderer ALWAYS mounts collapsed (React state starts false), so any
+  // load/reload makes "expanded" stale by definition. The window outlives the
+  // renderer — it is only hidden between recordings — so without this the main
+  // process can keep an expanded-sized window behind a compact pill, which macOS
+  // paints as a full-screen black rectangle with the pill floating in it.
+  // This fires on every load, unlike the create-time reset below it.
+  widgetWindow.webContents.on('did-finish-load', () => {
+    if (widgetExpanded) {
+      console.warn('[desktop][widget] renderer reloaded while expanded — collapsing to match');
+    }
+    widgetExpanded = false;
+    applyWidgetBounds(WIDGET_SIZES.compact, { anchorBottom: true });
+  });
+
   widgetWindow.once('ready-to-show', () => {
     widgetContentReady = true;
     if (!widgetUserPlaced && !applySavedWidgetPosition()) {
