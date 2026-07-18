@@ -14,6 +14,7 @@ import {
   type ExportMeeting,
 } from './export.js';
 import { postToSlack } from './slack.js';
+import { getSlackInstallation, getSlackPreferences } from '../connectors/slack/oauth.js';
 import type { IntegrationType } from '../lib/enums.js';
 
 async function logShare(
@@ -196,13 +197,88 @@ export async function autoEmailMeetingSummary(meetingId: string): Promise<void> 
   }
 }
 
+/**
+ * Post the summary to the user's default Slack channel when a meeting finishes
+ * processing — the Slack counterpart of `autoEmailMeetingSummary`.
+ *
+ * Silent no-op unless Slack is connected, auto-post is on, and a default channel
+ * is chosen. Idempotent per meeting so reprocessing never double-posts.
+ */
+export async function autoSlackMeetingSummary(meetingId: string): Promise<void> {
+  const meeting = await prisma.meeting.findUnique({
+    where: { id: meetingId },
+    include: {
+      attendees: true,
+      actionItems: { orderBy: { createdAt: 'desc' } },
+      transcript: { orderBy: { timestampSeconds: 'asc' } },
+      tags: true,
+      notes: true,
+    },
+  });
+  if (!meeting) return;
+
+  const userId = meeting.userId;
+
+  const install = await getSlackInstallation(userId);
+  if (!install) return;
+
+  const prefs = await getSlackPreferences(userId);
+  if (!prefs.autoPost || !prefs.defaultChannelId) return;
+
+  // Same guard as the email path: one successful post per meeting, ever.
+  const alreadyPosted = await prisma.integrationLog.findFirst({
+    where: { entityId: meetingId, integrationType: 'SLACK', status: 'success' },
+    select: { id: true },
+  });
+  if (alreadyPosted) return;
+
+  const exportMeeting: ExportMeeting = {
+    title: meeting.title,
+    startTime: meeting.startTime,
+    endTime: meeting.endTime,
+    duration: meeting.duration,
+    platform: meeting.platform,
+    platformUrl: meeting.platformUrl,
+    aiSummary: meeting.aiSummary,
+    keyDecisions: parseStringList(meeting.keyDecisions),
+    risks: parseStringList(meeting.risks),
+    highlights: parseStringList(meeting.highlights),
+    attendees: meeting.attendees.map((a) => ({ name: a.name, email: a.email, role: a.role })),
+    actionItems: meeting.actionItems.map((a) => ({
+      task: a.task,
+      assignee: a.assignee,
+      dueDate: a.dueDate,
+      priority: a.priority,
+      status: a.status,
+    })),
+    transcript: meeting.transcript.map((t) => ({
+      speaker: t.speaker,
+      text: t.text,
+      timestamp: t.timestamp,
+    })),
+    notes: meeting.notes.map((n) => ({ content: n.content })),
+    tags: meeting.tags.map((t) => ({ name: t.name })),
+  };
+
+  await shareMeetingToSlack(userId, meetingId, exportMeeting, prefs.defaultChannelId);
+  console.log(
+    `[autoSlack] Posted meeting summary for ${meetingId} to #${prefs.defaultChannelName ?? prefs.defaultChannelId}`
+  );
+}
+
 export async function shareMeetingToSlack(
+  userId: string,
   meetingId: string,
   meeting: ExportMeeting,
   channel: string
 ): Promise<void> {
+  const install = await getSlackInstallation(userId);
+  if (!install) {
+    throw new Error('Slack is not connected. Connect it in Settings to post meeting reports.');
+  }
+
   try {
-    await postToSlack(channel, buildMeetingSlackText(meeting));
+    await postToSlack(install.botToken, channel, buildMeetingSlackText(meeting));
     await logShare('SLACK', meetingId, channel, 'success');
   } catch (error) {
     await logShare(

@@ -28,14 +28,28 @@ function fail(message) {
   process.exit(1);
 }
 
-function isPortBusy(port) {
+function isHostPortBusy(port, host) {
   return new Promise((resolve) => {
     const server = net
       .createServer()
       .once('error', (error) => resolve(error.code === 'EADDRINUSE'))
       .once('listening', () => server.close(() => resolve(false)))
-      .listen(port, HOST);
+      .listen(port, host);
   });
+}
+
+/**
+ * Check BOTH loopback stacks. "localhost" alone tests only one of them, and a
+ * foreign dev server squatting just the other stack (e.g. a Next.js app on
+ * 127.0.0.1 while Vite gets [::1]) is precisely the half-hijack that made the
+ * widget load someone else's app.
+ */
+async function isPortBusy(port) {
+  const [v4, v6] = await Promise.all([
+    isHostPortBusy(port, '127.0.0.1'),
+    isHostPortBusy(port, '::1'),
+  ]);
+  return v4 || v6;
 }
 
 /** Our server is "ready" only when it actually serves the widget entry. */

@@ -345,10 +345,17 @@ export interface PreMeetingBrief {
   }>;
 }
 
-export async function fetchPreMeetingBrief(input: PreMeetingInput): Promise<PreMeetingBrief> {
+/**
+ * The server caches briefs, so revisiting a meeting is near-instant. Pass
+ * `refresh` to force a rebuild when the user explicitly asks for fresh context.
+ */
+export async function fetchPreMeetingBrief(
+  input: PreMeetingInput,
+  options: { refresh?: boolean } = {}
+): Promise<PreMeetingBrief> {
   return apiRequest<PreMeetingBrief>('/api/intelligence/pre-meeting', {
     method: 'POST',
-    body: JSON.stringify(input),
+    body: JSON.stringify({ ...input, refresh: options.refresh === true }),
   });
 }
 

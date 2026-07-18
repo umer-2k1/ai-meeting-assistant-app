@@ -46,6 +46,13 @@ export type CalendarEvent = {
   dayLabel?: string;
   startTime?: string;
   endTime?: string;
+  /**
+   * Raw timestamps. `startTime`/`endTime` are display strings ("7:55 PM"), which
+   * cannot be compared — keeping the real instants is what lets "Next up" tell a
+   * finished meeting from an upcoming one.
+   */
+  startsAt?: Date;
+  endsAt?: Date;
   attendees?: number;
   /**
    * Video-call URL (Google Meet/Zoom/Teams), kept separate from `location`.
