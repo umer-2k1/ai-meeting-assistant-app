@@ -247,3 +247,12 @@ Override styles in your component's CSS:
 ```
 
 This is a centralized, reusable editor that can be used anywhere in the application with consistent behavior and styling.
+\
+
+
+
+
+
+hey Whatsapp , so today i want to walk through somehting i have been building - An AI Meeting Copilot, So core idea is simple  it sits inside your system take notes, transcribe conversations, and generate meeting summaries in real-time.
+
+We have multiple integrations Slack, Gmail, Google Calendar (it pulls up your schedule meetings).

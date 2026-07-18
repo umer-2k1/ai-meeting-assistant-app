@@ -118,6 +118,14 @@ type DesktopApi = {
     ) => Promise<{ ok: boolean; limits?: WidgetSizeLimits }>;
     resizeMove: () => Promise<{ ok: boolean; size?: WidgetSize; limits?: WidgetSizeLimits }>;
     resizeEnd: () => Promise<{ ok: boolean }>;
+    /**
+     * Report the pill's measured size so the OS window hugs its content.
+     * Prevents an oversized transparent window around a small pill.
+     */
+    reportContentSize: (size: { width: number; height: number }) => Promise<{
+      ok: boolean;
+      size?: { width: number; height: number };
+    }>;
   };
 };
 
