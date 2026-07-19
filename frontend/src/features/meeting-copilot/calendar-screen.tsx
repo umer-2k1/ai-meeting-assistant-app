@@ -6,6 +6,7 @@ import {
   IconChevronLeft,
   IconChevronRight,
   IconClock,
+  IconFileText,
   IconLink,
   IconMapPin,
   IconMicrophone,
@@ -26,6 +27,7 @@ import { COPILOT_BTN_OUTLINE, COPILOT_HIGHLIGHT_PANEL, COPILOT_SURFACE } from '.
 import { BrandLoader } from '@/components/brand/brand-loader';
 import { SettingsSwitch } from './settings-ui';
 import type { CalendarEvent } from './types';
+import type { CalendarRecordingLaunch } from './meeting-copilot-app';
 
 function parseDayLabel(event: CalendarEvent): string {
   if (event.dayLabel) return event.dayLabel;
@@ -206,17 +208,27 @@ function CalendarStat({
 
 type PrepHandler = (ctx: NonNullable<CalendarEvent['prep']>) => void;
 
+/**
+ * Starting a recording from a calendar event carries that event with it, so the
+ * meeting can be marked as a CALENDAR meeting and inherit the invite's
+ * attendees. Without the event, a calendar-launched recording is
+ * indistinguishable from an ad-hoc one and has no attendee list.
+ */
+type StartRecordingHandler = (event: CalendarEvent) => void;
+
 function NextMeetingHero({
   event,
   autoRecord,
   onAutoRecordChange,
   onStartRecording,
+  onOpenRecording,
   onPrepare
 }: {
   event: CalendarEvent;
   autoRecord: boolean;
   onAutoRecordChange: (enabled: boolean) => void;
-  onStartRecording: () => void;
+  onStartRecording: StartRecordingHandler;
+  onOpenRecording?: (meetingId: string) => void;
   onPrepare?: PrepHandler;
 }) {
   return (
@@ -252,13 +264,25 @@ function NextMeetingHero({
       </div>
       <p className='mt-3 text-sm text-foreground/85'>{event.note}</p>
       <div className='mt-4 flex flex-wrap items-center gap-3'>
-        <Button
-          className='bg-primary hover:bg-primary/90 text-white'
-          onClick={onStartRecording}
-        >
-          <IconMicrophone className='mr-1.5 size-4' />
-          Start recording
-        </Button>
+        {event.recording ? (
+          // Already recorded — offering "Start recording" again invited a
+          // duplicate meeting for the same invite and hid the result.
+          <Button
+            className='bg-primary hover:bg-primary/90 text-white'
+            onClick={() => onOpenRecording?.(event.recording!.id)}
+          >
+            <IconFileText className='mr-1.5 size-4' />
+            {event.recording.status === 'COMPLETED' ? 'View recording' : 'View (processing…)'}
+          </Button>
+        ) : (
+          <Button
+            className='bg-primary hover:bg-primary/90 text-white'
+            onClick={() => onStartRecording(event)}
+          >
+            <IconMicrophone className='mr-1.5 size-4' />
+            Start recording
+          </Button>
+        )}
         {event.prep && onPrepare && (
           <Button
             variant='outline'
@@ -301,13 +325,15 @@ function CalendarEventCard({
   autoRecord,
   onAutoRecordChange,
   onStartRecording,
+  onOpenRecording,
   onPrepare,
   isLast
 }: {
   event: CalendarEvent;
   autoRecord: boolean;
   onAutoRecordChange: (enabled: boolean) => void;
-  onStartRecording: () => void;
+  onStartRecording: StartRecordingHandler;
+  onOpenRecording?: (meetingId: string) => void;
   onPrepare?: PrepHandler;
   isLast: boolean;
 }) {
@@ -376,14 +402,25 @@ function CalendarEventCard({
         </div>
 
         <div className='mt-3 flex flex-wrap items-center gap-2'>
-          <Button
-            size='sm'
-            className='rounded-full bg-primary/90 text-primary-foreground hover:bg-primary'
-            onClick={onStartRecording}
-          >
-            <IconMicrophone className='mr-1.5 size-3.5' />
-            Record
-          </Button>
+          {event.recording ? (
+            <Button
+              size='sm'
+              className='rounded-full bg-primary/90 text-primary-foreground hover:bg-primary'
+              onClick={() => onOpenRecording?.(event.recording!.id)}
+            >
+              <IconFileText className='mr-1.5 size-3.5' />
+              {event.recording.status === 'COMPLETED' ? 'View' : 'Processing…'}
+            </Button>
+          ) : (
+            <Button
+              size='sm'
+              className='rounded-full bg-primary/90 text-primary-foreground hover:bg-primary'
+              onClick={() => onStartRecording(event)}
+            >
+              <IconMicrophone className='mr-1.5 size-3.5' />
+              Record
+            </Button>
+          )}
           {event.prep && onPrepare && (
             <Button
               size='sm'
@@ -433,6 +470,7 @@ function DayGroup({
   autoRecordById,
   setAutoRecord,
   onStartRecording,
+  onOpenRecording,
   onPrepare,
   skipFirstIfHero
 }: {
@@ -440,7 +478,8 @@ function DayGroup({
   events: CalendarEvent[];
   autoRecordById: Record<string, boolean>;
   setAutoRecord: (id: string, enabled: boolean) => void;
-  onStartRecording: () => void;
+  onStartRecording: StartRecordingHandler;
+  onOpenRecording?: (meetingId: string) => void;
   onPrepare?: PrepHandler;
   skipFirstIfHero?: boolean;
 }) {
@@ -462,6 +501,7 @@ function DayGroup({
               setAutoRecord(event.id, enabled);
             }}
             onStartRecording={onStartRecording}
+            onOpenRecording={onOpenRecording}
             onPrepare={onPrepare}
             isLast={index === visible.length - 1}
           />
@@ -473,13 +513,38 @@ function DayGroup({
 
 export default function CalendarScreen({
   onStartRecording,
+  onOpenRecording,
   onManageIntegrations,
   onPrepare
 }: {
-  onStartRecording: () => void;
+  onStartRecording: (launch?: CalendarRecordingLaunch) => void;
+  /** Open the meeting already recorded for an event. */
+  onOpenRecording?: (meetingId: string) => void;
   onManageIntegrations?: () => void;
   onPrepare?: PrepHandler;
 }) {
+  /**
+   * Turn a calendar event into what the recorder needs. `calendarEventId` is
+   * what marks the meeting CALENDAR server-side; the attendees are what make the
+   * pre-meeting brief able to find past meetings with the same people.
+   */
+  const launchFor = (event: CalendarEvent): CalendarRecordingLaunch => ({
+    title: event.title,
+    recording: {
+      calendarEventId: event.id,
+      description: event.prep?.description,
+      platform: event.meetLink ? 'meet' : undefined,
+      platformUrl: event.meetLink,
+      attendees: (event.prep?.attendees ?? []).map((a) => ({
+        name: a.name,
+        email: a.email ?? null,
+      })),
+    },
+  });
+
+  const startRecordingForEvent: StartRecordingHandler = (event) => {
+    onStartRecording(launchFor(event));
+  };
   const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -543,6 +608,7 @@ export default function CalendarScreen({
         note: event.description || '',
         startsAt: new Date(event.startTime),
         endsAt: new Date(event.endTime),
+        recording: event.recording ?? null,
         dayLabel: getDayLabel(new Date(event.startTime)),
         attendees: event.attendees?.length,
         recurring: event.recurring,
@@ -877,7 +943,8 @@ export default function CalendarScreen({
           onAutoRecordChange={(enabled) => {
             setAutoRecord(nextEvent.id, enabled);
           }}
-          onStartRecording={onStartRecording}
+          onStartRecording={startRecordingForEvent}
+          onOpenRecording={onOpenRecording}
           onPrepare={onPrepare}
         />
       )}
@@ -896,7 +963,8 @@ export default function CalendarScreen({
             events={todayEvents}
             autoRecordById={autoRecordById}
             setAutoRecord={setAutoRecord}
-            onStartRecording={onStartRecording}
+            onStartRecording={startRecordingForEvent}
+            onOpenRecording={onOpenRecording}
             onPrepare={onPrepare}
             skipFirstIfHero={todayEvents[0]?.id === nextEvent?.id}
           />
@@ -905,7 +973,8 @@ export default function CalendarScreen({
             events={tomorrowEvents}
             autoRecordById={autoRecordById}
             setAutoRecord={setAutoRecord}
-            onStartRecording={onStartRecording}
+            onStartRecording={startRecordingForEvent}
+            onOpenRecording={onOpenRecording}
             onPrepare={onPrepare}
           />
         </div>

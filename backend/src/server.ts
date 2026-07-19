@@ -217,6 +217,9 @@ function attachLiveTranscriptionWs(server: http.Server) {
 
   wss.on('connection', (ws: WebSocket, _request: http.IncomingMessage, auth: { meetingId: string }) => {
     wsLog.ok(`client connected — streaming audio for meeting ${shortId(auth.meetingId)}`);
+    // While this socket is open the client is alive and streaming, so the idle
+    // watchdog must leave the meeting alone (see streamingMeetings).
+    streamingMeetings.set(auth.meetingId, Date.now());
     const emit = (message: TranscriptMessage) => {
       if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(message));
     };
@@ -225,6 +228,8 @@ function attachLiveTranscriptionWs(server: http.Server) {
 
     ws.on('message', (data: Buffer, isBinary: boolean) => {
       if (isBinary) {
+        // Audio still flowing = the client is alive, however quiet the room is.
+        streamingMeetings.set(auth.meetingId, Date.now());
         session.sendAudio(data);
         return;
       }
@@ -239,6 +244,7 @@ function attachLiveTranscriptionWs(server: http.Server) {
 
     const finalizeIfAbandoned = () => {
       wsLog.info(`client disconnected for meeting ${shortId(auth.meetingId)} — closing transcription session`);
+      streamingMeetings.delete(auth.meetingId);
       session.close();
       // If the socket closed without an explicit /complete (app closed, crashed,
       // navigated away), finalize the meeting so it doesn't get stuck LIVE. The
@@ -273,6 +279,30 @@ const LIVE_IDLE_TIMEOUT_MS = Number(process.env.LIVE_IDLE_TIMEOUT_MS ?? 3 * 60_0
 const LIVE_WATCHDOG_INTERVAL_MS = Number(process.env.LIVE_WATCHDOG_INTERVAL_MS ?? 60_000);
 
 /**
+ * Meetings with a live audio WebSocket attached right now.
+ *
+ * The watchdog measures idleness by *transcript* activity, but silence is not
+ * abandonment: three quiet minutes in a real meeting is normal. Finalizing one
+ * of those mid-recording ends the session behind the user's back — the client
+ * never learns to upload its audio blob (the upload is client-side, on stop), so
+ * the recording is lost and the UI is left thinking it is still recording.
+ *
+ * An open socket means the client is alive and streaming, so those meetings are
+ * exempt. Genuine abandonment still closes the socket, and `finalizeIfAbandoned`
+ * on the ws 'close'/'error' handlers already covers that case.
+ */
+const streamingMeetings = new Map<string, number>();
+
+/** True when audio arrived for this meeting recently enough to call it alive. */
+function isActivelyStreaming(meetingId: string): boolean {
+  const lastAudioAt = streamingMeetings.get(meetingId);
+  if (lastAudioAt === undefined) return false;
+  // An open-but-silent socket must not exempt a meeting forever: if audio has
+  // stopped arriving, the client is gone even though the socket never closed.
+  return Date.now() - lastAudioAt < LIVE_IDLE_TIMEOUT_MS;
+}
+
+/**
  * Periodically finalize idle LIVE meetings. Reuses the same atomic, idempotent
  * finalizer the WS-close path uses, so it races safely with `/complete`.
  */
@@ -281,6 +311,10 @@ function startLiveMeetingWatchdog() {
     void findIdleLiveMeetings(LIVE_IDLE_TIMEOUT_MS)
       .then(async (meetingIds) => {
         for (const meetingId of meetingIds) {
+          // Still streaming: quiet, not abandoned. Leave it to the user's Stop
+          // (or to the ws-close finalizer if the client really does go away).
+          if (isActivelyStreaming(meetingId)) continue;
+
           const { process: shouldProcess } = await finalizeAbandonedMeeting(meetingId);
           if (shouldProcess) {
             console.log(`[watchdog] finalizing idle LIVE meeting ${meetingId}`);

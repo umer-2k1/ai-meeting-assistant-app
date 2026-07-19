@@ -41,6 +41,7 @@ import {
   updateNoteApi
 } from '../meetings-api';
 import type { AiAnswer, Meeting } from '../types';
+import MeetingSourceBadge from '../meeting-source-badge';
 import MeetingAudioPlayer from './meeting-audio-player';
 import MeetingExportBar from './meeting-export-bar';
 import MeetingShareDialog from './meeting-share-dialog';
@@ -324,9 +325,12 @@ export default function MeetingDetailScreen({
 
         <div className='flex flex-wrap items-start justify-between gap-4'>
           <div className='min-w-0 flex-1 space-y-2'>
-            <h1 className='text-2xl font-semibold tracking-tight text-foreground'>
-              <TypewriterText key={meeting.id} text={meeting.title} />
-            </h1>
+            <div className='flex flex-wrap items-center gap-2'>
+              <h1 className='text-2xl font-semibold tracking-tight text-foreground'>
+                <TypewriterText key={meeting.id} text={meeting.title} />
+              </h1>
+              <MeetingSourceBadge source={meeting.source} />
+            </div>
             <p className='text-sm text-muted-foreground'>
               {displayDate} · {meeting.duration}
               {meeting.participantCount > 0 && ` · ${meeting.participantCount} participants`}

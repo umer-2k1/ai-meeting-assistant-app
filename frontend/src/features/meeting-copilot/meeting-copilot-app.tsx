@@ -65,6 +65,7 @@ import { useMeetingDetail, useMeetingList } from './use-meetings-data';
 import { useLiveTranscription } from './use-live-transcription';
 import { useIntegrationHealth } from './use-integration-health';
 import IntegrationReconnectBanner from './integration-reconnect-banner';
+import MeetingSourceBadge from './meeting-source-badge';
 import {
   completeMeetingApi,
   createLiveMeetingApi,
@@ -73,6 +74,7 @@ import {
   searchMeetingsApi,
   streamMeetingAnswer,
   fetchMeetingChatHistory,
+  type CalendarRecordingContext,
   updateMeetingTitleApi,
 } from './meetings-api';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -81,6 +83,12 @@ import { BrandLoader } from '@/components/brand/brand-loader';
 import type { AiAnswer, Meeting, TranscriptLine } from './types';
 
 type View = 'dashboard' | 'live' | 'detail' | 'calendar' | 'device-check' | 'settings' | 'prep';
+
+/** What the Calendar screen hands to `startRecording` for a calendar event. */
+export type CalendarRecordingLaunch = {
+  title: string;
+  recording: CalendarRecordingContext;
+};
 type RuntimeMode = 'web' | 'desktop';
 
 type IconComponent = typeof IconLayoutDashboard;
@@ -651,9 +659,12 @@ function DashboardScreen({
                 <CardHeader className='space-y-3'>
                   <div className='flex items-center justify-between gap-3'>
                     <CardTitle className='text-foreground'>{meeting.title}</CardTitle>
-                    <Badge variant='outline' className={cn('shrink-0', badge.className)}>
-                      {badge.label}
-                    </Badge>
+                    <div className='flex shrink-0 items-center gap-2'>
+                      <MeetingSourceBadge source={meeting.source} />
+                      <Badge variant='outline' className={cn('shrink-0', badge.className)}>
+                        {badge.label}
+                      </Badge>
+                    </div>
                   </div>
                   <div className='flex flex-wrap items-center gap-3 text-xs text-muted-foreground'>
                     <span className='inline-flex items-center gap-1'>
@@ -1052,6 +1063,17 @@ export default function MeetingCopilotApp() {
    * a single shared array leaked meeting A's questions into every other
    * meeting's AI Chat tab. Never flatten this back into one list.
    */
+  /**
+   * Recording state as this window last saw it, plus a guard so a stop is
+   * finalized exactly once. `stopRecording` itself calls the desktop stop, which
+   * echoes back through `onStateChange` — without the guard that would re-enter
+   * finalization and upload the audio twice.
+   */
+  const recordingActiveRef = useRef(false);
+  const stopInFlightRef = useRef(false);
+  /** Always the current `stopRecording`; the IPC effect runs once with [] deps. */
+  const stopRecordingRef = useRef<(nextView?: View) => void>(() => {});
+
   const [aiAnswersByMeeting, setAiAnswersByMeeting] = useState<Record<string, AiAnswer[]>>({});
   /** Meetings whose saved history has been fetched, so we load once per meeting. */
   const [chatHistoryLoaded, setChatHistoryLoaded] = useState<Record<string, boolean>>({});
@@ -1207,6 +1229,19 @@ export default function MeetingCopilotApp() {
       setIsRecording(state.isRecording);
       setIsRecordingPaused(state.isPaused);
       setElapsedSeconds(state.elapsedSeconds);
+
+      // A stop that originated OUTSIDE this window — the floating widget, the
+      // tray menu, the global shortcut — only flips main-process state. This
+      // window owns the recorder, the WebSocket and the audio blob, so without
+      // running the real stop path here: the MediaRecorder keeps running, the
+      // socket stays open, the audio is NEVER uploaded, and the meeting sits
+      // LIVE until the server's idle watchdog finalizes it minutes later.
+      // That is exactly how recordings stopped from the widget lost their audio.
+      if (!state.isRecording && recordingActiveRef.current && !stopInFlightRef.current) {
+        stopInFlightRef.current = true;
+        stopRecordingRef.current();
+      }
+      recordingActiveRef.current = state.isRecording;
     });
 
     return () => {
@@ -1403,7 +1438,15 @@ export default function MeetingCopilotApp() {
       });
   };
 
-  const startRecording = () => {
+  /**
+   * Start a recording. Pass `calendarContext` when it was launched from a
+   * Google Calendar event — that is what marks the meeting as a CALENDAR
+   * meeting and carries the invite's attendees onto it.
+   */
+  const startRecording = (calendarContext?: CalendarRecordingLaunch) => {
+    // Fresh session: re-arm the once-only stop guard.
+    stopInFlightRef.current = false;
+    recordingActiveRef.current = true;
     setView('live');
     setAskError(null);
     setIsRecordingPaused(false);
@@ -1458,8 +1501,11 @@ export default function MeetingCopilotApp() {
       // have a durable home. Audio streams into it; on stop it is processed.
       let liveMeetingId = '';
       try {
-        const defaultTitle = `Live session · ${new Date().toLocaleString()}`;
-        const meeting = await createLiveMeetingApi(defaultTitle);
+        // A calendar-started recording inherits the invite's title, attendees
+        // and join link; an ad-hoc one only gets a timestamped placeholder.
+        const defaultTitle =
+          calendarContext?.title ?? `Live session · ${new Date().toLocaleString()}`;
+        const meeting = await createLiveMeetingApi(defaultTitle, calendarContext?.recording);
         liveMeetingId = meeting.id;
         setSelectedMeetingId(meeting.id);
         setLiveTitle(meeting.title || defaultTitle);
@@ -1503,6 +1549,11 @@ export default function MeetingCopilotApp() {
   // Leaving the live view via the sidebar passes the clicked destination instead
   // so the user lands where they intended.
   const stopRecording = (nextView: View = 'dashboard') => {
+    // Claim the stop so the echo from the desktop stop (and any widget-initiated
+    // event already in flight) cannot start a second finalization.
+    if (stopInFlightRef.current && !recordingActiveRef.current) return;
+    stopInFlightRef.current = true;
+    recordingActiveRef.current = false;
     // Defensive: this is wired to button `onClick` in a couple of places, so a
     // stray event object (or any non-View) must never reach `setView` — doing so
     // used to blank the whole app (PAGE_META[view] undefined → render crash).
@@ -1584,6 +1635,9 @@ export default function MeetingCopilotApp() {
 
     finalize();
   };
+
+  // The IPC listener is registered once, so it must reach the CURRENT closure.
+  stopRecordingRef.current = stopRecording;
 
   // Navigating away from a live recording (e.g. clicking "Dashboard" in the
   // sidebar) ends the session — stop the recorder, finalize the meeting, and
@@ -1756,6 +1810,7 @@ export default function MeetingCopilotApp() {
             {view === 'calendar' && (
               <CalendarScreen
                 onStartRecording={startRecording}
+                onOpenRecording={openMeeting}
                 onManageIntegrations={() => setView('settings')}
                 onPrepare={(ctx) => {
                   setPrepContext(ctx);

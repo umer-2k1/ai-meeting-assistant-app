@@ -56,10 +56,6 @@ router.get('/status', requireAuth, async (req, res) => {
     const userId = req.user!.id;
     
     const integrations = await ConnectorManager.getUserIntegrations(userId);
-    console.log('[integrations:status] active integrations for user', {
-      userId,
-      providers: integrations.map((i) => i.provider),
-    });
     
     const slackInstall = await getSlackInstallation(userId);
 
@@ -79,7 +75,6 @@ router.get('/status', requireAuth, async (req, res) => {
         try {
           const connector = await ConnectorManager.getConnector(userId, 'GOOGLE_CALENDAR');
           const connectorStatus = await connector.getStatus();
-          console.log('[integrations:status] calendar connector status', connectorStatus);
           status.calendar = {
             connected: connectorStatus.connected,
             email: connectorStatus.email,
@@ -94,7 +89,6 @@ router.get('/status', requireAuth, async (req, res) => {
         try {
           const connector = await ConnectorManager.getConnector(userId, 'GMAIL');
           const connectorStatus = await connector.getStatus();
-          console.log('[integrations:status] gmail connector status', connectorStatus);
           status.gmail = {
             connected: connectorStatus.connected,
             email: connectorStatus.email,
@@ -108,7 +102,6 @@ router.get('/status', requireAuth, async (req, res) => {
       }
     }
     
-    console.log('[integrations:status] responding', status);
     res.json(status);
   } catch (error) {
     console.error('Error getting integration status:', error);
@@ -536,8 +529,35 @@ router.get('/calendar/events', requireAuth, async (req, res) => {
     
     // Fetch events
     const events = await calendarConnector.listEvents(startDate, endDate, maxResults);
-    
-    res.json({ events });
+
+    // Attach the recording already made for each event, so the UI can offer
+    // "View recording" instead of a Start button for a meeting that is done.
+    const eventIds = (events as Array<{ id?: string }>)
+      .map((e) => e.id)
+      .filter((id): id is string => Boolean(id));
+
+    const recorded = eventIds.length
+      ? await prisma.meeting.findMany({
+          where: { userId, calendarEventId: { in: eventIds } },
+          select: { id: true, calendarEventId: true, status: true, startTime: true },
+          orderBy: { startTime: 'desc' },
+        })
+      : [];
+
+    // One event can be recorded more than once; the newest wins.
+    const recordingByEvent = new Map<string, { id: string; status: string }>();
+    for (const m of recorded) {
+      if (m.calendarEventId && !recordingByEvent.has(m.calendarEventId)) {
+        recordingByEvent.set(m.calendarEventId, { id: m.id, status: m.status });
+      }
+    }
+
+    res.json({
+      events: (events as Array<{ id?: string }>).map((event) => ({
+        ...event,
+        recording: event.id ? (recordingByEvent.get(event.id) ?? null) : null,
+      })),
+    });
   } catch (error) {
     console.error('Error fetching calendar events:', error);
     

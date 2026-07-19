@@ -70,6 +70,11 @@ export interface CalendarEvent {
   meetLink?: string;
   status?: string;
   recurring?: boolean;
+  /**
+   * The meeting already recorded for this event, if any. Lets the Calendar offer
+   * "View recording" instead of inviting the user to record it a second time.
+   */
+  recording?: { id: string; status: string } | null;
 }
 
 /**
