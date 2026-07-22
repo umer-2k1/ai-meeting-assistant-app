@@ -66,6 +66,8 @@ export default function FloatingSystemWidget() {
   const [transcript, setTranscript] = useState<TranscriptLine[]>([]);
   const [interimLine, setInterimLine] = useState<TranscriptLine | null>(null);
   const transcriptScrollRef = useRef<HTMLDivElement | null>(null);
+  /** The compact pill — its measured size drives the OS window's size. */
+  const pillRef = useRef<HTMLDivElement | null>(null);
 
   // Load the most recent meeting for the highlights panel + Ask AI context.
   useEffect(() => {
@@ -141,10 +143,66 @@ export default function FloatingSystemWidget() {
     if (el) el.scrollTop = el.scrollHeight;
   }, [transcript, interimLine, expanded]);
 
+  /**
+   * Tell the main process what size the window should be.
+   *
+   * The preload bridge is not always injected by first render. Returning early
+   * on a missing API used to strand the two sides permanently — `expanded` never
+   * changes afterwards, so the effect never re-ran, leaving an expanded-sized
+   * window drawing a compact pill (a full-screen black rectangle on macOS).
+   * So: retry until the bridge exists rather than giving up.
+   */
   useEffect(() => {
+    let cancelled = false;
+    let retry: ReturnType<typeof setTimeout> | undefined;
+
+    const sync = () => {
+      if (cancelled) return;
+      const desktopApi = globalThis.window.desktop;
+      if (!desktopApi?.widget) {
+        retry = setTimeout(sync, 100);
+        return;
+      }
+      void desktopApi.widget.setExpanded(expanded);
+    };
+
+    sync();
+
+    return () => {
+      cancelled = true;
+      if (retry) clearTimeout(retry);
+    };
+  }, [expanded]);
+
+  /**
+   * Measure the pill and tell the main process, so the OS window hugs what is
+   * actually drawn.
+   *
+   * The overlay is a transparent frameless window: any part of it not covered by
+   * the pill is dead space that still blocks clicks and, on macOS, paints black
+   * and shows up in Mission Control as a separate window. Deriving the window
+   * size from the rendered element means the two can never drift apart.
+   */
+  useEffect(() => {
+    if (expanded) return;
+    const el = pillRef.current;
     const desktopApi = globalThis.window.desktop;
-    if (!desktopApi?.widget) return;
-    void desktopApi.widget.setExpanded(expanded);
+    if (!el || !desktopApi?.widget?.reportContentSize) return;
+
+    const report = () => {
+      const rect = el.getBoundingClientRect();
+      if (rect.width < 1 || rect.height < 1) return;
+      // +2px so a subpixel rounding never clips the pill's border.
+      void desktopApi.widget.reportContentSize({
+        width: Math.ceil(rect.width) + 2,
+        height: Math.ceil(rect.height) + 2
+      });
+    };
+
+    report();
+    const observer = new ResizeObserver(report);
+    observer.observe(el);
+    return () => observer.disconnect();
   }, [expanded]);
 
   const toggleExpanded = () => {
@@ -220,7 +278,11 @@ export default function FloatingSystemWidget() {
         className='widget-drag-handle flex h-full w-full items-center justify-center p-1'
         onPointerDown={onDragPointerDown}
       >
-        <div className={cn(pillShellClass, 'w-full max-w-[288px]')} onPointerDown={onDragPointerDown}>
+        <div
+          ref={pillRef}
+          className={cn(pillShellClass, 'w-full max-w-[288px]')}
+          onPointerDown={onDragPointerDown}
+        >
           <MessageToggleButton expanded={false} onClick={toggleExpanded} />
 
           <span className='min-w-[52px] text-center font-mono text-xs font-semibold tracking-wide text-foreground'>

@@ -41,6 +41,7 @@ import {
   updateNoteApi
 } from '../meetings-api';
 import type { AiAnswer, Meeting } from '../types';
+import MeetingSourceBadge from '../meeting-source-badge';
 import MeetingAudioPlayer from './meeting-audio-player';
 import MeetingExportBar from './meeting-export-bar';
 import MeetingShareDialog from './meeting-share-dialog';
@@ -50,6 +51,18 @@ type View = 'dashboard' | 'live' | 'detail' | 'calendar' | 'device-check' | 'set
 
 const DETAIL_TAB_TRIGGER =
   'cursor-pointer rounded-none border-0 border-b-2 border-transparent px-3 pb-3 after:hidden data-[state=active]:border-b-primary data-[state=active]:bg-transparent focus-visible:border-transparent focus-visible:ring-0 focus-visible:outline-none';
+
+/**
+ * The stored processingError is a developer artifact — it can embed a whole
+ * raw CLI/API JSON payload. Show people the readable first line only; the full
+ * text stays in the DB (and the title attribute) for debugging.
+ */
+function humanizeProcessingError(raw: string): string {
+  const jsonStart = raw.indexOf('{');
+  const headline = (jsonStart > 0 ? raw.slice(0, jsonStart) : raw).replace(/[:\s]+$/, '').trim();
+  const short = headline || 'The AI analysis step failed.';
+  return short.length > 220 ? `${short.slice(0, 220)}…` : short;
+}
 
 function priorityVariant(priority: 'high' | 'medium' | 'low') {
   if (priority === 'high') return 'destructive' as const;
@@ -312,9 +325,12 @@ export default function MeetingDetailScreen({
 
         <div className='flex flex-wrap items-start justify-between gap-4'>
           <div className='min-w-0 flex-1 space-y-2'>
-            <h1 className='text-2xl font-semibold tracking-tight text-foreground'>
-              <TypewriterText key={meeting.id} text={meeting.title} />
-            </h1>
+            <div className='flex flex-wrap items-center gap-2'>
+              <h1 className='text-2xl font-semibold tracking-tight text-foreground'>
+                <TypewriterText key={meeting.id} text={meeting.title} />
+              </h1>
+              <MeetingSourceBadge source={meeting.source} />
+            </div>
             <p className='text-sm text-muted-foreground'>
               {displayDate} · {meeting.duration}
               {meeting.participantCount > 0 && ` · ${meeting.participantCount} participants`}
@@ -391,14 +407,20 @@ export default function MeetingDetailScreen({
       {/* Non-fatal warning (e.g. vector indexing failed): the summary exists,
           but a degraded capability is worth telling the user about. */}
       {meeting.status === 'completed' && meeting.processingError && (
-        <div className='shrink-0 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300'>
-          {meeting.processingError}
+        <div
+          className='shrink-0 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300'
+          title={meeting.processingError}
+        >
+          {humanizeProcessingError(meeting.processingError)}
         </div>
       )}
       {meeting.status === 'failed' && (
         <div className='flex shrink-0 flex-wrap items-center justify-between gap-3 rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-700 dark:text-red-300'>
-          <span>
-            Processing failed{meeting.processingError ? `: ${meeting.processingError}` : '.'}
+          <span title={meeting.processingError ?? undefined}>
+            Processing failed
+            {meeting.processingError
+              ? `: ${humanizeProcessingError(meeting.processingError)}`
+              : '.'}
           </span>
           <Button
             type='button'

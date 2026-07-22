@@ -6,6 +6,7 @@ import {
   IconChevronLeft,
   IconChevronRight,
   IconClock,
+  IconFileText,
   IconLink,
   IconMapPin,
   IconMicrophone,
@@ -26,6 +27,7 @@ import { COPILOT_BTN_OUTLINE, COPILOT_HIGHLIGHT_PANEL, COPILOT_SURFACE } from '.
 import { BrandLoader } from '@/components/brand/brand-loader';
 import { SettingsSwitch } from './settings-ui';
 import type { CalendarEvent } from './types';
+import type { CalendarRecordingLaunch } from './meeting-copilot-app';
 
 function parseDayLabel(event: CalendarEvent): string {
   if (event.dayLabel) return event.dayLabel;
@@ -41,20 +43,53 @@ function formatTodayHeading() {
   }).format(new Date());
 }
 
+/**
+ * Open a meeting link in the real browser (desktop) or a new tab (web).
+ *
+ * http(s) only: the URL comes from third-party calendar data, and it reaches
+ * shell.openExternal on the desktop — which would happily launch a file:// or
+ * custom-scheme target. Anything else is dropped.
+ */
+function openMeetingLink(rawUrl: string) {
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    console.warn('[calendar] ignoring unparseable meeting link', rawUrl);
+    return;
+  }
+
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') {
+    console.warn('[calendar] refusing non-http(s) meeting link', url.protocol);
+    return;
+  }
+
+  const desktop = globalThis.window.desktop;
+  if (desktop?.auth?.openExternal) {
+    void desktop.auth.openExternal(url.href);
+    return;
+  }
+  globalThis.window.open(url.href, '_blank', 'noopener,noreferrer');
+}
+
 function CalendarConnectionCard({
   connected,
   email,
   connecting,
+  needsReconnect,
   syncing,
   onConnect,
+  onCancelConnect,
   onSync,
   onManage
 }: {
   connected: boolean;
   email?: string;
   connecting: boolean;
+  needsReconnect?: boolean;
   syncing?: boolean;
   onConnect: () => void;
+  onCancelConnect: () => void;
   onSync: () => void;
   onManage: () => void;
 }) {
@@ -78,6 +113,13 @@ function CalendarConnectionCard({
             >
               Connected
             </Badge>
+          ) : needsReconnect ? (
+            <Badge
+              variant='outline'
+              className='rounded-full border-destructive/40 bg-destructive/10 px-2 py-0 text-[11px] font-medium text-destructive'
+            >
+              Reconnect required
+            </Badge>
           ) : (
             <Badge
               variant='outline'
@@ -90,7 +132,9 @@ function CalendarConnectionCard({
         <p className='mt-0.5 text-sm text-muted-foreground'>
           {connected
             ? (email ?? 'Synced with your Google account')
-            : 'Connect Google Calendar in Settings to see your meetings here.'}
+            : needsReconnect
+              ? 'Google access expired or was revoked. Reconnect to restore your calendar.'
+              : 'Connect Google Calendar in Settings to see your meetings here.'}
         </p>
       </div>
       <div className='flex shrink-0 flex-wrap gap-2'>
@@ -111,14 +155,26 @@ function CalendarConnectionCard({
             </Button>
           </>
         ) : (
-          <Button
-            size='sm'
-            className='rounded-full bg-primary/90 text-primary-foreground hover:bg-primary'
-            onClick={onConnect}
-            disabled={connecting}
-          >
-            {connecting ? 'Connecting…' : 'Connect'}
-          </Button>
+          <>
+            <Button
+              size='sm'
+              className='rounded-full bg-primary/90 text-primary-foreground hover:bg-primary'
+              onClick={onConnect}
+              disabled={connecting}
+            >
+              {connecting ? 'Connecting…' : needsReconnect ? 'Reconnect' : 'Connect'}
+            </Button>
+            {connecting ? (
+              <Button
+                size='sm'
+                variant='ghost'
+                className='rounded-full text-muted-foreground'
+                onClick={onCancelConnect}
+              >
+                Cancel
+              </Button>
+            ) : null}
+          </>
         )}
       </div>
     </div>
@@ -152,17 +208,27 @@ function CalendarStat({
 
 type PrepHandler = (ctx: NonNullable<CalendarEvent['prep']>) => void;
 
+/**
+ * Starting a recording from a calendar event carries that event with it, so the
+ * meeting can be marked as a CALENDAR meeting and inherit the invite's
+ * attendees. Without the event, a calendar-launched recording is
+ * indistinguishable from an ad-hoc one and has no attendee list.
+ */
+type StartRecordingHandler = (event: CalendarEvent) => void;
+
 function NextMeetingHero({
   event,
   autoRecord,
   onAutoRecordChange,
   onStartRecording,
+  onOpenRecording,
   onPrepare
 }: {
   event: CalendarEvent;
   autoRecord: boolean;
   onAutoRecordChange: (enabled: boolean) => void;
-  onStartRecording: () => void;
+  onStartRecording: StartRecordingHandler;
+  onOpenRecording?: (meetingId: string) => void;
   onPrepare?: PrepHandler;
 }) {
   return (
@@ -198,13 +264,25 @@ function NextMeetingHero({
       </div>
       <p className='mt-3 text-sm text-foreground/85'>{event.note}</p>
       <div className='mt-4 flex flex-wrap items-center gap-3'>
-        <Button
-          className='bg-primary hover:bg-primary/90 text-white'
-          onClick={onStartRecording}
-        >
-          <IconMicrophone className='mr-1.5 size-4' />
-          Start recording
-        </Button>
+        {event.recording ? (
+          // Already recorded — offering "Start recording" again invited a
+          // duplicate meeting for the same invite and hid the result.
+          <Button
+            className='bg-primary hover:bg-primary/90 text-white'
+            onClick={() => onOpenRecording?.(event.recording!.id)}
+          >
+            <IconFileText className='mr-1.5 size-4' />
+            {event.recording.status === 'COMPLETED' ? 'View recording' : 'View (processing…)'}
+          </Button>
+        ) : (
+          <Button
+            className='bg-primary hover:bg-primary/90 text-white'
+            onClick={() => onStartRecording(event)}
+          >
+            <IconMicrophone className='mr-1.5 size-4' />
+            Start recording
+          </Button>
+        )}
         {event.prep && onPrepare && (
           <Button
             variant='outline'
@@ -216,10 +294,17 @@ function NextMeetingHero({
             Prepare
           </Button>
         )}
-        <Button variant='outline' className={cn('rounded-full', COPILOT_BTN_OUTLINE)} size='sm'>
-          <IconLink className='mr-1.5 size-3.5' />
-          Join meeting
-        </Button>
+        {event.meetLink && (
+          <Button
+            variant='outline'
+            className={cn('rounded-full', COPILOT_BTN_OUTLINE)}
+            size='sm'
+            onClick={() => openMeetingLink(event.meetLink!)}
+          >
+            <IconLink className='mr-1.5 size-3.5' />
+            Join meeting
+          </Button>
+        )}
         {event.recurring && (
           <label className='inline-flex items-center gap-2 text-sm text-muted-foreground'>
             <SettingsSwitch
@@ -240,13 +325,15 @@ function CalendarEventCard({
   autoRecord,
   onAutoRecordChange,
   onStartRecording,
+  onOpenRecording,
   onPrepare,
   isLast
 }: {
   event: CalendarEvent;
   autoRecord: boolean;
   onAutoRecordChange: (enabled: boolean) => void;
-  onStartRecording: () => void;
+  onStartRecording: StartRecordingHandler;
+  onOpenRecording?: (meetingId: string) => void;
   onPrepare?: PrepHandler;
   isLast: boolean;
 }) {
@@ -315,14 +402,25 @@ function CalendarEventCard({
         </div>
 
         <div className='mt-3 flex flex-wrap items-center gap-2'>
-          <Button
-            size='sm'
-            className='rounded-full bg-primary/90 text-primary-foreground hover:bg-primary'
-            onClick={onStartRecording}
-          >
-            <IconMicrophone className='mr-1.5 size-3.5' />
-            Record
-          </Button>
+          {event.recording ? (
+            <Button
+              size='sm'
+              className='rounded-full bg-primary/90 text-primary-foreground hover:bg-primary'
+              onClick={() => onOpenRecording?.(event.recording!.id)}
+            >
+              <IconFileText className='mr-1.5 size-3.5' />
+              {event.recording.status === 'COMPLETED' ? 'View' : 'Processing…'}
+            </Button>
+          ) : (
+            <Button
+              size='sm'
+              className='rounded-full bg-primary/90 text-primary-foreground hover:bg-primary'
+              onClick={() => onStartRecording(event)}
+            >
+              <IconMicrophone className='mr-1.5 size-3.5' />
+              Record
+            </Button>
+          )}
           {event.prep && onPrepare && (
             <Button
               size='sm'
@@ -349,8 +447,13 @@ function CalendarEventCard({
               Remind me
             </Button>
           )}
-          {isVideo && (
-            <Button size='sm' variant='ghost' className='rounded-full text-muted-foreground'>
+          {isVideo && event.meetLink && (
+            <Button
+              size='sm'
+              variant='ghost'
+              className='rounded-full text-muted-foreground'
+              onClick={() => openMeetingLink(event.meetLink!)}
+            >
               <IconLink className='mr-1.5 size-3.5' />
               Join
             </Button>
@@ -367,6 +470,7 @@ function DayGroup({
   autoRecordById,
   setAutoRecord,
   onStartRecording,
+  onOpenRecording,
   onPrepare,
   skipFirstIfHero
 }: {
@@ -374,7 +478,8 @@ function DayGroup({
   events: CalendarEvent[];
   autoRecordById: Record<string, boolean>;
   setAutoRecord: (id: string, enabled: boolean) => void;
-  onStartRecording: () => void;
+  onStartRecording: StartRecordingHandler;
+  onOpenRecording?: (meetingId: string) => void;
   onPrepare?: PrepHandler;
   skipFirstIfHero?: boolean;
 }) {
@@ -396,6 +501,7 @@ function DayGroup({
               setAutoRecord(event.id, enabled);
             }}
             onStartRecording={onStartRecording}
+            onOpenRecording={onOpenRecording}
             onPrepare={onPrepare}
             isLast={index === visible.length - 1}
           />
@@ -407,19 +513,50 @@ function DayGroup({
 
 export default function CalendarScreen({
   onStartRecording,
+  onOpenRecording,
   onManageIntegrations,
   onPrepare
 }: {
-  onStartRecording: () => void;
+  onStartRecording: (launch?: CalendarRecordingLaunch) => void;
+  /** Open the meeting already recorded for an event. */
+  onOpenRecording?: (meetingId: string) => void;
   onManageIntegrations?: () => void;
   onPrepare?: PrepHandler;
 }) {
+  /**
+   * Turn a calendar event into what the recorder needs. `calendarEventId` is
+   * what marks the meeting CALENDAR server-side; the attendees are what make the
+   * pre-meeting brief able to find past meetings with the same people.
+   */
+  const launchFor = (event: CalendarEvent): CalendarRecordingLaunch => ({
+    title: event.title,
+    recording: {
+      calendarEventId: event.id,
+      description: event.prep?.description,
+      platform: event.meetLink ? 'meet' : undefined,
+      platformUrl: event.meetLink,
+      attendees: (event.prep?.attendees ?? []).map((a) => ({
+        name: a.name,
+        email: a.email ?? null,
+      })),
+    },
+  });
+
+  const startRecordingForEvent: StartRecordingHandler = (event) => {
+    onStartRecording(launchFor(event));
+  };
   const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [calendarConnected, setCalendarConnected] = useState(false);
   const [calendarEmail, setCalendarEmail] = useState<string | undefined>(undefined);
+  /** Grant revoked/expired — reconnecting is the only fix, so say so. */
+  const [calendarNeedsReconnect, setCalendarNeedsReconnect] = useState(false);
   const [connecting, setConnecting] = useState(false);
+  /** Lets the Cancel button (and unmount) abort an in-flight OAuth attempt. */
+  const connectAbortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => () => connectAbortRef.current?.abort(), []);
   // `dateRange` is the *applied* window that actually drives fetching. `draftRange` is the
   // in-progress calendar selection — editing it (clicking start, then end) does NOT refetch,
   // so there's no jerk mid-selection. The user commits with the Apply button.
@@ -467,7 +604,11 @@ export default function CalendarScreen({
         startTime: new Date(event.startTime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }),
         endTime: new Date(event.endTime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }),
         location: event.meetLink || event.location || 'No location',
+        meetLink: event.meetLink,
         note: event.description || '',
+        startsAt: new Date(event.startTime),
+        endsAt: new Date(event.endTime),
+        recording: event.recording ?? null,
         dayLabel: getDayLabel(new Date(event.startTime)),
         attendees: event.attendees?.length,
         recurring: event.recurring,
@@ -503,6 +644,7 @@ export default function CalendarScreen({
       const status = await getIntegrationStatus();
       setCalendarConnected(status.calendar.connected);
       setCalendarEmail(status.calendar.email);
+      setCalendarNeedsReconnect(Boolean(status.calendar.needsReconnect));
     } catch (err) {
       console.error('Failed to fetch calendar connection status:', err);
     }
@@ -521,13 +663,22 @@ export default function CalendarScreen({
     return () => clearInterval(interval);
   }, [fetchCalendarEvents, refetchConnectionStatus]);
 
+  const handleCancelConnect = useCallback(() => {
+    connectAbortRef.current?.abort();
+  }, []);
+
   const handleConnectCalendar = useCallback(async () => {
+    connectAbortRef.current?.abort();
+    const controller = new AbortController();
+    connectAbortRef.current = controller;
+
     try {
       setConnecting(true);
       const { connectGoogleIntegration } = await import('@/lib/integrations-api');
       // Handles both web (popup) and desktop (system browser + deep link)
-      // flows, resolving once the OAuth attempt has finished.
-      await connectGoogleIntegration('GOOGLE_CALENDAR');
+      // flows, resolving once the OAuth attempt has finished, is cancelled, or
+      // is detected as abandoned.
+      await connectGoogleIntegration('GOOGLE_CALENDAR', { signal: controller.signal });
 
       void refetchConnectionStatus();
       void fetchCalendarEvents();
@@ -539,6 +690,7 @@ export default function CalendarScreen({
         alert('Failed to connect Google Calendar. Please try again.');
       }
     } finally {
+      if (connectAbortRef.current === controller) connectAbortRef.current = null;
       setConnecting(false);
     }
   }, [fetchCalendarEvents, refetchConnectionStatus]);
@@ -584,8 +736,24 @@ export default function CalendarScreen({
 
   const todayEvents = grouped.get('Today') ?? [];
   const tomorrowEvents = grouped.get('Tomorrow') ?? [];
-  const nextEvent =
-    calendarEvents.find((e) => e.startsSoon) ?? todayEvents[0] ?? calendarEvents[0];
+  /**
+   * "Next up" must never be a meeting that already ended. The loaded range can
+   * start in the past (the picker defaults to a window, not to today), so
+   * falling back to `calendarEvents[0]` used to surface a finished meeting and
+   * offer to record it. Pick the earliest event still running or yet to start.
+   */
+  const nextEvent = useMemo(() => {
+    const now = Date.now();
+    const upcoming = calendarEvents
+      .filter((e) => {
+        // An event still counts while it is in progress, so prefer its end.
+        const boundary = e.endsAt ?? e.startsAt;
+        return boundary ? boundary.getTime() > now : false;
+      })
+      .sort((a, b) => (a.startsAt?.getTime() ?? 0) - (b.startsAt?.getTime() ?? 0));
+
+    return upcoming.find((e) => e.startsSoon) ?? upcoming[0];
+  }, [calendarEvents]);
   const autoRecordCount = Object.values(autoRecordById).filter(Boolean).length;
 
   const setAutoRecord = (id: string, enabled: boolean) => {
@@ -599,7 +767,9 @@ export default function CalendarScreen({
           connected={calendarConnected}
           email={calendarEmail}
           connecting={connecting}
+          needsReconnect={calendarNeedsReconnect}
           onConnect={handleConnectCalendar}
+          onCancelConnect={handleCancelConnect}
           syncing={loading}
           onSync={() => void fetchCalendarEvents()}
           onManage={() => onManageIntegrations?.()}
@@ -618,7 +788,9 @@ export default function CalendarScreen({
           connected={calendarConnected}
           email={calendarEmail}
           connecting={connecting}
+          needsReconnect={calendarNeedsReconnect}
           onConnect={handleConnectCalendar}
+          onCancelConnect={handleCancelConnect}
           syncing={loading}
           onSync={() => void fetchCalendarEvents()}
           onManage={() => onManageIntegrations?.()}
@@ -640,8 +812,10 @@ export default function CalendarScreen({
         connected={calendarConnected}
         email={calendarEmail}
         connecting={connecting}
+        needsReconnect={calendarNeedsReconnect}
         syncing={loading}
         onConnect={handleConnectCalendar}
+        onCancelConnect={handleCancelConnect}
         onSync={() => void fetchCalendarEvents()}
         onManage={() => onManageIntegrations?.()}
       />
@@ -769,7 +943,8 @@ export default function CalendarScreen({
           onAutoRecordChange={(enabled) => {
             setAutoRecord(nextEvent.id, enabled);
           }}
-          onStartRecording={onStartRecording}
+          onStartRecording={startRecordingForEvent}
+          onOpenRecording={onOpenRecording}
           onPrepare={onPrepare}
         />
       )}
@@ -788,7 +963,8 @@ export default function CalendarScreen({
             events={todayEvents}
             autoRecordById={autoRecordById}
             setAutoRecord={setAutoRecord}
-            onStartRecording={onStartRecording}
+            onStartRecording={startRecordingForEvent}
+            onOpenRecording={onOpenRecording}
             onPrepare={onPrepare}
             skipFirstIfHero={todayEvents[0]?.id === nextEvent?.id}
           />
@@ -797,7 +973,8 @@ export default function CalendarScreen({
             events={tomorrowEvents}
             autoRecordById={autoRecordById}
             setAutoRecord={setAutoRecord}
-            onStartRecording={onStartRecording}
+            onStartRecording={startRecordingForEvent}
+            onOpenRecording={onOpenRecording}
             onPrepare={onPrepare}
           />
         </div>

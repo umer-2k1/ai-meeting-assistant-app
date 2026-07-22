@@ -62,6 +62,9 @@ export interface ApiMeeting {
   audioDuration?: number | null;
   platform?: string | null;
   platformUrl?: string | null;
+  /** DIRECT = ad-hoc recording; CALENDAR = started from a Google Calendar event. */
+  source?: import('./types').MeetingSource | null;
+  calendarEventId?: string | null;
   aiSummary?: string | null;
   summaryHtml?: string | null;
   keyDecisions?: string[];
@@ -177,6 +180,9 @@ export function mapApiMeeting(api: ApiMeeting): Meeting {
     attendees: api.attendees,
     platform: api.platform,
     platformUrl: api.platformUrl,
+    // Older meetings predate the column and come back without it — treat those
+    // as DIRECT, which is what they were.
+    source: api.source ?? 'DIRECT',
     summarySnippet: summary ? summary.slice(0, 180) : 'No summary generated yet.',
     summaryHtml: api.summaryHtml ?? undefined,
     tags: (api.tags ?? []).map((t) => t.name),
@@ -243,10 +249,29 @@ export async function updateNoteApi(
   return { id: res.note.id, content: res.note.content, contentHtml: res.note.contentHtml };
 }
 
-export async function createLiveMeetingApi(title: string): Promise<ApiMeeting> {
+/**
+ * Context carried over when a recording is started from a Google Calendar event.
+ *
+ * Supplying `calendarEventId` is what marks the meeting as a CALENDAR meeting
+ * server-side. The attendees matter beyond the badge: they are the join key the
+ * pre-meeting brief uses to find past meetings with the same people, so a
+ * recording started without them has no history to draw on.
+ */
+export interface CalendarRecordingContext {
+  calendarEventId: string;
+  description?: string;
+  platform?: string;
+  platformUrl?: string;
+  attendees?: Array<{ name: string; email?: string | null; role?: string | null }>;
+}
+
+export async function createLiveMeetingApi(
+  title: string,
+  calendar?: CalendarRecordingContext
+): Promise<ApiMeeting> {
   const res = await apiRequest<{ meeting: ApiMeeting }>('/api/live/meetings', {
     method: 'POST',
-    body: JSON.stringify({ title }),
+    body: JSON.stringify({ title, ...(calendar ?? {}) }),
   });
   return res.meeting;
 }
@@ -345,10 +370,55 @@ export interface PreMeetingBrief {
   }>;
 }
 
-export async function fetchPreMeetingBrief(input: PreMeetingInput): Promise<PreMeetingBrief> {
+/**
+ * The server caches briefs, so revisiting a meeting is near-instant. Pass
+ * `refresh` to force a rebuild when the user explicitly asks for fresh context.
+ */
+export async function fetchPreMeetingBrief(
+  input: PreMeetingInput,
+  options: { refresh?: boolean } = {}
+): Promise<PreMeetingBrief> {
   return apiRequest<PreMeetingBrief>('/api/intelligence/pre-meeting', {
     method: 'POST',
-    body: JSON.stringify(input),
+    body: JSON.stringify({ ...input, refresh: options.refresh === true }),
+  });
+}
+
+// ----- Guest research (internet enrichment) -----
+
+export interface GuestProfile {
+  email: string;
+  name: string | null;
+  domain: string | null;
+  isFreeEmail: boolean;
+  fullName: string | null;
+  title: string | null;
+  company: string | null;
+  companyDomain: string | null;
+  website: string | null;
+  linkedinUrl: string | null;
+  avatarUrl: string | null;
+  bio: string | null;
+  location: string | null;
+  socialProfiles: Record<string, string>;
+  confidence: 'high' | 'medium' | 'low';
+  matchStatus: 'verified' | 'possible_matches' | 'unknown';
+  sources: Array<{ type: string; url?: string }>;
+  enrichedAt: string | null;
+}
+
+export interface ResearchGuestsResponse {
+  enabled: boolean;
+  providerConfigured: boolean;
+  guests: GuestProfile[];
+}
+
+export async function fetchGuestResearch(
+  attendees: Array<{ name: string; email?: string | null }>
+): Promise<ResearchGuestsResponse> {
+  return apiRequest<ResearchGuestsResponse>('/api/intelligence/research-guests', {
+    method: 'POST',
+    body: JSON.stringify({ attendees }),
   });
 }
 
@@ -409,6 +479,20 @@ export async function getSlackChannelsApi(): Promise<{ id: string; name: string 
     '/api/integrations/slack/channels'
   );
   return res.channels;
+}
+
+/**
+ * This meeting's saved AI chat history, oldest first.
+ *
+ * Each meeting owns its own conversation — never share one list across meetings.
+ */
+export async function fetchMeetingChatHistory(
+  meetingId: string
+): Promise<Array<{ id: string; question: string; answer: string; timestamp: string }>> {
+  const res = await apiRequest<{
+    messages: Array<{ id: string; question: string; answer: string; timestamp: string }>;
+  }>(`/api/live/meetings/${meetingId}/chat`);
+  return res.messages;
 }
 
 /**

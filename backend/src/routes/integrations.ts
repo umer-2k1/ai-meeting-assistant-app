@@ -8,7 +8,20 @@ import express from 'express';
 import { requireAuth } from '../middleware/auth.js';
 import { googleOAuthService, getIntegrationsOAuthConfigIssues, GOOGLE_INTEGRATIONS_REDIRECT_URI } from '../connectors/google/oauth.js';
 import { ConnectorManager } from '../connectors/connector-manager.js';
-import { isSlackConfigured, listSlackChannels } from '../services/slack.js';
+import { listSlackChannels, isDeadSlackInstall } from '../services/slack.js';
+import {
+  generateSlackInstallUrl,
+  decodeSlackState,
+  exchangeSlackCode,
+  saveSlackInstallation,
+  getSlackInstallation,
+  getSlackOAuthConfigIssues,
+  isSlackOAuthConfigured,
+  disconnectSlack,
+  getSlackPreferences,
+  saveSlackPreferences,
+  SLACK_REDIRECT_URI,
+} from '../connectors/slack/oauth.js';
 import prisma from '../lib/prisma.js';
 import {
   buildIntegrationConnectedPage,
@@ -43,28 +56,31 @@ router.get('/status', requireAuth, async (req, res) => {
     const userId = req.user!.id;
     
     const integrations = await ConnectorManager.getUserIntegrations(userId);
-    console.log('[integrations:status] active integrations for user', {
-      userId,
-      providers: integrations.map((i) => i.provider),
-    });
     
+    const slackInstall = await getSlackInstallation(userId);
+
     const status: Record<string, any> = {
       calendar: { connected: false },
       gmail: { connected: false },
-      // Slack is an app-level bot-token integration (not per-user OAuth).
-      slack: { connected: isSlackConfigured() },
+      slack: {
+        connected: Boolean(slackInstall),
+        // Surfaced so the card can name the workspace instead of just "Connected".
+        workspace: slackInstall?.teamName ?? undefined,
+        configured: isSlackOAuthConfigured(),
+      },
     };
-    
+
     for (const integration of integrations) {
       if (integration.provider === 'GOOGLE_CALENDAR') {
         try {
           const connector = await ConnectorManager.getConnector(userId, 'GOOGLE_CALENDAR');
           const connectorStatus = await connector.getStatus();
-          console.log('[integrations:status] calendar connector status', connectorStatus);
           status.calendar = {
             connected: connectorStatus.connected,
             email: connectorStatus.email,
             lastSync: integration.lastSyncAt,
+            needsReconnect: connectorStatus.needsReconnect ?? false,
+            error: connectorStatus.error,
           };
         } catch (error) {
           console.error('[integrations:status] Error getting calendar status:', error);
@@ -73,11 +89,12 @@ router.get('/status', requireAuth, async (req, res) => {
         try {
           const connector = await ConnectorManager.getConnector(userId, 'GMAIL');
           const connectorStatus = await connector.getStatus();
-          console.log('[integrations:status] gmail connector status', connectorStatus);
           status.gmail = {
             connected: connectorStatus.connected,
             email: connectorStatus.email,
             lastSync: integration.lastSyncAt,
+            needsReconnect: connectorStatus.needsReconnect ?? false,
+            error: connectorStatus.error,
           };
         } catch (error) {
           console.error('[integrations:status] Error getting gmail status:', error);
@@ -85,7 +102,6 @@ router.get('/status', requireAuth, async (req, res) => {
       }
     }
     
-    console.log('[integrations:status] responding', status);
     res.json(status);
   } catch (error) {
     console.error('Error getting integration status:', error);
@@ -97,16 +113,158 @@ router.get('/status', requireAuth, async (req, res) => {
  * GET /api/integrations/slack/channels
  * List Slack channels the bot can post to (for the share picker).
  */
-router.get('/slack/channels', requireAuth, async (_req, res) => {
+router.get('/slack/channels', requireAuth, async (req, res) => {
   try {
-    if (!isSlackConfigured()) {
-      return res.status(400).json({ error: 'Slack is not configured on this server.' });
+    const install = await getSlackInstallation(req.user!.id);
+    if (!install) {
+      return res.status(400).json({ error: 'Slack is not connected. Connect it in Settings.' });
     }
-    const channels = await listSlackChannels();
+    const channels = await listSlackChannels(install.botToken);
     res.json({ channels });
   } catch (error) {
     console.error('[integrations:slack] channels error:', error);
+    if (isDeadSlackInstall(error)) {
+      return res
+        .status(400)
+        .json({ error: 'Slack access was revoked. Reconnect it in Settings.', needsReconnect: true });
+    }
     res.status(500).json({ error: 'Failed to list Slack channels' });
+  }
+});
+
+/**
+ * POST /api/integrations/slack/connect
+ * Start the Slack install ("Add to Slack") flow. Mirrors the Google connect
+ * route: returns a URL the client opens in a popup (web) or system browser
+ * (desktop).
+ */
+router.post('/slack/connect', requireAuth, async (req, res) => {
+  try {
+    if (!isSlackOAuthConfigured()) {
+      return res.status(400).json({
+        error: 'Slack app is not configured on this server.',
+        configIssues: getSlackOAuthConfigIssues(),
+      });
+    }
+
+    const isDesktop = req.body?.source === 'desktop';
+    const authUrl = generateSlackInstallUrl(req.user!.id, { isDesktop });
+
+    console.log('[slack:connect] generated install url', { userId: req.user!.id, isDesktop });
+    res.json({ authUrl, redirectUri: SLACK_REDIRECT_URI });
+  } catch (error) {
+    console.error('[slack:connect] error:', error);
+    res.status(500).json({ error: 'Failed to start Slack install' });
+  }
+});
+
+/**
+ * GET /api/integrations/slack/callback
+ * Slack redirects here after the user approves the install.
+ */
+router.get('/slack/callback', async (req, res) => {
+  const rawState = typeof req.query.state === 'string' ? req.query.state : '';
+  const state = rawState ? decodeSlackState(rawState) : null;
+  const isDesktop = Boolean(state?.isDesktop);
+
+  try {
+    if (req.query.error) {
+      return sendIntegrationCallbackResult(res, isDesktop, {
+        success: false,
+        reason: String(req.query.error),
+      });
+    }
+
+    // A missing or unverifiable state means we cannot trust who this install
+    // belongs to — refuse rather than attach a workspace to the wrong account.
+    if (!state) {
+      return sendIntegrationCallbackResult(res, isDesktop, {
+        success: false,
+        reason: 'invalid_state',
+      });
+    }
+
+    const code = typeof req.query.code === 'string' ? req.query.code : '';
+    if (!code) {
+      return sendIntegrationCallbackResult(res, isDesktop, {
+        success: false,
+        reason: 'missing_code',
+      });
+    }
+
+    const install = await exchangeSlackCode(code);
+    await saveSlackInstallation(state.userId, install);
+
+    console.log('[slack:callback] installed', {
+      userId: state.userId,
+      teamId: install.teamId,
+      teamName: install.teamName,
+    });
+
+    sendIntegrationCallbackResult(res, isDesktop, { success: true, providers: ['SLACK'] });
+  } catch (error) {
+    console.error('[slack:callback] error:', error);
+    sendIntegrationCallbackResult(res, isDesktop, {
+      success: false,
+      reason: error instanceof Error ? error.message : 'unknown_error',
+    });
+  }
+});
+
+/**
+ * GET /api/integrations/slack/preferences
+ * Default channel + auto-post setting for the connected workspace.
+ */
+router.get('/slack/preferences', requireAuth, async (req, res) => {
+  try {
+    res.json(await getSlackPreferences(req.user!.id));
+  } catch (error) {
+    console.error('[slack:preferences] read error:', error);
+    res.status(500).json({ error: 'Failed to load Slack preferences' });
+  }
+});
+
+/**
+ * PUT /api/integrations/slack/preferences
+ * Body: { defaultChannelId?, defaultChannelName?, autoPost? }
+ */
+router.put('/slack/preferences', requireAuth, async (req, res) => {
+  try {
+    const body = req.body ?? {};
+    const update: Record<string, unknown> = {};
+
+    if ('defaultChannelId' in body) {
+      const id = body.defaultChannelId;
+      update.defaultChannelId = typeof id === 'string' && id.trim() ? id.trim() : null;
+    }
+    if ('defaultChannelName' in body) {
+      const name = body.defaultChannelName;
+      update.defaultChannelName = typeof name === 'string' && name.trim() ? name.trim() : null;
+    }
+    if ('autoPost' in body) {
+      update.autoPost = body.autoPost === true;
+    }
+
+    const saved = await saveSlackPreferences(req.user!.id, update);
+    console.log('[slack:preferences] saved', { userId: req.user!.id, ...saved });
+    res.json(saved);
+  } catch (error) {
+    console.error('[slack:preferences] save error:', error);
+    const message = error instanceof Error ? error.message : 'Failed to save Slack preferences';
+    res.status(message.includes('not connected') ? 400 : 500).json({ error: message });
+  }
+});
+
+/**
+ * DELETE /api/integrations/slack/disconnect
+ */
+router.delete('/slack/disconnect', requireAuth, async (req, res) => {
+  try {
+    await disconnectSlack(req.user!.id);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('[slack:disconnect] error:', error);
+    res.status(500).json({ error: 'Failed to disconnect Slack' });
   }
 });
 
@@ -294,6 +452,13 @@ router.get('/google/callback', async (req, res) => {
       });
     }
 
+    // saveIntegration writes tokens straight to the DB, bypassing
+    // ConnectorManager.updateTokens (which is what normally evicts the cache).
+    // Without this, a reconnect keeps serving the connector built from the old
+    // tokens/scopes until the process restarts — so the fresh grant appears to
+    // have no effect.
+    ConnectorManager.clearCache(userId);
+
     if (authorizedProviders.length === 0) {
       console.warn('[integrations:callback] no providers authorized from granted scopes; nothing saved');
     }
@@ -364,8 +529,35 @@ router.get('/calendar/events', requireAuth, async (req, res) => {
     
     // Fetch events
     const events = await calendarConnector.listEvents(startDate, endDate, maxResults);
-    
-    res.json({ events });
+
+    // Attach the recording already made for each event, so the UI can offer
+    // "View recording" instead of a Start button for a meeting that is done.
+    const eventIds = (events as Array<{ id?: string }>)
+      .map((e) => e.id)
+      .filter((id): id is string => Boolean(id));
+
+    const recorded = eventIds.length
+      ? await prisma.meeting.findMany({
+          where: { userId, calendarEventId: { in: eventIds } },
+          select: { id: true, calendarEventId: true, status: true, startTime: true },
+          orderBy: { startTime: 'desc' },
+        })
+      : [];
+
+    // One event can be recorded more than once; the newest wins.
+    const recordingByEvent = new Map<string, { id: string; status: string }>();
+    for (const m of recorded) {
+      if (m.calendarEventId && !recordingByEvent.has(m.calendarEventId)) {
+        recordingByEvent.set(m.calendarEventId, { id: m.id, status: m.status });
+      }
+    }
+
+    res.json({
+      events: (events as Array<{ id?: string }>).map((event) => ({
+        ...event,
+        recording: event.id ? (recordingByEvent.get(event.id) ?? null) : null,
+      })),
+    });
   } catch (error) {
     console.error('Error fetching calendar events:', error);
     

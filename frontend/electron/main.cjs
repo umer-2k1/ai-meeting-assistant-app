@@ -34,6 +34,8 @@ const WIDGET_SIZES = {
 };
 
 const WIDGET_EXPANDED_MIN = { width: 380, height: 520 };
+/** Ceiling for the expanded overlay — see getWidgetExpandedLimits. */
+const WIDGET_EXPANDED_MAX = { width: 720, height: 900 };
 
 /** @type {BrowserWindow | null} */
 let mainWindow = null;
@@ -78,8 +80,11 @@ function loadWidgetPrefs() {
     }
     if (prefs && prefs.expandedSize) {
       const { width, height } = prefs.expandedSize;
-      if (typeof width === 'number' && typeof height === 'number') {
-        widgetExpandedSize = { width: Math.round(width), height: Math.round(height) };
+      // Clamp on read, not just on use: a NaN/Infinity/negative value, or a size
+      // saved on a much larger display, would otherwise be trusted verbatim and
+      // produce a window far bigger than the content it holds.
+      if (Number.isFinite(width) && Number.isFinite(height)) {
+        widgetExpandedSize = clampExpandedSize(width, height);
       }
     }
   } catch {
@@ -297,6 +302,18 @@ function syncWidgetVisibility() {
     return;
   }
 
+  // The overlay exists for when the app is OUT OF SIGHT — minimised, hidden, or
+  // behind another app. While the user is looking at the main window they
+  // already have the full Live Session view, so putting a second floating window
+  // on top of it just reads as "the app opened another window".
+  if (isMainWindowInView()) {
+    if (widgetWindow && !widgetWindow.isDestroyed() && widgetWindow.isVisible()) {
+      if (widgetExpanded) resizeWidgetWindow(false);
+      widgetWindow.hide();
+    }
+    return;
+  }
+
   ensureWidgetWindow();
   if (!widgetWindow || widgetWindow.isDestroyed()) return;
 
@@ -309,6 +326,19 @@ function syncWidgetVisibility() {
   if (widgetContentReady && !widgetWindow.isVisible()) {
     widgetWindow.showInactive();
   }
+}
+
+/**
+ * Is the main app window actually in front of the user right now?
+ *
+ * Drives whether the floating overlay is needed at all. Destroyed/minimised/
+ * hidden all count as out of view; so does the window being open but not
+ * focused, because the user is then working in a different app.
+ */
+function isMainWindowInView() {
+  if (!mainWindow || mainWindow.isDestroyed()) return false;
+  if (!mainWindow.isVisible() || mainWindow.isMinimized()) return false;
+  return mainWindow.isFocused();
 }
 
 function startRecordingTimers() {
@@ -342,6 +372,9 @@ async function startRecording() {
     recordingState.isPaused = false;
     startRecordingTimers();
     emitRecordingStateAndSyncWidget();
+    // The reported "a black window appears when I start recording" happens right
+    // here — capture what both windows are actually doing at that instant.
+    void reportMainWindowState('recording-started');
 
     return { ...recordingState };
   } catch (error) {
@@ -469,9 +502,58 @@ function createMainWindow() {
     mainWindow.show();
   });
 
-  mainWindow.on('closed', () => {
-    mainWindow = null;
-  });
+  // The overlay is only wanted while the app is out of view, so every change to
+  // the main window's visibility has to re-evaluate it. Without this you'd have
+  // to stop and restart recording for the overlay to appear or disappear.
+  for (const event of ['focus', 'blur', 'show', 'hide', 'minimize', 'restore', 'closed']) {
+    mainWindow.on(event, () => {
+      if (event === 'closed') mainWindow = null;
+      syncWidgetVisibility();
+      void reportMainWindowState(event);
+    });
+  }
+}
+
+/**
+ * Report what the MAIN window is doing whenever its visibility changes.
+ *
+ * "A new black window appears when recording starts" has two very different
+ * explanations that look identical in a screenshot: the main window rendering
+ * blank (its backgroundColor #050A1A reads as black), or the main window being
+ * hidden so the user is seeing their own desktop behind the overlay. These
+ * fields separate them without another round of guessing.
+ */
+async function reportMainWindowState(reason) {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    console.log('[desktop][main] state', { reason, window: 'destroyed' });
+    return;
+  }
+  try {
+    const probe = await mainWindow.webContents.executeJavaScript(
+      `({
+        rootChildren: document.getElementById('root')?.childElementCount ?? -1,
+        bodyBg: getComputedStyle(document.body).backgroundColor,
+        url: location.pathname
+      })`,
+      true
+    );
+    console.log('[desktop][main] state', {
+      reason,
+      visible: mainWindow.isVisible(),
+      minimized: mainWindow.isMinimized(),
+      focused: mainWindow.isFocused(),
+      fullScreen: mainWindow.isFullScreen(),
+      bounds: mainWindow.getBounds(),
+      ...probe,
+      widgetVisible: Boolean(widgetWindow && !widgetWindow.isDestroyed() && widgetWindow.isVisible()),
+      widgetBounds: widgetWindow && !widgetWindow.isDestroyed() ? widgetWindow.getBounds() : null,
+    });
+    if (probe.rootChildren <= 0) {
+      console.error('[desktop][main] main window rendered NOTHING — this is the black screen.');
+    }
+  } catch (error) {
+    console.warn('[desktop][main] probe failed', error?.message ?? error);
+  }
 }
 
 function loadWidgetContent(win) {
@@ -481,6 +563,30 @@ function loadWidgetContent(win) {
   } else {
     win.loadFile(path.join(__dirname, '..', 'dist', 'widget.html'));
   }
+}
+
+function isWidgetUrl(urlString) {
+  return typeof urlString === 'string' && urlString.includes('widget.html');
+}
+
+/**
+ * The widget window must never leave widget.html. Any navigation away swaps the
+ * transparent overlay for an opaque full-window app page — which reads on screen
+ * as a big black box with the pill floating in it. The renderer no longer
+ * redirects on 401 (see api-client.ts), and this is the backstop that keeps it
+ * that way regardless of what future code does.
+ */
+function lockWidgetToItsOwnPage(win) {
+  win.webContents.on('will-navigate', (event, url) => {
+    if (isWidgetUrl(url)) return;
+    event.preventDefault();
+    console.warn('[desktop][widget] blocked navigation away from widget.html →', url);
+  });
+
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    console.warn('[desktop][widget] blocked window.open from the overlay →', url);
+    return { action: 'deny' };
+  });
 }
 
 function positionWidgetBottomRight() {
@@ -499,11 +605,14 @@ function getWidgetWorkArea() {
 
 function getWidgetExpandedLimits() {
   const workArea = getWidgetWorkArea();
+  // Hard cap well below the work area. This is an overlay, not a window manager:
+  // letting a drag-resize grow it to nearly full screen produces a screen-sized
+  // transparent surface that reads as a black rectangle with the pill inside it.
   return {
     minWidth: WIDGET_EXPANDED_MIN.width,
     minHeight: WIDGET_EXPANDED_MIN.height,
-    maxWidth: workArea.width - 24,
-    maxHeight: workArea.height - 24
+    maxWidth: Math.min(workArea.width - 24, WIDGET_EXPANDED_MAX.width),
+    maxHeight: Math.min(workArea.height - 24, WIDGET_EXPANDED_MAX.height)
   };
 }
 
@@ -513,6 +622,57 @@ function clampExpandedSize(width, height) {
     width: Math.round(Math.min(Math.max(width, limits.minWidth), limits.maxWidth)),
     height: Math.round(Math.min(Math.max(height, limits.minHeight), limits.maxHeight))
   };
+}
+
+/**
+ * Bound the window by size constraints rather than `resizable: false`, so
+ * programmatic resizes still work in both directions. Re-applied when the
+ * display layout changes, since the limits derive from the work area.
+ */
+function applyWidgetSizeConstraints() {
+  if (!widgetWindow || widgetWindow.isDestroyed()) return;
+  const limits = getWidgetExpandedLimits();
+  widgetWindow.setMinimumSize(WIDGET_SIZES.compact.width, WIDGET_SIZES.compact.height);
+  widgetWindow.setMaximumSize(limits.maxWidth, limits.maxHeight);
+}
+
+/**
+ * One log line that says which of the three failure modes is in play when the
+ * overlay misbehaves: assets not loading (empty root), transparency lost
+ * (opaque computed background), or geometry desync (bounds >> content).
+ * Three previous fixes shipped blind for want of this.
+ */
+async function reportWidgetHealth(reason) {
+  if (!widgetWindow || widgetWindow.isDestroyed()) return;
+  try {
+    const probe = await widgetWindow.webContents.executeJavaScript(
+      `({
+        rootChildren: document.getElementById('root')?.childElementCount ?? -1,
+        bodyBg: getComputedStyle(document.body).backgroundColor,
+        htmlBg: getComputedStyle(document.documentElement).backgroundColor
+      })`,
+      true
+    );
+    const bounds = widgetWindow.getBounds();
+    const transparent = /rgba\(0, 0, 0, 0\)|transparent/.test(probe.bodyBg);
+
+    console.log('[desktop][widget] health', { reason, ...probe, bounds, expanded: widgetExpanded });
+
+    if (probe.rootChildren <= 0) {
+      console.error(
+        '[desktop][widget] renderer painted nothing — the JS bundle did not load. ' +
+          'Expect an opaque window. Check the asset URLs in the loaded HTML.'
+      );
+    }
+    if (!transparent) {
+      console.error(
+        `[desktop][widget] body background is "${probe.bodyBg}", not transparent — ` +
+          'the overlay will render as a solid rectangle. A stylesheet is painting over it.'
+      );
+    }
+  } catch (error) {
+    console.warn('[desktop][widget] health probe failed', error?.message ?? error);
+  }
 }
 
 function applyWidgetBounds(size, { anchorBottom = true } = {}) {
@@ -580,7 +740,14 @@ function createWidgetWindow() {
     height: WIDGET_SIZES.compact.height,
     frame: false,
     transparent: true,
-    resizable: false,
+    // Resizable, but bounded by setMinimumSize/setMaximumSize below. Created
+    // with `resizable: false`, macOS pins the min AND max size to the creation
+    // size, so the programmatic setBounds calls used for expand/collapse and the
+    // reload reset get clamped — a window that grew could never shrink back,
+    // stranding a compact pill inside an oversized frame. The window is
+    // frameless with app-drawn drag/resize affordances, so OS edge-resize is not
+    // a concern.
+    resizable: true,
     alwaysOnTop: true,
     skipTaskbar: true,
     hasShadow: false,
@@ -593,6 +760,8 @@ function createWidgetWindow() {
     }
   });
 
+  applyWidgetSizeConstraints();
+
   // Float above everything — including full-screen apps and the menu bar — and
   // stay present across all Spaces, so the widget is genuinely a screen-wide
   // overlay rather than something tied to one window/desktop.
@@ -601,10 +770,32 @@ function createWidgetWindow() {
     widgetWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   }
 
+  lockWidgetToItsOwnPage(widgetWindow);
   loadWidgetContent(widgetWindow);
 
   // Only show once the renderer has actually painted — showing a transparent
   // window before first paint is what left a blank/empty overlay on screen.
+  // A fresh renderer ALWAYS mounts collapsed (React state starts false), so any
+  // load/reload makes "expanded" stale by definition. The window outlives the
+  // renderer — it is only hidden between recordings — so without this the main
+  // process can keep an expanded-sized window behind a compact pill, which macOS
+  // paints as a full-screen black rectangle with the pill floating in it.
+  // This fires on every load, unlike the create-time reset below it.
+  widgetWindow.webContents.on('did-finish-load', () => {
+    if (widgetExpanded) {
+      console.warn('[desktop][widget] renderer reloaded while expanded — collapsing to match');
+    }
+    widgetExpanded = false;
+    applyWidgetBounds(WIDGET_SIZES.compact, { anchorBottom: true });
+    void reportWidgetHealth('did-finish-load');
+  });
+
+  // The overlay silently rendering nothing is the failure that took three
+  // attempts to pin down — say so out loud instead.
+  widgetWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, url) => {
+    console.error('[desktop][widget] failed to load', { url, errorCode, errorDescription });
+  });
+
   widgetWindow.once('ready-to-show', () => {
     widgetContentReady = true;
     if (!widgetUserPlaced && !applySavedWidgetPosition()) {
@@ -884,6 +1075,45 @@ function registerIpcHandlers() {
     return { ok: true, limits: getWidgetExpandedLimits() };
   });
 
+  /**
+   * The renderer measures the pill and the window follows it.
+   *
+   * Every previous attempt at the "big black window" bug tried to keep two
+   * numbers in sync — the main process's idea of the size and what React
+   * actually drew. Any desync (a reload, a stale flag, a clamped resize) left an
+   * oversized window around a small pill, which on macOS reads as a black
+   * rectangle and shows up in Mission Control as a separate window.
+   *
+   * Deriving the window size FROM the rendered content removes that class of bug
+   * outright: there is only one number now. Ignored while a user drag-resize is
+   * in progress, and while expanded (the chat panel is deliberately larger than
+   * its content box).
+   */
+  ipcMain.handle('desktop:widget:content-size', (_event, size) => {
+    if (!widgetWindow || widgetWindow.isDestroyed()) return { ok: false };
+    if (widgetExpanded || widgetResizeState) return { ok: false };
+
+    const width = Math.round(Number(size?.width));
+    const height = Math.round(Number(size?.height));
+    if (!Number.isFinite(width) || !Number.isFinite(height) || width < 1 || height < 1) {
+      return { ok: false };
+    }
+
+    // Never let a bogus measurement grow the overlay: compact is the ceiling
+    // while collapsed.
+    const next = {
+      width: Math.min(width, WIDGET_SIZES.compact.width),
+      height: Math.min(height, WIDGET_SIZES.compact.height)
+    };
+
+    const current = widgetWindow.getBounds();
+    if (current.width === next.width && current.height === next.height) return { ok: true };
+
+    console.log('[desktop][widget] sizing window to content', { from: current, to: next });
+    applyWidgetBounds(next, { anchorBottom: true });
+    return { ok: true, size: next };
+  });
+
   ipcMain.handle('desktop:widget:resize-move', () => {
     if (!widgetWindow || widgetWindow.isDestroyed() || !widgetResizeState) {
       return { ok: false };
@@ -983,6 +1213,14 @@ app.whenReady().then(() => {
   if (!isTestMode) {
     createWidgetWindow();
     createTray();
+
+    // Size limits derive from the work area, so a display change (resolution,
+    // arrangement, monitor unplugged) can leave the overlay larger than the
+    // screen it now lives on.
+    screen.on('display-metrics-changed', () => {
+      applyWidgetSizeConstraints();
+      widgetExpandedSize = clampExpandedSize(widgetExpandedSize.width, widgetExpandedSize.height);
+    });
   }
   registerGlobalShortcuts();
 

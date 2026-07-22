@@ -1,0 +1,30 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(npx tsc *)",
+      "Bash(git add *)",
+      "Bash(grep -E \"\\\\.\\(ts|tsx\\)$\")",
+      "Bash(break)",
+      "Bash(npm init *)",
+      "Bash(npm install *)",
+      "Bash(python3 -)",
+      "Bash(sqlite3 -header prisma/dev.db \"SELECT substr\\(id,1,12\\) AS id, substr\\(title,1,26\\) AS title, source, audioUrl IS NOT NULL AS has_audio, status, recordingEnded IS NOT NULL AS ended FROM Meeting ORDER BY createdAt DESC LIMIT 4;\")"
+    ]
+  },
+  "enabledMcpjsonServers": ["shadcn"],
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Read|Grep|Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "path=$(jq -r '.tool_input.file_path // .tool_input.path // empty'); echo \"$path\" | grep -q '\\.env' && echo 'Blocked: .env is protected' >&2 && exit 2 || exit 0"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -28,22 +28,31 @@ async function apiFetch(endpoint: string, options: RequestInit = {}) {
   return response;
 }
 
+export interface ProviderStatus {
+  connected: boolean;
+  email?: string;
+  lastSync?: string;
+  /**
+   * The stored Google grant was revoked or expired (`invalid_grant`). Only
+   * re-consent fixes this, so the UI must prompt to reconnect rather than
+   * showing a plain "Not connected" and waiting for a recovery that can't come.
+   */
+  needsReconnect?: boolean;
+  /** Human-readable reason the provider isn't usable. */
+  error?: string;
+}
+
+export interface SlackProviderStatus extends ProviderStatus {
+  /** Slack workspace name, once installed. */
+  workspace?: string;
+  /** Whether the server has SLACK_CLIENT_ID/SECRET — without them, no install is possible. */
+  configured?: boolean;
+}
+
 export interface IntegrationStatus {
-  calendar: {
-    connected: boolean;
-    email?: string;
-    lastSync?: string;
-  };
-  gmail: {
-    connected: boolean;
-    email?: string;
-    lastSync?: string;
-  };
-  slack: {
-    connected: boolean;
-    email?: string;
-    lastSync?: string;
-  };
+  calendar: ProviderStatus;
+  gmail: ProviderStatus;
+  slack: SlackProviderStatus;
 }
 
 export interface CalendarEvent {
@@ -61,6 +70,11 @@ export interface CalendarEvent {
   meetLink?: string;
   status?: string;
   recurring?: boolean;
+  /**
+   * The meeting already recorded for this event, if any. Lets the Calendar offer
+   * "View recording" instead of inviting the user to record it a second time.
+   */
+  recording?: { id: string; status: string } | null;
 }
 
 /**
@@ -100,15 +114,18 @@ export async function connectGoogle(
   return (await response.json()) as { authUrl: string };
 }
 
-function statusKeyFor(provider: GoogleIntegrationProvider): 'calendar' | 'gmail' {
+/** Which `/status` key a connect flow should watch to know it finished. */
+type IntegrationStatusKey = 'calendar' | 'gmail' | 'slack';
+
+function statusKeyFor(provider: GoogleIntegrationProvider): IntegrationStatusKey {
   return provider === 'GMAIL' ? 'gmail' : 'calendar';
 }
 
-async function isProviderConnected(provider: GoogleIntegrationProvider): Promise<boolean> {
+async function isProviderConnected(statusKey: IntegrationStatusKey): Promise<boolean> {
   try {
     const status = await getIntegrationStatus();
-    const connected = Boolean(status[statusKeyFor(provider)]?.connected);
-    console.log('[connect] status poll', { provider, connected, status });
+    const connected = Boolean(status[statusKey]?.connected);
+    console.log('[connect] status poll', { statusKey, connected, status });
     return connected;
   } catch (error) {
     console.warn('[connect] status poll failed', error);
@@ -116,82 +133,127 @@ async function isProviderConnected(provider: GoogleIntegrationProvider): Promise
   }
 }
 
+type DesktopBridge = NonNullable<typeof globalThis.window.desktop>;
+
+const CONNECT_POLL_MS = 2000;
+const CONNECT_TIMEOUT_MS = 3 * 60 * 1000;
 /**
- * Runs the full "connect this Google integration" flow and resolves once the
- * OAuth attempt has finished so the caller can refetch status. Resolves to
- * `true` if the provider is connected afterwards, `false` otherwise.
- *
- * - Web: opens a popup and resolves once it closes.
- * - Desktop: Google blocks OAuth inside Electron's embedded webview, so the
- *   backend sends the user through the *system browser*. There is no popup
- *   handle to poll, so we detect completion two ways (whichever fires first):
- *     1. Fast path: a custom-protocol deep link (`ai-meeting-copilot://
- *        integrations/callback`) that the Electron main process forwards to
- *        the renderer as an `auth:callback` IPC event.
- *     2. Reliable path: polling the backend `/status` endpoint until the
- *        provider shows connected. This works even if the Electron main
- *        process wasn't restarted to recognize the new deep link.
+ * Once the user is back in the app, how long the backend still gets to finish
+ * committing the tokens before we call the attempt abandoned. Without this,
+ * returning a beat before the callback lands would look like a cancel.
  */
-export async function connectGoogleIntegration(provider: GoogleIntegrationProvider): Promise<boolean> {
-  const desktopMode = isDesktopApp();
-  console.log('[connect] start', { provider, desktopMode });
-  const alreadyConnected = await isProviderConnected(provider);
-  const { authUrl } = await connectGoogle(provider);
-  console.log('[connect] got authUrl', { provider, alreadyConnected, authUrl });
-  const desktop = globalThis.window.desktop;
+const RETURN_GRACE_MS = 5000;
 
-  if (desktopMode && desktop?.auth?.openExternal) {
-    console.log('[connect] opening system browser (desktop flow)');
-    void desktop.auth.openExternal(authUrl);
+/**
+ * Desktop completion watcher.
+ *
+ * Two rules hold this together:
+ *   1. Only a confirmed `true` may settle success, and a negative read may
+ *      never settle failure. A deep link is a hint to re-check, not a verdict —
+ *      it routinely arrives before the backend has committed, and treating that
+ *      early `false` as final is what reported a *successful* connect as
+ *      "not connected".
+ *   2. Failure is settled only by an explicit cancel, or by the user coming
+ *      back to the app and staying (see RETURN_GRACE_MS) without connecting.
+ */
+function waitForDesktopConnect(
+  statusKey: IntegrationStatusKey,
+  {
+    alreadyConnected,
+    desktop,
+    signal
+  }: { alreadyConnected: boolean; desktop: DesktopBridge; signal?: AbortSignal }
+): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    let settled = false;
+    let firstTick = true;
+    /** A return only means "cancelled" if they actually left for the browser. */
+    let hasLeftApp = false;
+    let unsubscribe: (() => void) | undefined;
+    let pollTimer: number | undefined;
+    let timeoutId: number | undefined;
+    let graceTimer: number | undefined;
 
-    return new Promise<boolean>((resolve) => {
-      let settled = false;
-      let unsubscribe: (() => void) | undefined;
-      let pollTimer: number | undefined;
-      let timeoutId: number | undefined;
+    const finish = (connected: boolean) => {
+      if (settled) return;
+      settled = true;
+      if (pollTimer !== undefined) window.clearInterval(pollTimer);
+      if (timeoutId !== undefined) window.clearTimeout(timeoutId);
+      if (graceTimer !== undefined) window.clearTimeout(graceTimer);
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('blur', onBlur);
+      signal?.removeEventListener('abort', onAbort);
+      unsubscribe?.();
+      console.log('[connect] desktop flow finished', { statusKey, connected });
+      resolve(connected);
+    };
 
-      const finish = (connected: boolean) => {
-        if (settled) return;
-        settled = true;
-        if (timeoutId !== undefined) window.clearTimeout(timeoutId);
-        if (pollTimer !== undefined) window.clearInterval(pollTimer);
-        unsubscribe?.();
-        console.log('[connect] desktop flow finished', { provider, connected });
-        resolve(connected);
-      };
+    const checkConnected = async (): Promise<boolean> => {
+      if (settled) return false;
+      const connected = await isProviderConnected(statusKey);
+      if (settled) return false;
+      // Skip the first read of a reconnect: it still reflects the OLD
+      // connection, not the one being made right now.
+      if (firstTick) {
+        firstTick = false;
+        if (connected && alreadyConnected) return false;
+      }
+      if (connected) finish(true);
+      return connected;
+    };
 
-      // Fast path: deep link from Electron. Confirm with a status check.
-      unsubscribe = desktop.auth.onCallback?.((payload: { url?: string }) => {
-        console.log('[connect] received auth:callback deep link', payload?.url);
-        if (payload?.url?.includes('integrations/callback')) {
-          void isProviderConnected(provider).then(finish);
-        }
-      });
+    const onAbort = () => {
+      console.log('[connect] cancelled by user');
+      finish(false);
+    };
 
-      // Reliable path: poll the backend until the provider connects. If it was
-      // already connected before we started, wait for lastSync to change is
-      // overkill — just resolve on the first positive read after a short delay.
-      let firstTick = true;
-      pollTimer = window.setInterval(() => {
-        void isProviderConnected(provider).then((connected) => {
-          // Skip the very first read if it was already connected, so a reconnect
-          // doesn't resolve before the user finishes in the browser.
-          if (firstTick) {
-            firstTick = false;
-            if (connected && alreadyConnected) return;
-          }
-          if (connected) finish(true);
+    const onBlur = () => {
+      hasLeftApp = true;
+      // Back off to the browser — any pending "did they cancel?" countdown is void.
+      if (graceTimer !== undefined) {
+        window.clearTimeout(graceTimer);
+        graceTimer = undefined;
+      }
+    };
+
+    const onFocus = () => {
+      if (settled || !hasLeftApp) return;
+      if (graceTimer !== undefined) window.clearTimeout(graceTimer);
+      graceTimer = window.setTimeout(() => {
+        void checkConnected().then((connected) => {
+          if (!connected) finish(false);
         });
-      }, 2000);
+      }, RETURN_GRACE_MS);
+    };
 
-      // Don't leave the caller hanging forever if the user abandons the flow.
-      timeoutId = window.setTimeout(() => {
-        console.warn('[connect] desktop flow timed out after 3 minutes');
-        void isProviderConnected(provider).then(finish);
-      }, 3 * 60 * 1000);
+    unsubscribe = desktop.auth.onCallback?.((payload: { url?: string }) => {
+      console.log('[connect] received auth:callback deep link', payload?.url);
+      if (payload?.url?.includes('integrations/callback')) {
+        void checkConnected();
+      }
     });
-  }
 
+    pollTimer = window.setInterval(() => void checkConnected(), CONNECT_POLL_MS);
+    window.addEventListener('focus', onFocus);
+    window.addEventListener('blur', onBlur);
+    signal?.addEventListener('abort', onAbort);
+
+    timeoutId = window.setTimeout(() => {
+      console.warn('[connect] desktop flow timed out');
+      void checkConnected().then((connected) => {
+        if (!connected) finish(false);
+      });
+    }, CONNECT_TIMEOUT_MS);
+
+    if (signal?.aborted) onAbort();
+  });
+}
+
+/** Web completion watcher — the popup handle tells us when the user is done. */
+function waitForPopupConnect(
+  statusKey: IntegrationStatusKey,
+  { authUrl, signal }: { authUrl: string; signal?: AbortSignal }
+): Promise<boolean> {
   return new Promise<boolean>((resolve, reject) => {
     const popup = window.open(authUrl, '_blank', 'width=600,height=700');
     if (!popup) {
@@ -199,13 +261,155 @@ export async function connectGoogleIntegration(provider: GoogleIntegrationProvid
       return;
     }
 
+    let settled = false;
+
+    const finish = (connected: boolean) => {
+      if (settled) return;
+      settled = true;
+      window.clearInterval(pollInterval);
+      signal?.removeEventListener('abort', onAbort);
+      resolve(connected);
+    };
+
+    const onAbort = () => {
+      popup.close();
+      finish(false);
+    };
+
     const pollInterval = window.setInterval(() => {
-      if (popup.closed) {
-        window.clearInterval(pollInterval);
-        void isProviderConnected(provider).then(resolve);
-      }
+      if (popup.closed) void isProviderConnected(statusKey).then(finish);
     }, 500);
+
+    signal?.addEventListener('abort', onAbort);
+    if (signal?.aborted) onAbort();
   });
+}
+
+/**
+ * Runs the full "connect this Google integration" flow and resolves once the
+ * OAuth attempt has finished so the caller can refetch status. Resolves to
+ * `true` if the provider is connected afterwards, `false` otherwise (including
+ * when the user cancels).
+ *
+ * Pass `signal` to cancel — aborting resolves `false` promptly rather than
+ * leaving the caller's "Connecting…" state stranded.
+ *
+ * - Web: opens a popup and resolves once it closes.
+ * - Desktop: Google blocks OAuth inside Electron's embedded webview, so the
+ *   backend sends the user through the *system browser*. There is no popup
+ *   handle to poll, so completion is detected via the `integrations/callback`
+ *   deep link and by polling the backend `/status` endpoint.
+ */
+export async function connectGoogleIntegration(
+  provider: GoogleIntegrationProvider,
+  options: { signal?: AbortSignal } = {}
+): Promise<boolean> {
+  const { signal } = options;
+  const statusKey = statusKeyFor(provider);
+  const desktopMode = isDesktopApp();
+  console.log('[connect] start', { provider, desktopMode });
+  const alreadyConnected = await isProviderConnected(statusKey);
+  const { authUrl } = await connectGoogle(provider);
+  console.log('[connect] got authUrl', { provider, alreadyConnected, authUrl });
+  const desktop = globalThis.window.desktop;
+
+  if (desktopMode && desktop?.auth?.openExternal) {
+    console.log('[connect] opening system browser (desktop flow)');
+    void desktop.auth.openExternal(authUrl);
+    return waitForDesktopConnect(statusKey, { alreadyConnected, desktop, signal });
+  }
+
+  return waitForPopupConnect(statusKey, { authUrl, signal });
+}
+
+/**
+ * Start the Slack install ("Add to Slack"). Same two-mode completion handling as
+ * the Google flow — popup on web, system browser + deep link on desktop.
+ */
+export async function connectSlackIntegration(
+  options: { signal?: AbortSignal } = {}
+): Promise<boolean> {
+  const { signal } = options;
+  const desktopMode = isDesktopApp();
+
+  const response = await apiFetch('/api/integrations/slack/connect', {
+    method: 'POST',
+    body: JSON.stringify({ source: desktopMode ? 'desktop' : undefined }),
+  });
+
+  if (!response.ok) {
+    // The server tells us exactly what is missing from its Slack app config;
+    // surfacing that beats a generic failure the user cannot act on.
+    const body = (await response.json().catch(() => ({}))) as {
+      error?: string;
+      configIssues?: string[];
+    };
+    throw new Error(
+      [body.error ?? 'Failed to start Slack install', ...(body.configIssues ?? [])].join(' ')
+    );
+  }
+
+  const { authUrl } = (await response.json()) as { authUrl: string };
+  const alreadyConnected = await isProviderConnected('slack');
+  const desktop = globalThis.window.desktop;
+
+  if (desktopMode && desktop?.auth?.openExternal) {
+    void desktop.auth.openExternal(authUrl);
+    return waitForDesktopConnect('slack', { alreadyConnected, desktop, signal });
+  }
+
+  return waitForPopupConnect('slack', { authUrl, signal });
+}
+
+export interface SlackChannel {
+  id: string;
+  name: string;
+}
+
+export async function getSlackChannels(): Promise<SlackChannel[]> {
+  const response = await apiFetch('/api/integrations/slack/channels', { method: 'GET' });
+  if (!response.ok) {
+    const body = (await response.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error ?? 'Failed to list Slack channels');
+  }
+  const { channels } = (await response.json()) as { channels: SlackChannel[] };
+  return channels;
+}
+
+export interface SlackPreferences {
+  defaultChannelId: string | null;
+  defaultChannelName: string | null;
+  /** Post the summary to the default channel when a meeting finishes processing. */
+  autoPost: boolean;
+}
+
+export async function getSlackPreferences(): Promise<SlackPreferences> {
+  const response = await apiFetch('/api/integrations/slack/preferences', { method: 'GET' });
+  if (!response.ok) throw new Error('Failed to load Slack preferences');
+  return (await response.json()) as SlackPreferences;
+}
+
+export async function saveSlackPreferences(
+  prefs: Partial<SlackPreferences>
+): Promise<SlackPreferences> {
+  const response = await apiFetch('/api/integrations/slack/preferences', {
+    method: 'PUT',
+    body: JSON.stringify(prefs),
+  });
+  if (!response.ok) {
+    const body = (await response.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error ?? 'Failed to save Slack preferences');
+  }
+  return (await response.json()) as SlackPreferences;
+}
+
+/** Uninstall the Slack app for this user. */
+export async function disconnectSlack(): Promise<{ success: boolean }> {
+  const response = await apiFetch('/api/integrations/slack/disconnect', { method: 'DELETE' });
+  if (!response.ok) {
+    throw new Error('Failed to disconnect Slack');
+  }
+  return (await response.json()) as { success: boolean };
 }
 
 /**

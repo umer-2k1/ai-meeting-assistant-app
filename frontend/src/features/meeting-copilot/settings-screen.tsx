@@ -82,23 +82,9 @@ const INTEGRATIONS: IntegrationConfig[] = [
     description: 'Post highlights and action items to your team channels.',
     icon: IconBrandSlack,
     iconClassName: 'bg-[#4A154B]',
-    features: [
-      {
-        key: 'defaultChannel',
-        label: 'Post to #product-team',
-        description: 'Default channel for meeting summaries.'
-      },
-      {
-        key: 'eodDigest',
-        label: 'End-of-day digest (6:00 PM)',
-        description: 'Roll up open action items each evening.'
-      },
-      {
-        key: 'threadSummaries',
-        label: 'Thread summaries by meeting',
-        description: 'Keep each meeting in its own Slack thread.'
-      }
-    ]
+    // Slack's settings are a real channel picker rendered by SlackChannelSettings,
+    // not generic on/off switches.
+    features: []
   },
   {
     id: 'calendar',
@@ -341,11 +327,140 @@ function AiPreferencesTab() {
   );
 }
 
+/**
+ * Slack's real settings: which channel meeting summaries go to, and whether to
+ * post automatically when a meeting finishes. Both persist server-side on the
+ * Slack integration, so disconnecting clears them with the connection.
+ */
+function SlackChannelSettings({ connected }: { connected: boolean }) {
+  const [channels, setChannels] = useState<Array<{ id: string; name: string }> | null>(null);
+  const [prefs, setPrefs] = useState<{
+    defaultChannelId: string | null;
+    defaultChannelName: string | null;
+    autoPost: boolean;
+  } | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!connected) {
+      setChannels(null);
+      setPrefs(null);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+
+    void (async () => {
+      try {
+        const api = await import('@/lib/integrations-api');
+        const [channelList, saved] = await Promise.all([
+          api.getSlackChannels(),
+          api.getSlackPreferences()
+        ]);
+        if (cancelled) return;
+        setChannels(channelList);
+        setPrefs(saved);
+      } catch (err) {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : 'Could not load Slack channels');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [connected]);
+
+  const persist = async (update: {
+    defaultChannelId?: string | null;
+    defaultChannelName?: string | null;
+    autoPost?: boolean;
+  }) => {
+    setSaving(true);
+    setError(null);
+    try {
+      const { saveSlackPreferences } = await import('@/lib/integrations-api');
+      setPrefs(await saveSlackPreferences(update));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save Slack settings');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!connected) return null;
+
+  return (
+    <div className='px-5 py-1'>
+      <SettingsRow
+        label='Default channel'
+        description='Where meeting summaries are posted.'
+      >
+        {loading ? (
+          <span className='text-xs text-muted-foreground'>Loading…</span>
+        ) : (
+          <Select
+            value={prefs?.defaultChannelId ?? ''}
+            disabled={saving || !channels?.length}
+            onValueChange={(value) => {
+              const picked = channels?.find((c) => c.id === value);
+              void persist({
+                defaultChannelId: value,
+                defaultChannelName: picked?.name ?? null
+              });
+            }}
+          >
+            <SelectTrigger className='w-56'>
+              <SelectValue placeholder='Select a channel' />
+            </SelectTrigger>
+            <SelectContent>
+              {(channels ?? []).map((channel) => (
+                <SelectItem key={channel.id} value={channel.id}>
+                  #{channel.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+      </SettingsRow>
+
+      <SettingsRow
+        label='Post automatically after each meeting'
+        description={
+          prefs?.defaultChannelId
+            ? `Summaries post to #${prefs.defaultChannelName ?? 'the selected channel'} when processing finishes.`
+            : 'Pick a default channel first.'
+        }
+      >
+        <SettingsSwitch
+          aria-label='Post automatically after each meeting'
+          checked={prefs?.autoPost ?? false}
+          disabled={saving || !prefs?.defaultChannelId}
+          onCheckedChange={(enabled) => void persist({ autoPost: enabled })}
+        />
+      </SettingsRow>
+
+      {error && <p className='pb-3 text-xs text-destructive'>{error}</p>}
+      {!loading && channels?.length === 0 && (
+        <p className='pb-3 text-xs text-muted-foreground'>
+          No public channels found in this workspace. Create one in Slack, then reopen Settings.
+        </p>
+      )}
+    </div>
+  );
+}
+
 function IntegrationCard({
   config,
   connected,
   connecting,
   connectedEmail,
+  needsReconnect,
   featureToggles,
   onConnectToggle,
   onFeatureToggle
@@ -354,6 +469,7 @@ function IntegrationCard({
   connected: boolean;
   connecting?: boolean;
   connectedEmail?: string;
+  needsReconnect?: boolean;
   featureToggles: Record<string, boolean>;
   onConnectToggle: () => void;
   onFeatureToggle: (key: string, enabled: boolean) => void;
@@ -380,10 +496,18 @@ function IntegrationCard({
                 'rounded-full border-0 px-2 py-0 text-[11px] font-medium',
                 connected
                   ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400'
-                  : 'bg-muted text-muted-foreground'
+                  : needsReconnect
+                    ? 'bg-destructive/15 text-destructive'
+                    : 'bg-muted text-muted-foreground'
               )}
             >
-              {connecting ? 'Connecting…' : connected ? 'Connected' : 'Not connected'}
+              {connecting
+                ? 'Connecting…'
+                : connected
+                  ? 'Connected'
+                  : needsReconnect
+                    ? 'Reconnect required'
+                    : 'Not connected'}
             </Badge>
           </div>
           <p className='mt-1 text-sm text-muted-foreground'>
@@ -391,6 +515,11 @@ function IntegrationCard({
             {connectedEmail && (
               <span className='block mt-1 text-xs'>
                 {connectedEmail}
+              </span>
+            )}
+            {!connected && needsReconnect && (
+              <span className='mt-1 block text-xs text-destructive'>
+                Access expired or was revoked — reconnect to restore this integration.
               </span>
             )}
           </p>
@@ -402,9 +531,16 @@ function IntegrationCard({
           onClick={onConnectToggle}
           disabled={connecting}
         >
-          {connecting ? 'Connecting…' : connected ? 'Disconnect' : 'Connect'}
+          {connecting
+            ? 'Connecting…'
+            : connected
+              ? 'Disconnect'
+              : needsReconnect
+                ? 'Reconnect'
+                : 'Connect'}
         </Button>
       </header>
+      {config.id === 'slack' && <SlackChannelSettings connected={connected} />}
       <div className={cn('px-5 py-1', !connected && 'pointer-events-none opacity-50')}>
         {config.features.map((feature) => (
           <SettingsRow key={feature.key} label={feature.label} description={feature.description}>
@@ -434,7 +570,15 @@ function IntegrationsTab() {
     slack: undefined,
     calendar: undefined
   });
+  /** Grant revoked/expired — only re-consent fixes it, so prompt instead of failing quietly. */
+  const [needsReconnect, setNeedsReconnect] = useState<Record<IntegrationId, boolean>>({
+    gmail: false,
+    slack: false,
+    calendar: false
+  });
   const [loading, setLoading] = useState(true);
+  /** Status fetch failed — the cards below show stale/empty state, so warn. */
+  const [statusError, setStatusError] = useState<string | null>(null);
   const [connecting, setConnecting] = useState<Record<IntegrationId, boolean>>({
     gmail: false,
     slack: false,
@@ -458,13 +602,26 @@ function IntegrationsTab() {
         calendar: status.calendar.connected
       });
 
+      setNeedsReconnect({
+        gmail: Boolean(status.gmail.needsReconnect),
+        slack: Boolean(status.slack.needsReconnect),
+        calendar: Boolean(status.calendar.needsReconnect)
+      });
+
       setEmails({
         gmail: status.gmail.email,
-        slack: status.slack.email,
+        // Slack identifies by workspace, not by an address.
+        slack: status.slack.workspace ?? status.slack.email,
         calendar: status.calendar.email
       });
+      setStatusError(null);
     } catch (error) {
       console.error('Failed to fetch integration status:', error);
+      // Every flag stays false when this call fails, which renders identically
+      // to "nothing is connected". Say so explicitly instead of lying by omission.
+      setStatusError(
+        error instanceof Error ? error.message : 'Could not load integration status'
+      );
     } finally {
       if (options.showLoading) setLoading(false);
     }
@@ -504,18 +661,41 @@ function IntegrationsTab() {
         setConnecting((prev) => ({ ...prev, [integrationId]: false }));
       }
     } else {
-      // Slack is an app-level (bot-token) integration configured on the server,
-      // not a per-user OAuth connect.
-      alert(
-        connected.slack
-          ? 'Slack is connected. Use the Share button on a meeting to post its report to a channel.'
-          : 'To enable Slack, add SLACK_BOT_TOKEN to the backend environment and restart the server.'
-      );
+      // Slack: OAuth v2 install, same popup/deep-link handling as Google.
+      try {
+        setConnecting((prev) => ({ ...prev, slack: true }));
+        const { connectSlackIntegration } = await import('@/lib/integrations-api');
+        await connectSlackIntegration();
+        await refetchStatus({ showLoading: false });
+      } catch (error) {
+        console.error('Failed to install Slack app:', error);
+        if (error instanceof Error && error.message === 'popup-blocked') {
+          alert('Please allow popups for this site to connect Slack.');
+        } else {
+          alert(error instanceof Error ? error.message : 'Failed to connect Slack.');
+        }
+      } finally {
+        setConnecting((prev) => ({ ...prev, slack: false }));
+      }
     }
   };
 
   const handleDisconnect = async (integrationId: IntegrationId) => {
     const provider = googleProviderFor(integrationId);
+
+    if (integrationId === 'slack') {
+      if (!confirm('Are you sure you want to disconnect Slack?')) return;
+      try {
+        const { disconnectSlack } = await import('@/lib/integrations-api');
+        await disconnectSlack();
+        setConnected((prev) => ({ ...prev, slack: false }));
+        setEmails((prev) => ({ ...prev, slack: undefined }));
+      } catch (error) {
+        console.error('Failed to disconnect Slack:', error);
+        alert('Failed to disconnect. Please try again.');
+      }
+      return;
+    }
 
     if (provider) {
       const label = integrationId === 'gmail' ? 'Gmail' : 'Google Calendar';
@@ -546,6 +726,25 @@ function IntegrationsTab() {
 
   return (
     <div className='space-y-4'>
+      {statusError && (
+        <div
+          role='alert'
+          className='flex flex-wrap items-center gap-3 rounded-2xl border border-destructive/30 bg-destructive/10 px-5 py-4'
+        >
+          <p className='min-w-0 flex-1 text-sm text-foreground'>
+            Couldn&apos;t load integration status, so the states below may be wrong.{' '}
+            <span className='text-muted-foreground'>{statusError}</span>
+          </p>
+          <Button
+            size='sm'
+            variant='outline'
+            className='shrink-0 rounded-full px-4'
+            onClick={() => void refetchStatus({ showLoading: true })}
+          >
+            Retry
+          </Button>
+        </div>
+      )}
       {INTEGRATIONS.map((integration) => (
         <IntegrationCard
           key={integration.id}
@@ -553,6 +752,7 @@ function IntegrationsTab() {
           connected={connected[integration.id]}
           connecting={connecting[integration.id]}
           connectedEmail={emails[integration.id]}
+          needsReconnect={needsReconnect[integration.id]}
           featureToggles={features[integration.id]}
           onConnectToggle={() => {
             if (connected[integration.id]) {

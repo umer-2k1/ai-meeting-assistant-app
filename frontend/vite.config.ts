@@ -30,8 +30,18 @@ export default defineConfig({
   ],
   server: {
     host: config.server.host,
-    port: config.server.port
+    port: config.server.port,
+    // Fail loudly instead of drifting to the next free port. Electron loads the
+    // widget from a hardcoded VITE_DEV_SERVER_URL, so a silent port change meant
+    // it attached to whatever stale server already held this one.
+    strictPort: true
   },
+  // Relative asset URLs. Electron loads the built HTML with loadFile() over
+  // file://, where the default absolute base ('/') resolves /assets/* against
+  // the FILESYSTEM ROOT — so every script and stylesheet 404s and the app (and
+  // the widget overlay) renders as an empty opaque window. Relative paths work
+  // under both file:// and the dev server.
+  base: './',
   build: {
     rollupOptions: {
       input: {

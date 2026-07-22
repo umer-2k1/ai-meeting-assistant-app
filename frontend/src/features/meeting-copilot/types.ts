@@ -1,5 +1,12 @@
 export type MeetingStatus = 'live' | 'scheduled' | 'processing' | 'completed' | 'archived' | 'failed';
 
+/**
+ * Where a meeting came from.
+ * - DIRECT   — ad-hoc "New Recording"; no invite, so no attendee list.
+ * - CALENDAR — started from a Google Calendar event; carries its attendees.
+ */
+export type MeetingSource = 'DIRECT' | 'CALENDAR';
+
 /** Raw status as stored by the backend. */
 export type ApiMeetingStatus =
   | 'SCHEDULED'
@@ -46,9 +53,24 @@ export type CalendarEvent = {
   dayLabel?: string;
   startTime?: string;
   endTime?: string;
+  /**
+   * Raw timestamps. `startTime`/`endTime` are display strings ("7:55 PM"), which
+   * cannot be compared — keeping the real instants is what lets "Next up" tell a
+   * finished meeting from an upcoming one.
+   */
+  startsAt?: Date;
+  endsAt?: Date;
   attendees?: number;
+  /**
+   * Video-call URL (Google Meet/Zoom/Teams), kept separate from `location`.
+   * `location` folds this into a display string, which left Join with nothing
+   * to open.
+   */
+  meetLink?: string;
   /** Highlight as the imminent next meeting */
   startsSoon?: boolean;
+  /** Set once this event has been recorded, so the UI can link to it. */
+  recording?: { id: string; status: string } | null;
   /** Context for building a pre-meeting brief (raw attendees preserved) */
   prep?: {
     title: string;
@@ -84,6 +106,8 @@ export type Meeting = {
   /** Platform + join link when available */
   platform?: string | null;
   platformUrl?: string | null;
+  /** Whether this came from a calendar invite or an ad-hoc recording. */
+  source?: MeetingSource;
   summarySnippet: string;
   /** Rich HTML summary (Tiptap-compatible) for Summary tab */
   summaryHtml?: string;

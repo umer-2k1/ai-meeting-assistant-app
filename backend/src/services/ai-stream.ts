@@ -1,7 +1,5 @@
-import { ChatGroq } from '@langchain/groq';
 import { ChatPromptTemplate } from '@langchain/core/prompts';
-
-const GROQ_API_KEY = process.env.GROQ_API_KEY;
+import { createLLM } from './llm-provider.js';
 
 interface StreamCallbacks {
   onToken: (token: string) => void;
@@ -21,22 +19,12 @@ export async function answerMeetingQuestionStream(
   },
   callbacks: StreamCallbacks
 ): Promise<void> {
-  if (!GROQ_API_KEY) {
-    callbacks.onError(new Error('GROQ_API_KEY not configured'));
-    return;
-  }
-
   const startTime = Date.now();
   let fullAnswer = '';
   let tokensUsed = 0;
 
   try {
-    const llm = new ChatGroq({
-      apiKey: GROQ_API_KEY,
-      model: 'llama-3.3-70b-versatile',
-      temperature: 0.7,
-      streaming: true,
-    });
+    const llm = createLLM({ temperature: 0.7, streaming: true });
 
     const contextStr = `
 Meeting Summary: ${context.summary || 'N/A'}
@@ -104,21 +92,11 @@ export async function generateMeetingSummaryStream(
   transcript: string,
   callbacks: StreamCallbacks
 ): Promise<void> {
-  if (!GROQ_API_KEY) {
-    callbacks.onError(new Error('GROQ_API_KEY not configured'));
-    return;
-  }
-
   const startTime = Date.now();
   let fullAnswer = '';
 
   try {
-    const llm = new ChatGroq({
-      apiKey: GROQ_API_KEY,
-      model: 'llama-3.3-70b-versatile',
-      temperature: 0.5,
-      streaming: true,
-    });
+    const llm = createLLM({ temperature: 0.5, streaming: true });
 
     const prompt = ChatPromptTemplate.fromTemplate(`
 You are an AI meeting assistant. Analyze the following meeting transcript and provide:

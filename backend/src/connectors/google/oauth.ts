@@ -229,7 +229,10 @@ export class GoogleOAuthService {
       },
       update: {
         accessToken,
-        refreshToken,
+        // Google omits `refresh_token` on some re-consents. Writing that null
+        // over a working token permanently breaks the connection with no way
+        // back except another full re-consent, so only overwrite with a real one.
+        ...(refreshToken ? { refreshToken } : {}),
         tokenExpiry: expiresAt,
         scopes: serializeStringList(scopes),
         isActive: true,

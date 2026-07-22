@@ -448,13 +448,14 @@ router.post('/:id/share/slack', requireAuth, async (req, res) => {
     const meeting = await getMeetingWithDetails(meetingId, req.user!.id);
     if (!meeting) return res.status(404).json({ error: 'Meeting not found' });
 
-    await shareMeetingToSlack(meetingId, serializeMeetingForApi(meeting)!, channel);
+    await shareMeetingToSlack(req.user!.id, meetingId, serializeMeetingForApi(meeting)!, channel);
     res.json({ success: true });
   } catch (error) {
     console.error('Share slack error:', error);
-    res.status(500).json({
-      error: error instanceof Error ? error.message : 'Failed to post to Slack',
-    });
+    const message = error instanceof Error ? error.message : 'Failed to post to Slack';
+    // "Not connected" is the user's to fix, not a server fault.
+    const status = message.includes('not connected') ? 400 : 500;
+    res.status(status).json({ error: message });
   }
 });
 

@@ -1,12 +1,16 @@
 import { useEffect, useState } from 'react';
 import {
   IconArrowLeft,
+  IconBrandGithub,
   IconBrandLinkedin,
   IconBulb,
   IconChecklist,
   IconHistory,
+  IconRefresh,
+  IconSearch,
   IconSparkles,
   IconUsers,
+  IconWorld,
 } from '@tabler/icons-react';
 
 import { Badge } from '@/components/ui/badge';
@@ -16,7 +20,19 @@ import { BrandLoader } from '@/components/brand/brand-loader';
 import { cn } from '@/lib/utils';
 
 import { COPILOT_BTN_OUTLINE, COPILOT_SURFACE } from './copilot-styles';
-import { fetchPreMeetingBrief, type PreMeetingBrief, type PreMeetingInput } from './meetings-api';
+import {
+  fetchGuestResearch,
+  fetchPreMeetingBrief,
+  type GuestProfile,
+  type PreMeetingBrief,
+  type PreMeetingInput,
+} from './meetings-api';
+
+const CONFIDENCE_BADGE: Record<GuestProfile['confidence'], string> = {
+  high: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
+  medium: 'border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400',
+  low: 'border-border text-muted-foreground',
+};
 
 const SURFACE = COPILOT_SURFACE;
 
@@ -31,7 +47,35 @@ export default function PreMeetingScreen({
 }) {
   const [data, setData] = useState<PreMeetingBrief | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isRegenerating, setIsRegenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Guest research (on-demand internet enrichment).
+  const [guests, setGuests] = useState<Map<string, GuestProfile> | null>(null);
+  const [guestsLoading, setGuestsLoading] = useState(false);
+  const [guestsError, setGuestsError] = useState<string | null>(null);
+  const [providerConfigured, setProviderConfigured] = useState(false);
+
+  const researchGuests = async () => {
+    setGuestsLoading(true);
+    setGuestsError(null);
+    try {
+      const res = await fetchGuestResearch(context.attendees);
+      setProviderConfigured(res.providerConfigured);
+      setGuests(new Map(res.guests.map((g) => [g.email.toLowerCase(), g])));
+    } catch {
+      setGuestsError('Could not research guests. Please retry.');
+    } finally {
+      setGuestsLoading(false);
+    }
+  };
+
+  // Reset research when the meeting context changes.
+  useEffect(() => {
+    setGuests(null);
+    setGuestsError(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [context.title, JSON.stringify(context.attendees)]);
 
   useEffect(() => {
     let cancelled = false;
@@ -47,6 +91,19 @@ export default function PreMeetingScreen({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [context.title, context.description, JSON.stringify(context.attendees)]);
 
+  /** The brief above is served from cache; this is the way to force a rebuild. */
+  const regenerate = async () => {
+    setIsRegenerating(true);
+    setError(null);
+    try {
+      setData(await fetchPreMeetingBrief(context, { refresh: true }));
+    } catch {
+      setError('Could not rebuild the pre-meeting brief. Please retry.');
+    } finally {
+      setIsRegenerating(false);
+    }
+  };
+
   return (
     <section className='mx-auto flex max-w-4xl flex-col gap-5'>
       <div className='flex items-center gap-3'>
@@ -60,10 +117,23 @@ export default function PreMeetingScreen({
           <IconArrowLeft className='mr-1.5 size-3.5' />
           Back
         </Button>
-        <div>
+        <div className='min-w-0 flex-1'>
           <h1 className='text-xl font-semibold text-foreground'>{context.title}</h1>
           <p className='text-xs text-muted-foreground'>AI pre-meeting brief</p>
         </div>
+        {!isLoading && !error && (
+          <Button
+            type='button'
+            size='sm'
+            variant='outline'
+            className={cn('shrink-0 rounded-full', COPILOT_BTN_OUTLINE)}
+            disabled={isRegenerating}
+            onClick={() => void regenerate()}
+          >
+            <IconRefresh className='mr-1.5 size-3.5' />
+            {isRegenerating ? 'Rebuilding…' : 'Regenerate'}
+          </Button>
+        )}
       </div>
 
       {isLoading ? (
@@ -115,32 +185,86 @@ export default function PreMeetingScreen({
           </Card>
 
           <Card className={SURFACE}>
-            <CardHeader>
+            <CardHeader className='flex flex-row items-center justify-between gap-2 space-y-0'>
               <CardTitle className='flex items-center gap-2 text-base'>
                 <IconUsers className='size-4 text-primary' />
                 Attendees
               </CardTitle>
+              <Button
+                type='button'
+                size='sm'
+                variant='outline'
+                className={cn('rounded-full', COPILOT_BTN_OUTLINE)}
+                onClick={researchGuests}
+                disabled={guestsLoading}
+              >
+                <IconSearch className='mr-1.5 size-3.5' />
+                {guestsLoading ? 'Researching…' : guests ? 'Refresh research' : 'Research guests'}
+              </Button>
             </CardHeader>
             <CardContent className='space-y-3'>
-              {data.attendees.map((a, i) => (
-                <div key={i} className='rounded-lg border border-border/60 p-3'>
-                  <div className='flex items-center justify-between gap-2'>
-                    <div>
-                      <p className='text-sm font-medium text-foreground'>{a.name}</p>
-                      {a.email && <p className='text-xs text-muted-foreground'>{a.email}</p>}
+              {data.attendees.map((a, i) => {
+                const g = a.email ? guests?.get(a.email.toLowerCase()) : undefined;
+                const displayName = g?.fullName || a.name;
+                const website = g?.website ?? undefined;
+                const linkedinUrl = g?.linkedinUrl ?? a.linkedinUrl ?? undefined;
+                const github = g?.socialProfiles?.['github'];
+                const bio = g?.bio ?? a.bio ?? undefined;
+                return (
+                  <div key={i} className='rounded-lg border border-border/60 p-3'>
+                    <div className='flex items-start justify-between gap-2'>
+                      <div className='min-w-0'>
+                        <div className='flex flex-wrap items-center gap-2'>
+                          <p className='text-sm font-medium text-foreground'>{displayName}</p>
+                          {g && (
+                            <Badge
+                              variant='outline'
+                              className={cn('text-[10px]', CONFIDENCE_BADGE[g.confidence])}
+                            >
+                              {g.matchStatus === 'possible_matches'
+                                ? 'Possible match'
+                                : `${g.confidence} confidence`}
+                            </Badge>
+                          )}
+                        </div>
+                        {(g?.title || g?.company) && (
+                          <p className='truncate text-xs text-foreground/80'>
+                            {[g?.title, g?.company].filter(Boolean).join(' · ')}
+                          </p>
+                        )}
+                        {a.email && <p className='truncate text-xs text-muted-foreground'>{a.email}</p>}
+                        {g?.location && (
+                          <p className='text-xs text-muted-foreground'>{g.location}</p>
+                        )}
+                      </div>
+                      <div className='flex shrink-0 items-center gap-2 text-muted-foreground'>
+                        {website && (
+                          <a href={website} target='_blank' rel='noreferrer' title='Website' className='hover:text-primary'>
+                            <IconWorld className='size-4' />
+                          </a>
+                        )}
+                        {github && (
+                          <a href={github} target='_blank' rel='noreferrer' title='GitHub' className='hover:text-primary'>
+                            <IconBrandGithub className='size-4' />
+                          </a>
+                        )}
+                        {linkedinUrl && (
+                          <a href={linkedinUrl} target='_blank' rel='noreferrer' title='LinkedIn' className='text-primary'>
+                            <IconBrandLinkedin className='size-4' />
+                          </a>
+                        )}
+                      </div>
                     </div>
-                    {a.linkedinUrl && (
-                      <a href={a.linkedinUrl} target='_blank' rel='noreferrer' className='text-primary'>
-                        <IconBrandLinkedin className='size-4' />
-                      </a>
-                    )}
+                    {bio && <p className='mt-2 text-xs text-muted-foreground'>{bio}</p>}
                   </div>
-                  {a.bio && <p className='mt-2 text-xs text-muted-foreground'>{a.bio}</p>}
-                </div>
-              ))}
-              {!data.enrichmentEnabled && (
+                );
+              })}
+              {guestsError && <p className='text-xs text-destructive'>{guestsError}</p>}
+              {guests && !providerConfigured && (
                 <p className='text-xs text-muted-foreground'>
-                  Add SERPER_API_KEY to enable attendee web enrichment (LinkedIn, bio).
+                  Showing free results (company, Gravatar, GitHub). Set{' '}
+                  <code>ENRICHMENT_PROVIDER=serper</code> (+ <code>SERPER_API_KEY</code>) or{' '}
+                  <code>pdl</code> to add LinkedIn profiles.
                 </p>
               )}
             </CardContent>

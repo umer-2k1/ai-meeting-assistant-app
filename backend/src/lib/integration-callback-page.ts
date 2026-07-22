@@ -8,6 +8,7 @@
 const PROVIDER_LABELS: Record<string, string> = {
   GOOGLE_CALENDAR: 'Google Calendar',
   GMAIL: 'Gmail',
+  SLACK: 'Slack',
 };
 
 function escapeHtml(value: string): string {

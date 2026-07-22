@@ -113,6 +113,17 @@ model Meeting {
   recordingStarted  DateTime?
   recordingEnded    DateTime?
 
+  // Where this meeting came from.
+  // MeetingSource: DIRECT | CALENDAR
+  // DIRECT   — ad-hoc "New Recording"; no invite, so no attendee list.
+  // CALENDAR — started from a Google Calendar event, so it carries that event's
+  //            attendees. That attendee list is the join key the pre-meeting
+  //            brief uses to find past meetings with the same people, which is
+  //            why preserving the distinction matters beyond a UI badge.
+  source            String    @default("DIRECT")
+  /** Google Calendar event id, when source = CALENDAR. */
+  calendarEventId   String?
+
   // Platform info
   platform          String?   // "zoom", "meet", "teams", "in-person"
   platformMeetingId String?
@@ -149,6 +160,9 @@ model Meeting {
   @@index([userId])
   @@index([startTime])
   @@index([status])
+  @@index([source])
+  // Lets a repeat "Start recording" on the same invite find the existing meeting.
+  @@index([calendarEventId])
 }
 
 // ========================================
@@ -164,12 +178,16 @@ model MeetingAttendee {
   email           String?
   role            String?   // "organizer", "required", "optional"
 
-  // Enrichment data
+  // Enrichment data (snapshot; shared cache lives on Contact)
   linkedinUrl     String?
   company         String?
   title           String?
   bio             String?
   enrichedAt      DateTime?
+
+  // Link to the shared, cross-meeting enriched profile (nullable).
+  contactId       String?
+  contact         Contact?  @relation(fields: [contactId], references: [id], onDelete: SetNull)
 
   // Timestamps
   createdAt       DateTime  @default(now())
@@ -177,6 +195,48 @@ model MeetingAttendee {
 
   @@index([meetingId])
   @@index([email])
+  @@index([contactId])
+}
+
+// ========================================
+// Contact — shared enriched profile, cached across meetings by email.
+// Populated by the guest-research service (free base + optional LinkedIn layer).
+// ========================================
+
+model Contact {
+  id             String    @id @default(cuid())
+  email          String    @unique
+  domain         String?
+  isFreeEmail    Boolean   @default(false)
+
+  // Profile (v1: company + website + LinkedIn/Gravatar/GitHub)
+  fullName       String?
+  title          String?
+  company        String?
+  companyDomain  String?
+  website        String?
+  linkedinUrl    String?
+  avatarUrl      String?
+  bio            String?
+  location       String?
+
+  // Extension seam for broader socials (YouTube/FB/IG/X/GitHub…)
+  socialProfiles Json?             // { github?, twitter?, youtube?, ... }
+
+  // Provenance & trust
+  confidence     String    @default("low")     // 'high' | 'medium' | 'low'
+  matchStatus    String    @default("unknown") // 'verified' | 'possible_matches' | 'unknown'
+  sources        Json?             // [{ type, url?, note? }]
+  provider       String?           // active LinkedIn-layer provider at enrich time
+  raw            Json?             // provider raw payload (debug / re-derive)
+  enrichedAt     DateTime?
+
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  attendees      MeetingAttendee[]
+
+  @@index([domain])
 }
 
 // ========================================

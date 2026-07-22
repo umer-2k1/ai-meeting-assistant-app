@@ -1,6 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useParams } from 'react-router-dom';
-import { toast } from 'sonner';
 
 import {
   IconArrowUp,
@@ -10,12 +8,12 @@ import {
   IconCircleFilled,
   IconClock,
   IconFolders,
-  IconInfoCircle,
   IconHeadphones,
+  IconInfoCircle,
   IconLayoutDashboard,
   IconLoader2,
-  IconMicrophone,
   IconLogout,
+  IconMicrophone,
   IconMusic,
   IconPlayerPause,
   IconPlayerStop,
@@ -25,6 +23,8 @@ import {
   IconUpload,
   IconUsers
 } from '@tabler/icons-react';
+import { useParams } from 'react-router-dom';
+import { toast } from 'sonner';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -35,20 +35,14 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
+  DialogTrigger
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import ThemeToggle from '@/components/ui/theme-toggle';
-import { cn } from '@/lib/utils';
-import { useAuth } from '@/contexts/auth-context';
 import { UserProfile } from '@/components/user-profile';
+import { useAuth } from '@/contexts/auth-context';
+import { cn } from '@/lib/utils';
 
-import {
-  queryWebMicrophone,
-  requestDesktopMicrophone,
-  requestWebMicrophone
-} from './permissions';
-import SettingsScreen from './settings-screen';
 import {
   COPILOT_BTN_OUTLINE,
   COPILOT_HIGHLIGHT_PANEL,
@@ -56,28 +50,47 @@ import {
   COPILOT_INPUT,
   COPILOT_SURFACE
 } from './copilot-styles';
+import { queryWebMicrophone, requestDesktopMicrophone, requestWebMicrophone } from './permissions';
+import SettingsScreen from './settings-screen';
+
 import './copilot-theme.css';
+
+import type { DeviceCheckTab } from './device-check-screen';
+import type { CalendarRecordingContext } from './meetings-api';
+import type { PreMeetingContext } from './pre-meeting-screen';
+import type { AiAnswer, Meeting, TranscriptLine } from './types';
+
+import { BrandLoader } from '@/components/brand/brand-loader';
+import { BrandLogo } from '@/components/brand/brand-mark';
+import { Skeleton } from '@/components/ui/skeleton';
+
 import CalendarScreen from './calendar-screen';
-import PreMeetingScreen, { type PreMeetingContext } from './pre-meeting-screen';
-import DeviceCheckScreen, { type DeviceCheckTab } from './device-check-screen';
+import DeviceCheckScreen from './device-check-screen';
+import IntegrationReconnectBanner from './integration-reconnect-banner';
 import MeetingDetailScreen from './meeting-detail/meeting-detail-screen';
-import { useMeetingDetail, useMeetingList } from './use-meetings-data';
-import { useLiveTranscription } from './use-live-transcription';
+import MeetingSourceBadge from './meeting-source-badge';
 import {
   completeMeetingApi,
   createLiveMeetingApi,
-  uploadMeetingAudioApi,
+  fetchMeetingChatHistory,
   importAudioApi,
   searchMeetingsApi,
   streamMeetingAnswer,
   updateMeetingTitleApi,
+  uploadMeetingAudioApi
 } from './meetings-api';
-import { Skeleton } from '@/components/ui/skeleton';
-import { BrandLogo } from '@/components/brand/brand-mark';
-import { BrandLoader } from '@/components/brand/brand-loader';
-import type { AiAnswer, Meeting, TranscriptLine } from './types';
+import PreMeetingScreen from './pre-meeting-screen';
+import { useIntegrationHealth } from './use-integration-health';
+import { useLiveTranscription } from './use-live-transcription';
+import { useMeetingDetail, useMeetingList } from './use-meetings-data';
 
 type View = 'dashboard' | 'live' | 'detail' | 'calendar' | 'device-check' | 'settings' | 'prep';
+
+/** What the Calendar screen hands to `startRecording` for a calendar event. */
+export type CalendarRecordingLaunch = {
+  title: string;
+  recording: CalendarRecordingContext;
+};
 type RuntimeMode = 'web' | 'desktop';
 
 type IconComponent = typeof IconLayoutDashboard;
@@ -137,7 +150,6 @@ const PAGE_META: Record<View, { title: string; description: string }> = {
   }
 };
 
-
 function AppSidebar({
   activeView,
   onNavigate,
@@ -159,14 +171,14 @@ function AppSidebar({
   const [showAllRecent, setShowAllRecent] = useState(false);
   const visibleRecent = showAllRecent ? recentMeetings : recentMeetings.slice(0, 5);
   return (
-    <aside className='sticky top-0 hidden h-dvh w-64 shrink-0 flex-col overflow-y-auto overscroll-contain border-r border-border bg-sidebar p-4 text-sidebar-foreground lg:flex'>
-      <div className='mb-3 inline-flex items-center rounded-xl border border-primary/30 bg-card px-3 py-2'>
+    <aside className='border-border bg-sidebar text-sidebar-foreground sticky top-0 hidden h-dvh w-64 shrink-0 flex-col overflow-y-auto overscroll-contain border-r p-4 lg:flex'>
+      <div className='border-primary/30 bg-card mb-3 inline-flex items-center rounded-xl border px-3 py-2'>
         <BrandLogo size={32} animated={activeView === 'live'} />
       </div>
 
-      <div className='rounded-xl border border-border bg-muted/40 p-3'>
-        <p className='text-sm font-semibold text-foreground'>{user?.name || 'User'}</p>
-        <p className='text-xs text-muted-foreground'>{user?.email || '—'}</p>
+      <div className='border-border bg-muted/40 rounded-xl border p-3'>
+        <p className='text-foreground text-sm font-semibold'>{user?.name || 'User'}</p>
+        <p className='text-muted-foreground text-xs'>{user?.email || '—'}</p>
       </div>
       <nav aria-label='Primary navigation' className='mt-4 space-y-1'>
         {SIDEBAR_LINKS.map((entry) => {
@@ -182,7 +194,7 @@ function AppSidebar({
                 'flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm transition-all duration-200',
                 activeView === entry.id
                   ? 'bg-primary text-primary-foreground shadow-sm'
-                  : 'text-muted-foreground hover:bg-[var(--copilot-nav-hover)] hover:text-foreground'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-[var(--copilot-nav-hover)]'
               )}
             >
               <Icon className='size-4' />
@@ -193,7 +205,7 @@ function AppSidebar({
       </nav>
 
       <div className='mt-5'>
-        <p className='mb-2 px-2 text-[11px] font-semibold tracking-[0.15em] text-muted-foreground uppercase'>
+        <p className='text-muted-foreground mb-2 px-2 text-[11px] font-semibold tracking-[0.15em] uppercase'>
           Recent
         </p>
         <div
@@ -203,7 +215,7 @@ function AppSidebar({
           )}
         >
           {recentMeetings.length === 0 ? (
-            <p className='px-2 py-1.5 text-xs text-muted-foreground'>No meetings yet</p>
+            <p className='text-muted-foreground px-2 py-1.5 text-xs'>No meetings yet</p>
           ) : (
             visibleRecent.map((meeting) => {
               const isActive = activeView === 'detail' && meeting.id === selectedMeeting?.id;
@@ -217,8 +229,8 @@ function AppSidebar({
                   className={cn(
                     'flex w-full items-center gap-2 rounded-lg border px-2 py-1.5 text-left text-xs transition-all duration-200',
                     isActive
-                      ? 'border-primary/40 bg-primary/10 font-medium text-foreground shadow-sm'
-                      : 'border-transparent text-muted-foreground hover:border-primary/40 hover:bg-muted/60'
+                      ? 'border-primary/40 bg-primary/10 text-foreground font-medium shadow-sm'
+                      : 'text-muted-foreground hover:border-primary/40 hover:bg-muted/60 border-transparent'
                   )}
                 >
                   <span
@@ -240,7 +252,7 @@ function AppSidebar({
           <button
             type='button'
             onClick={() => setShowAllRecent((v) => !v)}
-            className='mt-1 w-full rounded-lg px-2 py-1 text-left text-[11px] font-medium text-primary hover:underline'
+            className='text-primary mt-1 w-full rounded-lg px-2 py-1 text-left text-[11px] font-medium hover:underline'
           >
             {showAllRecent ? 'Show less' : `View more (${recentMeetings.length - 5})`}
           </button>
@@ -248,19 +260,22 @@ function AppSidebar({
       </div>
 
       {isRecording && selectedMeeting && (
-        <div className='mt-4 rounded-xl border border-primary/40 bg-primary/5 p-3'>
-          <p className='inline-flex items-center gap-1.5 text-[11px] font-medium text-primary'>
+        <div className='border-primary/40 bg-primary/5 mt-4 rounded-xl border p-3'>
+          <p className='text-primary inline-flex items-center gap-1.5 text-[11px] font-medium'>
             <IconCircleFilled className='size-2.5 animate-pulse' /> Recording now
           </p>
-          <p className='mt-1 truncate text-sm font-medium text-foreground' title={selectedMeeting.title}>
+          <p
+            className='text-foreground mt-1 truncate text-sm font-medium'
+            title={selectedMeeting.title}
+          >
             {selectedMeeting.title}
           </p>
-          <p className='mt-1 text-xs text-muted-foreground'>{selectedMeeting.duration}</p>
+          <p className='text-muted-foreground mt-1 text-xs'>{selectedMeeting.duration}</p>
         </div>
       )}
 
       <Button
-        className='mt-auto bg-primary hover:bg-primary/90 text-white hover:opacity-95'
+        className='bg-primary hover:bg-primary/90 mt-auto text-white hover:opacity-95'
         onClick={() => {
           onStartRecording();
         }}
@@ -271,7 +286,7 @@ function AppSidebar({
 
       <Button
         variant='outline'
-        className='mt-2 rounded-xl border-border/70 bg-muted/40 text-muted-foreground hover:bg-muted'
+        className='border-border/70 bg-muted/40 text-muted-foreground hover:bg-muted mt-2 rounded-xl'
         onClick={() => {
           logout();
         }}
@@ -285,7 +300,10 @@ function AppSidebar({
 
 const STATUS_BADGE: Record<Meeting['status'], { label: string; className: string }> = {
   live: { label: 'Live', className: 'bg-red-500 text-white border-transparent' },
-  processing: { label: 'Processing', className: 'bg-amber-500/15 text-amber-600 border-amber-500/40' },
+  processing: {
+    label: 'Processing',
+    className: 'bg-amber-500/15 text-amber-600 border-amber-500/40'
+  },
   scheduled: { label: 'Upcoming', className: 'bg-blue-500/10 text-blue-600 border-blue-500/40' },
   completed: { label: 'Completed', className: 'border-border text-muted-foreground' },
   failed: { label: 'Failed', className: 'bg-red-500/10 text-red-600 border-red-500/40' },
@@ -323,7 +341,7 @@ function ProcessingMeetingCard({ meeting }: { meeting: Meeting }) {
             Processing
           </Badge>
         </div>
-        <div className='flex flex-wrap items-center gap-3 text-xs text-muted-foreground'>
+        <div className='text-muted-foreground flex flex-wrap items-center gap-3 text-xs'>
           <span className='inline-flex items-center gap-1'>
             <IconClock className='size-3.5' />
             {meeting.startedAt}
@@ -332,8 +350,8 @@ function ProcessingMeetingCard({ meeting }: { meeting: Meeting }) {
         </div>
       </CardHeader>
       <CardContent className='space-y-3'>
-        <p className='inline-flex items-center gap-2 text-sm text-muted-foreground'>
-          <IconLoader2 className='size-4 animate-spin text-primary' />
+        <p className='text-muted-foreground inline-flex items-center gap-2 text-sm'>
+          <IconLoader2 className='text-primary size-4 animate-spin' />
           Processing recording… transcript, summary, and audio will appear here shortly.
         </p>
         <div className='space-y-2' aria-hidden='true'>
@@ -438,7 +456,7 @@ function ImportAudioDialog({ onImportAudio }: { onImportAudio: (file: File) => v
           }}
           className={cn(
             'flex cursor-pointer flex-col items-center gap-3 rounded-xl border-2 border-dashed px-6 py-10 text-center transition-colors',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
+            'focus-visible:ring-primary/50 focus-visible:ring-2 focus-visible:outline-none',
             isDragging
               ? 'border-primary bg-primary/5'
               : 'border-border bg-muted/30 hover:border-primary/60 hover:bg-muted/50'
@@ -455,20 +473,20 @@ function ImportAudioDialog({ onImportAudio }: { onImportAudio: (file: File) => v
               <IconMusic className='size-6' />
             </span>
             <div className='space-y-1'>
-              <p className='text-base font-semibold text-foreground'>
+              <p className='text-foreground text-base font-semibold'>
                 {isDragging ? 'Drop to import' : 'Drag & drop your audio file'}
               </p>
-              <p className='text-xs text-muted-foreground'>
+              <p className='text-muted-foreground text-xs'>
                 {IMPORT_AUDIO_EXTENSIONS.map((e) => e.toUpperCase()).join(', ')}
               </p>
             </div>
           </div>
 
-          <span className='pointer-events-none text-xs text-muted-foreground'>or</span>
+          <span className='text-muted-foreground pointer-events-none text-xs'>or</span>
 
           <Button
             type='button'
-            className='pointer-events-none bg-primary text-white hover:bg-primary/90'
+            className='bg-primary hover:bg-primary/90 pointer-events-none text-white'
             tabIndex={-1}
           >
             Browse files
@@ -522,10 +540,12 @@ function DashboardScreen({
         {statCards.map((stat) => (
           <Card key={stat.label} className={SURFACE}>
             <CardContent className='space-y-1'>
-              <p className='text-xs uppercase tracking-[0.12em] text-muted-foreground'>{stat.label}</p>
-              <p className='text-2xl font-semibold text-foreground'>
-                {isLoading ? <Skeleton className='h-8 w-16' /> : stat.value}
+              <p className='text-muted-foreground text-xs tracking-[0.12em] uppercase'>
+                {stat.label}
               </p>
+              <div className='text-foreground text-2xl font-semibold'>
+                {isLoading ? <Skeleton className='h-8 w-16' /> : stat.value}
+              </div>
             </CardContent>
           </Card>
         ))}
@@ -533,7 +553,7 @@ function DashboardScreen({
 
       <div className='flex flex-wrap items-center gap-3'>
         <div className='relative min-w-64 flex-1'>
-          <IconSearch className='absolute top-2 left-2.5 size-4 text-muted-foreground' />
+          <IconSearch className='text-muted-foreground absolute top-2 left-2.5 size-4' />
           <Input
             aria-label='Search all meetings'
             value={searchText}
@@ -564,17 +584,17 @@ function DashboardScreen({
 
       <div className='space-y-3'>
         <div className='flex items-center gap-2'>
-          <IconFolders className='size-4 text-muted-foreground' />
-          <h2 className='text-lg font-semibold text-foreground'>
+          <IconFolders className='text-muted-foreground size-4' />
+          <h2 className='text-foreground text-lg font-semibold'>
             {searchText.trim() ? 'Search Results' : 'Recent Meetings'}
           </h2>
-          {isSearching && <IconLoader2 className='size-4 animate-spin text-muted-foreground' />}
+          {isSearching && <IconLoader2 className='text-muted-foreground size-4 animate-spin' />}
         </div>
 
         {error ? (
           <Card className={SURFACE}>
             <CardContent className='flex flex-col items-center gap-3 py-10 text-center'>
-              <p className='text-sm text-muted-foreground'>{error}</p>
+              <p className='text-muted-foreground text-sm'>{error}</p>
               <Button variant='outline' className={COPILOT_BTN_OUTLINE} onClick={onRetry}>
                 Retry
               </Button>
@@ -598,12 +618,12 @@ function DashboardScreen({
         ) : filteredMeetings.length === 0 ? (
           <Card className={SURFACE}>
             <CardContent className='flex flex-col items-center gap-3 py-12 text-center'>
-              <IconFolders className='size-8 text-muted-foreground/60' />
+              <IconFolders className='text-muted-foreground/60 size-8' />
               <div>
-                <p className='text-sm font-medium text-foreground'>
+                <p className='text-foreground text-sm font-medium'>
                   {searchText.trim() ? 'No meetings match your search' : 'No meetings yet'}
                 </p>
-                <p className='mt-1 text-xs text-muted-foreground'>
+                <p className='text-muted-foreground mt-1 text-xs'>
                   {searchText.trim()
                     ? 'Try a different search term.'
                     : 'Start a recording or connect your calendar to see meetings here.'}
@@ -642,17 +662,20 @@ function DashboardScreen({
                 }}
                 className={cn(
                   SURFACE,
-                  'cursor-pointer transition-all hover:-translate-y-0.5 hover:border-primary/60'
+                  'hover:border-primary/60 cursor-pointer transition-all hover:-translate-y-0.5'
                 )}
               >
                 <CardHeader className='space-y-3'>
                   <div className='flex items-center justify-between gap-3'>
                     <CardTitle className='text-foreground'>{meeting.title}</CardTitle>
-                    <Badge variant='outline' className={cn('shrink-0', badge.className)}>
-                      {badge.label}
-                    </Badge>
+                    <div className='flex shrink-0 items-center gap-2'>
+                      <MeetingSourceBadge source={meeting.source} />
+                      <Badge variant='outline' className={cn('shrink-0', badge.className)}>
+                        {badge.label}
+                      </Badge>
+                    </div>
                   </div>
-                  <div className='flex flex-wrap items-center gap-3 text-xs text-muted-foreground'>
+                  <div className='text-muted-foreground flex flex-wrap items-center gap-3 text-xs'>
                     <span className='inline-flex items-center gap-1'>
                       <IconClock className='size-3.5' />
                       {meeting.startedAt}
@@ -668,7 +691,7 @@ function DashboardScreen({
                         target='_blank'
                         rel='noreferrer'
                         onClick={(e) => e.stopPropagation()}
-                        className='inline-flex items-center gap-1 text-primary hover:underline'
+                        className='text-primary inline-flex items-center gap-1 hover:underline'
                       >
                         <IconArrowUpRight className='size-3.5' />
                         {meeting.platform || 'Join'}
@@ -677,7 +700,7 @@ function DashboardScreen({
                   </div>
                 </CardHeader>
                 <CardContent className='space-y-3'>
-                  <p className='text-sm text-foreground/80'>{meeting.summarySnippet}</p>
+                  <p className='text-foreground/80 text-sm'>{meeting.summarySnippet}</p>
                   {meeting.tags.length > 0 && (
                     <div className='flex flex-wrap gap-1'>
                       {meeting.tags.map((tag) => (
@@ -692,8 +715,9 @@ function DashboardScreen({
                     </div>
                   )}
                   <div className='flex flex-wrap items-center justify-between gap-2'>
-                    <p className='text-xs text-muted-foreground'>
-                      {meeting.actionItemCount ?? meeting.actionItems.length} action items • {meeting.decisions.length} decisions
+                    <p className='text-muted-foreground text-xs'>
+                      {meeting.actionItemCount ?? meeting.actionItems.length} action items •{' '}
+                      {meeting.decisions.length} decisions
                     </p>
                     <Button
                       size='sm'
@@ -765,17 +789,17 @@ function LiveScreen({
     return (
       <Card className={cn(SURFACE, 'mx-auto max-w-xl')}>
         <CardContent className='flex flex-col items-center gap-4 py-14 text-center'>
-          <div className='inline-flex size-14 items-center justify-center rounded-full bg-primary/10'>
-            <IconMicrophone className='size-7 text-primary' />
+          <div className='bg-primary/10 inline-flex size-14 items-center justify-center rounded-full'>
+            <IconMicrophone className='text-primary size-7' />
           </div>
           <div className='space-y-1'>
-            <p className='text-base font-semibold text-foreground'>No active recording</p>
-            <p className='text-sm text-muted-foreground'>
-              Start a new recording to capture live transcript, or open a past meeting
-              from the dashboard.
+            <p className='text-foreground text-base font-semibold'>No active recording</p>
+            <p className='text-muted-foreground text-sm'>
+              Start a new recording to capture live transcript, or open a past meeting from the
+              dashboard.
             </p>
           </div>
-          <Button className='bg-primary text-white hover:bg-primary/90' onClick={onStart}>
+          <Button className='bg-primary hover:bg-primary/90 text-white' onClick={onStart}>
             <IconMicrophone className='mr-1.5 size-4' />
             Start New Recording
           </Button>
@@ -794,9 +818,11 @@ function LiveScreen({
                 className={cn('size-4 text-red-500', isRecording && 'animate-pulse')}
                 aria-hidden='true'
               />
-              <p className='text-sm font-semibold text-foreground'>Recording</p>
+              <p className='text-foreground text-sm font-semibold'>Recording</p>
             </div>
-            <p className='text-sm text-foreground/80'>Timer: {mm}:{ss}</p>
+            <p className='text-foreground/80 text-sm'>
+              Timer: {mm}:{ss}
+            </p>
           </div>
           <Input
             value={title}
@@ -813,7 +839,11 @@ function LiveScreen({
             className={COPILOT_INPUT}
           />
           <div className='flex flex-wrap items-center gap-2'>
-            <Button variant='outline' className='border-border text-foreground' onClick={onPauseResume}>
+            <Button
+              variant='outline'
+              className='border-border text-foreground'
+              onClick={onPauseResume}
+            >
               <IconPlayerPause className='mr-1.5 size-4' />
               {isPaused ? 'Resume' : 'Pause'}
             </Button>
@@ -824,12 +854,15 @@ function LiveScreen({
           </div>
         </CardHeader>
         <CardContent className='space-y-3'>
-          <p className='text-xs font-semibold tracking-[0.15em] text-muted-foreground uppercase'>
+          <p className='text-muted-foreground text-xs font-semibold tracking-[0.15em] uppercase'>
             Live Transcript
           </p>
-          <div aria-live='polite' className='max-h-[max(280px,50dvh)] space-y-3 overflow-y-auto pr-2'>
+          <div
+            aria-live='polite'
+            className='max-h-[max(280px,50dvh)] space-y-3 overflow-y-auto pr-2'
+          >
             {transcript.length === 0 && !interimLine && (
-              <p className='text-sm text-muted-foreground'>
+              <p className='text-muted-foreground text-sm'>
                 {isRecording ? 'Listening…' : 'Transcript will appear here once recording starts.'}
               </p>
             )}
@@ -841,11 +874,11 @@ function LiveScreen({
                   line.highlighted ? COPILOT_HIGHLIGHT_PANEL : COPILOT_INNER_PANEL
                 )}
               >
-                <p className='mb-1 text-xs font-medium text-muted-foreground'>
+                <p className='text-muted-foreground mb-1 text-xs font-medium'>
                   [{line.timestamp}] {line.speaker}
                   {line.highlighted ? '  ⭐' : ''}
                 </p>
-                <p className='text-sm text-foreground/85'>{line.text}</p>
+                <p className='text-foreground/85 text-sm'>{line.text}</p>
               </div>
             ))}
             {/* Volatile tail: the line Deepgram is still revising. Greyed and
@@ -853,12 +886,12 @@ function LiveScreen({
                 the Otter-style stable/volatile split, so text never flickers. */}
             {interimLine && (
               <div className={cn('rounded-lg border border-dashed p-3', COPILOT_INNER_PANEL)}>
-                <p className='mb-1 text-xs font-medium text-muted-foreground'>
+                <p className='text-muted-foreground mb-1 text-xs font-medium'>
                   [{interimLine.timestamp}] {interimLine.speaker}
                 </p>
-                <p className='text-sm text-foreground/50'>
+                <p className='text-foreground/50 text-sm'>
                   {interimLine.text}
-                  <span className='ml-1 inline-block animate-pulse text-primary'>▍</span>
+                  <span className='text-primary ml-1 inline-block animate-pulse'>▍</span>
                 </p>
               </div>
             )}
@@ -895,7 +928,7 @@ function LiveScreen({
                 <button
                   key={prompt}
                   type='button'
-                  className='rounded-full border border-border bg-muted/70 px-3 py-1 text-xs text-foreground/80 hover:border-primary'
+                  className='border-border bg-muted/70 text-foreground/80 hover:border-primary rounded-full border px-3 py-1 text-xs'
                   onClick={async () => {
                     await onAskAi(prompt);
                   }}
@@ -925,39 +958,39 @@ function LiveScreen({
           transcript. Each turn shows your question + the streaming answer. */}
       <Card className={SURFACE}>
         <CardHeader>
-          <CardTitle className='inline-flex items-center gap-2 text-foreground'>
-            <IconSparkles className='size-4 text-primary' />
+          <CardTitle className='text-foreground inline-flex items-center gap-2'>
+            <IconSparkles className='text-primary size-4' />
             Ask AI
           </CardTitle>
         </CardHeader>
         <CardContent>
           {aiAnswers.length === 0 ? (
-            <p className='text-sm text-muted-foreground'>
-              Ask a question about the meeting so far — your questions and answers appear
-              here, kept separate from the live transcript.
+            <p className='text-muted-foreground text-sm'>
+              Ask a question about the meeting so far — your questions and answers appear here, kept
+              separate from the live transcript.
             </p>
           ) : (
             <div className='max-h-[max(320px,60dvh)] space-y-3 overflow-y-auto overscroll-contain pr-1'>
               {aiAnswers.map((answer) => (
                 <div key={answer.id} className='space-y-1.5'>
-                  <div className='ml-auto w-fit max-w-[90%] rounded-2xl rounded-br-sm bg-primary px-3 py-1.5 text-sm text-primary-foreground'>
+                  <div className='bg-primary text-primary-foreground ml-auto w-fit max-w-[90%] rounded-2xl rounded-br-sm px-3 py-1.5 text-sm'>
                     {answer.question}
                   </div>
-                  <div className='w-fit max-w-[95%] rounded-2xl rounded-bl-sm border border-border/70 bg-muted/70 px-3 py-1.5 text-sm text-foreground/90'>
+                  <div className='border-border/70 bg-muted/70 text-foreground/90 w-fit max-w-[95%] rounded-2xl rounded-bl-sm border px-3 py-1.5 text-sm'>
                     {answer.answer ||
                       (answer.error ? null : (
-                        <span className='inline-flex items-center gap-1 text-muted-foreground'>
-                          <span className='inline-block size-2 animate-pulse rounded-full bg-primary' />
+                        <span className='text-muted-foreground inline-flex items-center gap-1'>
+                          <span className='bg-primary inline-block size-2 animate-pulse rounded-full' />
                           Thinking…
                         </span>
                       ))}
                     {answer.error && (
-                      <span className='mt-1 flex items-center gap-2 text-xs text-destructive'>
+                      <span className='text-destructive mt-1 flex items-center gap-2 text-xs'>
                         <IconInfoCircle className='size-3.5 shrink-0' />
                         Answer interrupted.
                         <button
                           type='button'
-                          className='font-medium underline underline-offset-2 hover:text-destructive/80'
+                          className='hover:text-destructive/80 font-medium underline underline-offset-2'
                           onClick={() => void onAskAi(answer.question)}
                           disabled={isAsking}
                         >
@@ -1000,11 +1033,20 @@ function FloatingWidget({
 
   return (
     <div className={cn('fixed right-4 bottom-4 z-40 w-80 max-w-[calc(100vw-2rem)] p-3', SURFACE)}>
-      <p className='mb-1 text-sm font-semibold text-foreground'>AI Meeting Copilot</p>
-      <p className='text-sm text-foreground/85'>🔴 Recording {mm}:{ss}</p>
-      <p className='mt-1 truncate text-xs text-muted-foreground'>{meetingTitle || 'Untitled meeting'}</p>
+      <p className='text-foreground mb-1 text-sm font-semibold'>AI Meeting Copilot</p>
+      <p className='text-foreground/85 text-sm'>
+        🔴 Recording {mm}:{ss}
+      </p>
+      <p className='text-muted-foreground mt-1 truncate text-xs'>
+        {meetingTitle || 'Untitled meeting'}
+      </p>
       <div className='mt-2 flex gap-2'>
-        <Button size='sm' variant='outline' className='border-primary/50 text-primary' onClick={onAsk}>
+        <Button
+          size='sm'
+          variant='outline'
+          className='border-primary/50 text-primary'
+          onClick={onAsk}
+        >
           Ask AI
         </Button>
         <Button size='sm' variant='outline' className={COPILOT_BTN_OUTLINE} onClick={onPauseResume}>
@@ -1044,7 +1086,28 @@ export default function MeetingCopilotApp() {
   const [detailAskInput, setDetailAskInput] = useState('');
   const [isAsking, setIsAsking] = useState(false);
   const [askError, setAskError] = useState<string | null>(null);
-  const [aiAnswers, setAiAnswers] = useState<AiAnswer[]>([]);
+  /**
+   * AI chat, keyed by meeting id. Each meeting owns an isolated conversation:
+   * a single shared array leaked meeting A's questions into every other
+   * meeting's AI Chat tab. Never flatten this back into one list.
+   */
+  /**
+   * Recording state as this window last saw it, plus a guard so a stop is
+   * finalized exactly once. `stopRecording` itself calls the desktop stop, which
+   * echoes back through `onStateChange` — without the guard that would re-enter
+   * finalization and upload the audio twice.
+   */
+  const recordingActiveRef = useRef(false);
+  const stopInFlightRef = useRef(false);
+  /** Always the current `stopRecording`; the IPC effect runs once with [] deps. */
+  const stopRecordingRef = useRef<(nextView?: View) => void>(() => {});
+
+  const [aiAnswersByMeeting, setAiAnswersByMeeting] = useState<Record<string, AiAnswer[]>>({});
+  /** Meetings whose saved history has been fetched, so we load once per meeting. */
+  const [chatHistoryLoaded, setChatHistoryLoaded] = useState<Record<string, boolean>>({});
+  // Re-checked periodically: a grant can die mid-session, and the only fix is
+  // re-consent, so the prompt has to find the user wherever they are.
+  const { revoked: revokedIntegrations } = useIntegrationHealth({ pollMs: 5 * 60 * 1000 });
 
   const {
     meetings: meetingList,
@@ -1067,13 +1130,54 @@ export default function MeetingCopilotApp() {
     error: liveError
   } = useLiveTranscription();
 
+  /** Only the open meeting's conversation is ever rendered. */
+  const aiAnswers = selectedMeetingId ? (aiAnswersByMeeting[selectedMeetingId] ?? []) : [];
+
+  // Load this meeting's saved chat once, so history survives reopening the
+  // meeting or restarting the app. Answers are already persisted per meeting
+  // server-side; before this they were written and never read back.
+  useEffect(() => {
+    const meetingId = selectedMeetingId;
+    if (!meetingId || chatHistoryLoaded[meetingId]) return;
+
+    let cancelled = false;
+    void fetchMeetingChatHistory(meetingId)
+      .then((messages) => {
+        if (cancelled) return;
+        setAiAnswersByMeeting((byMeeting) => {
+          // Newest first, matching how live answers are prepended. Anything
+          // asked while this was in flight stays on top.
+          const restored: AiAnswer[] = messages
+            .map((m) => ({
+              id: m.id,
+              question: m.question,
+              answer: m.answer,
+              timestamp: m.timestamp
+            }))
+            .reverse();
+          const pending = byMeeting[meetingId] ?? [];
+          const known = new Set(pending.map((a) => a.id));
+          return {
+            ...byMeeting,
+            [meetingId]: [...pending, ...restored.filter((a) => !known.has(a.id))]
+          };
+        });
+        setChatHistoryLoaded((loaded) => ({ ...loaded, [meetingId]: true }));
+      })
+      .catch((error) => {
+        // Non-fatal: the tab still works for new questions.
+        console.error('Failed to load meeting chat history:', error);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedMeetingId, chatHistoryLoaded]);
+
   // True while any meeting in the list is still being finalized — drives the
   // dashboard's background polling so a just-stopped recording flips from
   // "Processing…" to a real, openable meeting on its own (no app reopen needed).
-  const hasProcessingMeetings = useMemo(
-    () => meetingList.some(isMeetingProcessing),
-    [meetingList]
-  );
+  const hasProcessingMeetings = useMemo(() => meetingList.some(isMeetingProcessing), [meetingList]);
 
   // Auto-refresh while a meeting is still processing so the AI summary, title,
   // tags, and audio appear on their own (and the title types out) — no manual
@@ -1150,6 +1254,19 @@ export default function MeetingCopilotApp() {
       setIsRecording(state.isRecording);
       setIsRecordingPaused(state.isPaused);
       setElapsedSeconds(state.elapsedSeconds);
+
+      // A stop that originated OUTSIDE this window — the floating widget, the
+      // tray menu, the global shortcut — only flips main-process state. This
+      // window owns the recorder, the WebSocket and the audio blob, so without
+      // running the real stop path here: the MediaRecorder keeps running, the
+      // socket stays open, the audio is NEVER uploaded, and the meeting sits
+      // LIVE until the server's idle watchdog finalizes it minutes later.
+      // That is exactly how recordings stopped from the widget lost their audio.
+      if (!state.isRecording && recordingActiveRef.current && !stopInFlightRef.current) {
+        stopInFlightRef.current = true;
+        stopRecordingRef.current();
+      }
+      recordingActiveRef.current = state.isRecording;
     });
 
     return () => {
@@ -1209,8 +1326,7 @@ export default function MeetingCopilotApp() {
       const target = event.target as HTMLElement | null;
       const isTyping =
         !!target &&
-        (target.isContentEditable ||
-          ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName));
+        (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName));
       if (isTyping) return;
 
       const withCommand = event.metaKey || event.ctrlKey;
@@ -1258,7 +1374,7 @@ export default function MeetingCopilotApp() {
     return meetingList.find((m) => m.id === selectedMeetingId) ?? null;
   }, [selectedMeetingDetail, meetingList, selectedMeetingId]);
 
-  const filteredMeetings = searchText.trim() ? searchResults ?? [] : meetingList;
+  const filteredMeetings = searchText.trim() ? (searchResults ?? []) : meetingList;
 
   // Opening a meeting that is still finalizing would show an empty detail page.
   // Guard every open path (dashboard cards, sidebar "Recent") so a processing
@@ -1277,7 +1393,7 @@ export default function MeetingCopilotApp() {
     const question = (questionOverride ?? askInput).trim();
     if (!question || isAsking) return;
 
-    const meetingId = selectedMeeting?.id;
+    const meetingId = selectedMeetingId ?? selectedMeeting?.id;
     if (!meetingId) {
       setAskError('Open or start a meeting before asking the AI.');
       return;
@@ -1286,26 +1402,30 @@ export default function MeetingCopilotApp() {
     setIsAsking(true);
     setAskError(null);
 
+    // Every update targets THIS meeting's bucket. Answers must land in the
+    // meeting they were asked about even if the user navigates mid-stream.
+    const updateAnswers = (updater: (current: AiAnswer[]) => AiAnswer[]) => {
+      setAiAnswersByMeeting((byMeeting) => ({
+        ...byMeeting,
+        [meetingId]: updater(byMeeting[meetingId] ?? [])
+      }));
+    };
+
     // Insert a placeholder answer and stream tokens into it (RAG-grounded SSE).
     const answerId = crypto.randomUUID();
-    setAiAnswers((current) => [
-      { id: answerId, question, answer: '', timestamp: '' },
-      ...current
-    ]);
+    updateAnswers((current) => [{ id: answerId, question, answer: '', timestamp: '' }, ...current]);
     if (!questionOverride) setAskInput('');
 
     try {
       const { timestamp } = await streamMeetingAnswer(meetingId, question, {
         onToken: (tokenText) => {
-          setAiAnswers((current) =>
-            current.map((a) =>
-              a.id === answerId ? { ...a, answer: a.answer + tokenText } : a
-            )
+          updateAnswers((current) =>
+            current.map((a) => (a.id === answerId ? { ...a, answer: a.answer + tokenText } : a))
           );
         }
       });
       if (timestamp) {
-        setAiAnswers((current) =>
+        updateAnswers((current) =>
           current.map((a) => (a.id === answerId ? { ...a, timestamp } : a))
         );
       }
@@ -1314,7 +1434,7 @@ export default function MeetingCopilotApp() {
       // interrupted — the panel shows a Retry affordance instead of silently
       // presenting a truncated answer as complete.
       setAskError('Ask AI is temporarily unavailable. Please retry.');
-      setAiAnswers((current) =>
+      updateAnswers((current) =>
         current.map((a) => (a.id === answerId ? { ...a, error: true } : a))
       );
     } finally {
@@ -1337,12 +1457,21 @@ export default function MeetingCopilotApp() {
       });
   };
 
-  const startRecording = () => {
+  /**
+   * Start a recording. Pass `calendarContext` when it was launched from a
+   * Google Calendar event — that is what marks the meeting as a CALENDAR
+   * meeting and carries the invite's attendees onto it.
+   */
+  const startRecording = (calendarContext?: CalendarRecordingLaunch) => {
+    // Fresh session: re-arm the once-only stop guard.
+    stopInFlightRef.current = false;
+    recordingActiveRef.current = true;
     setView('live');
     setAskError(null);
     setIsRecordingPaused(false);
     setElapsedSeconds(0);
-    setAiAnswers([]);
+    // No chat to clear: each meeting has its own bucket, so a new recording
+    // starts empty by construction rather than by wiping shared state.
 
     const beginSession = (liveMeetingId: string) => {
       // Start the real renderer-side capture → WS → Deepgram pipeline.
@@ -1391,8 +1520,11 @@ export default function MeetingCopilotApp() {
       // have a durable home. Audio streams into it; on stop it is processed.
       let liveMeetingId = '';
       try {
-        const defaultTitle = `Live session · ${new Date().toLocaleString()}`;
-        const meeting = await createLiveMeetingApi(defaultTitle);
+        // A calendar-started recording inherits the invite's title, attendees
+        // and join link; an ad-hoc one only gets a timestamped placeholder.
+        const defaultTitle =
+          calendarContext?.title ?? `Live session · ${new Date().toLocaleString()}`;
+        const meeting = await createLiveMeetingApi(defaultTitle, calendarContext?.recording);
         liveMeetingId = meeting.id;
         setSelectedMeetingId(meeting.id);
         setLiveTitle(meeting.title || defaultTitle);
@@ -1436,6 +1568,11 @@ export default function MeetingCopilotApp() {
   // Leaving the live view via the sidebar passes the clicked destination instead
   // so the user lands where they intended.
   const stopRecording = (nextView: View = 'dashboard') => {
+    // Claim the stop so the echo from the desktop stop (and any widget-initiated
+    // event already in flight) cannot start a second finalization.
+    if (stopInFlightRef.current && !recordingActiveRef.current) return;
+    stopInFlightRef.current = true;
+    recordingActiveRef.current = false;
     // Defensive: this is wired to button `onClick` in a couple of places, so a
     // stray event object (or any non-View) must never reach `setView` — doing so
     // used to blank the whole app (PAGE_META[view] undefined → render crash).
@@ -1466,8 +1603,12 @@ export default function MeetingCopilotApp() {
                 } else {
                   // Request succeeded but nothing was persisted (e.g. Cloudinary
                   // not configured) — say so instead of silently showing no audio.
-                  console.warn(`[audio] not stored for meeting ${meetingId} (audio storage not configured)`);
-                  toast.info('Recording saved, but audio playback is not configured on the server.');
+                  console.warn(
+                    `[audio] not stored for meeting ${meetingId} (audio storage not configured)`
+                  );
+                  toast.info(
+                    'Recording saved, but audio playback is not configured on the server.'
+                  );
                 }
                 void refetchDetail();
               })
@@ -1475,7 +1616,9 @@ export default function MeetingCopilotApp() {
                 // No longer swallowed: the upload genuinely failed. Log the
                 // server detail and tell the user so missing audio isn't a mystery.
                 console.error(`[audio] upload failed for meeting ${meetingId}:`, err);
-                toast.error('Could not save the recording audio — see the console/terminal for details.');
+                toast.error(
+                  'Could not save the recording audio — see the console/terminal for details.'
+                );
               });
           } else {
             // The recorder produced nothing — points at mic/capture, not upload.
@@ -1517,6 +1660,9 @@ export default function MeetingCopilotApp() {
 
     finalize();
   };
+
+  // The IPC listener is registered once, so it must reach the CURRENT closure.
+  stopRecordingRef.current = stopRecording;
 
   // Navigating away from a live recording (e.g. clicking "Dashboard" in the
   // sidebar) ends the session — stop the recorder, finalize the meeting, and
@@ -1567,7 +1713,7 @@ export default function MeetingCopilotApp() {
   const pageMeta = PAGE_META[view];
 
   return (
-    <div className='relative flex h-dvh flex-col overflow-hidden bg-background text-foreground'>
+    <div className='bg-background text-foreground relative flex h-dvh flex-col overflow-hidden'>
       <div className='pointer-events-none absolute -top-24 -left-24 size-80 rounded-full bg-[var(--copilot-glow-primary)] blur-3xl' />
       <div className='pointer-events-none absolute top-20 right-0 size-[26rem] rounded-full bg-[var(--copilot-glow-secondary)] blur-3xl' />
       <div className='pointer-events-none absolute bottom-0 left-1/3 size-[30rem] rounded-full bg-cyan-500/10 blur-3xl dark:bg-cyan-500/15' />
@@ -1582,19 +1728,24 @@ export default function MeetingCopilotApp() {
           onOpenMeeting={openMeeting}
         />
         <div className='flex min-h-0 min-w-0 flex-1 flex-col'>
-          <header className='sticky top-0 z-20 shrink-0 border-b border-border bg-background/95 backdrop-blur-md supports-[backdrop-filter]:bg-background/85'>
+          <header className='border-border bg-background/95 supports-[backdrop-filter]:bg-background/85 sticky top-0 z-20 shrink-0 border-b backdrop-blur-md'>
             <div className='flex items-center justify-between px-5 py-4'>
               <div>
-                <h1 className='text-lg font-semibold text-foreground'>{pageMeta.title}</h1>
-                <p className='text-xs text-muted-foreground'>{pageMeta.description}</p>
+                <h1 className='text-foreground text-lg font-semibold'>{pageMeta.title}</h1>
+                <p className='text-muted-foreground text-xs'>{pageMeta.description}</p>
               </div>
               <div className='flex items-center gap-3'>
-                <Badge variant='outline' className='border-cyan-500/50 bg-cyan-500/10 text-cyan-700 dark:text-cyan-300'>
+                <Badge
+                  variant='outline'
+                  className='border-cyan-500/50 bg-cyan-500/10 text-cyan-700 dark:text-cyan-300'
+                >
                   <IconBolt className='mr-1 size-3.5' />
                   Live AI
                 </Badge>
                 <Badge variant='outline' className='border-border bg-muted/60 text-foreground/80'>
-                  {runtimeMode === 'desktop' ? `Desktop${desktopPlatform ? ` · ${desktopPlatform}` : ''}` : 'Web Preview'}
+                  {runtimeMode === 'desktop'
+                    ? `Desktop${desktopPlatform ? ` · ${desktopPlatform}` : ''}`
+                    : 'Web Preview'}
                 </Badge>
                 <ThemeToggle />
                 <UserProfile />
@@ -1610,6 +1761,14 @@ export default function MeetingCopilotApp() {
                 : 'overflow-y-auto overscroll-contain'
             )}
           >
+            {/* Settings already shows per-integration reconnect state, and the
+                live view stays clear while recording. */}
+            {view !== 'settings' && view !== 'live' && (
+              <IntegrationReconnectBanner
+                revoked={revokedIntegrations}
+                onManageIntegrations={() => setView('settings')}
+              />
+            )}
             {view === 'dashboard' && (
               <DashboardScreen
                 filteredMeetings={filteredMeetings}
@@ -1670,10 +1829,14 @@ export default function MeetingCopilotApp() {
                 </div>
               ) : (
                 <div className='flex flex-1 flex-col items-center justify-center gap-3 text-center'>
-                  <p className='text-sm text-muted-foreground'>
+                  <p className='text-muted-foreground text-sm'>
                     {detailError ?? 'Meeting not found.'}
                   </p>
-                  <Button variant='outline' className={COPILOT_BTN_OUTLINE} onClick={() => setView('dashboard')}>
+                  <Button
+                    variant='outline'
+                    className={COPILOT_BTN_OUTLINE}
+                    onClick={() => setView('dashboard')}
+                  >
                     Back to dashboard
                   </Button>
                 </div>
@@ -1681,6 +1844,7 @@ export default function MeetingCopilotApp() {
             {view === 'calendar' && (
               <CalendarScreen
                 onStartRecording={startRecording}
+                onOpenRecording={openMeeting}
                 onManageIntegrations={() => setView('settings')}
                 onPrepare={(ctx) => {
                   setPrepContext(ctx);

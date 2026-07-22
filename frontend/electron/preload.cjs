@@ -52,6 +52,8 @@ contextBridge.exposeInMainWorld('desktop', {
     dragEnd: () => ipcRenderer.invoke('desktop:widget:drag-end'),
     resizeStart: (edge) => ipcRenderer.invoke('desktop:widget:resize-start', edge),
     resizeMove: () => ipcRenderer.invoke('desktop:widget:resize-move'),
-    resizeEnd: () => ipcRenderer.invoke('desktop:widget:resize-end')
+    resizeEnd: () => ipcRenderer.invoke('desktop:widget:resize-end'),
+    /** Report the pill's measured size so the window can hug its content. */
+    reportContentSize: (size) => ipcRenderer.invoke('desktop:widget:content-size', size)
   }
 });

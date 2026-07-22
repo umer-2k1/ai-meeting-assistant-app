@@ -24,11 +24,37 @@ export async function createMeeting(data: {
   startTime: Date;
   platform?: string;
   platformUrl?: string;
+  /** DIRECT (ad-hoc recording) or CALENDAR (started from a Google Calendar event). */
+  source?: 'DIRECT' | 'CALENDAR';
+  calendarEventId?: string;
+  /**
+   * Invite attendees, for CALENDAR meetings. Persisting these is what lets the
+   * pre-meeting brief find past meetings with the same people — it joins on
+   * attendee email, so a meeting with no attendees is invisible to it.
+   */
+  attendees?: Array<{ name: string; email?: string | null; role?: string | null }>;
 }) {
+  const { attendees, ...meeting } = data;
+
   return prisma.meeting.create({
     data: {
-      ...data,
+      ...meeting,
+      source: meeting.source ?? 'DIRECT',
       status: 'LIVE',
+      ...(attendees && attendees.length > 0
+        ? {
+            attendees: {
+              create: attendees
+                // A nameless, email-less attendee is noise and would never match.
+                .filter((a) => (a.name ?? '').trim() || (a.email ?? '').trim())
+                .map((a) => ({
+                  name: (a.name ?? '').trim() || (a.email ?? '').trim(),
+                  email: a.email?.trim().toLowerCase() || null,
+                  role: a.role ?? null,
+                })),
+            },
+          }
+        : {}),
     },
   });
 }
